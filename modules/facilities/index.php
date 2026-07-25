@@ -206,10 +206,7 @@ if (!$showForm) {
                        value="<?= e((string) $facility['capacity']) ?>" required>
             </div>
 
-            <div class="t8-field">
-                <label class="t8-label" for="description">Description <span class="t8-help-text">(optional)</span></label>
-                <textarea class="t8-textarea" id="description" name="description" rows="3"><?= e((string) $facility['description']) ?></textarea>
-            </div>
+    
 
             <button class="t8-btn t8-btn-accent" type="submit">
                 <i class="fa-solid fa-check"></i> <?= $action === 'edit' ? 'Save Changes' : 'Add Facility' ?>
