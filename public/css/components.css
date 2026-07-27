@@ -6,6 +6,7 @@
 
 /* ---- Buttons ---- */
 .t8-btn {
+   
     display: inline-flex;
     align-items: center;
     gap: var(--t8-space-2);
@@ -22,8 +23,8 @@
 }
 .t8-btn:hover { background: var(--t8-primary-dark); transform: translateY(-1px); box-shadow: var(--t8-shadow-lift); }
 .t8-btn:active { transform: translateY(0); }
-.t8-btn-accent { background: var(--t8-primary); color: #fff; }
-.t8-btn-accent:hover { background: var(--t8-primary-dark); }
+.t8-btn-accent { background: var(--t8-primary); color: #ffffff; }
+.t8-btn-accent:hover { background: var(--t8-primary-dark); color: #ffffff; }
 .t8-btn-ghost { background: transparent; border-color: rgba(255,255,255,0.35); color: inherit; }
 .t8-btn-ghost:hover { background: rgba(255,255,255,0.1); box-shadow: none; transform: none; }
 .t8-btn-outline { background: #fff; border-color: var(--t8-border); color: var(--t8-text); }
@@ -165,8 +166,7 @@
     align-items: center;
     justify-content: center;
     background:
-        linear-gradient(rgba(92, 16, 16, 0.72), rgba(92, 16, 16, 0.72)),
-        url('../img/bg.png') center / cover no-repeat;
+        url('../img/ramyunbg.jpg') center / cover no-repeat;
     padding: var(--t8-space-4);
 }
 .t8-auth-card {

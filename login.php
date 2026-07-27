@@ -103,12 +103,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="t8-auth-wrapper">
     <div class="t8-card t8-auth-card">
         <img class="t8-auth-logo" src="<?= e(asset('img/ramyumlogo.jpg')) ?>" alt="RAM-YUM Korean and Japanese Store">
-        <div class="t8-auth-badge">Sign In</div>
+        <div class="t8-auth-badge"></div>
         <h1 class="t8-auth-title"><?= e(APP_NAME) ?></h1>
-        <p class="t8-help-text">
-            This is a stand-in sign-in built by Team 8. It will be replaced by
-            the shared system-wide login once that team's module is integrated.
-        </p>
+    
 
         <?php foreach ($errors as $error): ?>
             <div class="t8-alert t8-alert-danger"><?= e($error) ?></div>
