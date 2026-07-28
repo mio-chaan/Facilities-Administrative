@@ -1,13 +1,8 @@
 <?php
 /**
  * audit.php
- * FIX (Low, code review): the shared `audit_logs` table existed in
- * the schema but nothing wrote to it, which the review flagged as
- * worth doing before Milestone 2's "Recent Activity" needs real data.
- * This is a minimal writer, wired up so far to: login success,
- * logout, and 403s (see login.php, logout.php, permissions.php).
- * More entity types (reservations, documents, etc.) can log through
- * this same helper as those modules get built.
+ * Minimal writer for auth and access events such as login, logout,
+ * and 403s (see login.php, logout.php, permissions.php).
  *
  * Requires $pdo (see db_connect.php).
  */

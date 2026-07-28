@@ -29,14 +29,6 @@ function t8_has_role($allowedRoles): bool
  * Call at the top of a module's index.php:
  *   t8_require_role(['admin', 'facilities_staff']);
  *
- * FIX (Medium, code review): this used to echo a bare div and exit()
- * mid-render — since a module file runs after index.php has already
- * opened header.php/navbar.php/the .t8-shell/.t8-main markup, that
- * left a truncated HTML fragment (no closing </main></div></body>,
- * no footer/JS). This now closes out the shell and requires
- * footer.php before exiting, so a denied request still returns valid,
- * complete HTML instead of a broken page.
- *
  * @param string|string[] $allowedRoles
  */
 function t8_require_role($allowedRoles): void

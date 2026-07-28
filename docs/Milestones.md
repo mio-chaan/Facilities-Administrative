@@ -14,24 +14,36 @@ Keep commits small and meaningful. Update this file's checkboxes and
       module hasn't landed yet. See `docs/Auth.md`. Will be swapped
       for the real thing once available — no other module code should
       need to change when that happens.
-- [ ] **Milestone 2 — Dashboard** — statistics, recent activity, quick
-      actions, notifications
-- [ ] **Milestone 3 — Reservation Module** — create/update/cancel,
-      approval workflow, reservation calendar
-- [ ] **Milestone 4 — Visitor Management** — registration, check-in/out,
-      visitor history
-- [ ] **Milestone 5 — Document Management** — upload, download, search,
-      archive, categories
-- [ ] **Milestone 6 — Records Retention** — retention policies,
-      expiration, disposal schedule, archive
-- [ ] **Milestone 7 — Legal Documents** — legal records, compliance,
-      case tracking
-- [ ] **Milestone 8 — Contract Management** — contract records, renewal
-      reminders, expiration tracking
-- [ ] **Milestone 9 — Reports** — reservation/visitor/document reports,
-      export to PDF/Excel
-- [ ] **Milestone 10 — System Completion** — testing, bug fixes,
-      performance optimization, documentation, deployment prep
+- [x] **Milestone 2 — Dashboard** — statistics, recent activity, quick
+      actions, and notifications are all live (real DB-backed stat
+      cards, `audit_logs`-driven activity feed, per-user notification
+      list on `modules/dashboard/index.php`).
+- [x] **Milestone 3 — Reservation Module** — create/update/cancel,
+      approval workflow, reservation calendar. See
+      `modules/reservation/index.php`, `public/css/reservation.css`,
+      `public/js/reservation.js`, and the Milestone 3 notes in
+      `docs/API.md` / `docs/Database.md`.
+- [x] **Milestone 4 — Visitor Management** — visitor check-in/out
+      logging, on-site tracking, and visitor history are implemented in
+      `modules/visitor/index.php`.
+- [x] **Milestone 5 — Document Management** — upload, versioning,
+      download, archive/restore, categories, and document history are
+      implemented in `modules/documents/index.php`.
+- [x] **Milestone 6 — Records Retention** — retention schedules,
+      record placement, disposition dates, overdue state handling,
+      and archive/restore workflows are implemented in
+      `modules/retention/index.php`.
+- [x] **Milestone 7 — Legal Documents** — legal case tracking,
+      assignment, status updates, archive/restore, and document
+      attachments are implemented in `modules/legal/index.php`.
+- [x] **Milestone 8 — Contract Management** — contract CRUD,
+      parties, obligations, document attachments, renewal linkage,
+      and archive/restore are implemented in `modules/contracts/index.php`.
+- [ ] Milestone 9 — Reports — reservation/visitor/document reports,
+      export to PDF/Excel (not yet built)
+- [ ] Milestone 10 — System Completion — testing, bug fixes,
+      performance optimization, documentation, and deployment prep
+      (core modules are now in place, but release polish remains)
 
 ## Future Improvements (post-Milestone 10, not scheduled)
 - Email notifications
@@ -41,3 +53,5 @@ Keep commits small and meaningful. Update this file's checkboxes and
 - Multi-office support
 - Dark mode
 - Responsive mobile UI polish
+- Multi-step reservation approval chains (currently single-step:
+  any `admin`/`facilities_staff` user can approve/reject)

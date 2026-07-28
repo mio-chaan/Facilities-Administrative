@@ -1,20 +1,33 @@
 -- =========================================================
--- TEAM 8 REVIEW PATCH (Suggested Changes)
--- CHANGED: Do NOT add temporary authentication tables.
--- CHANGED: Continue referencing the shared users table.
--- CHANGED: Standardize audit fields on all Team 8 tables:
---          created_at, updated_at, created_by, updated_by
--- CHANGED: Add soft-delete fields where appropriate:
---          is_deleted, deleted_at, deleted_by
--- CHANGED: Prefer remarks TEXT for approvals/rejections.
--- CHANGED: Standardize status values using CHECK/ENUM/app constants.
--- NOTE: These are architectural recommendations and should be
--- applied table-by-table during implementation.
--- =========================================================
-
--- =========================================================
 -- TEAM 8 — FACILITIES & ADMINISTRATIVE MANAGEMENT
 -- Subsystem schema (integrates into shared capstone database)
+-- =========================================================
+-- REGENERATED 2026-07-24: previous schema.sql had drifted from the
+-- actual live shared database (database/capstone_shared_db.sql) and
+-- from the application code — a fresh import of the old file would
+-- have crashed Visitor Management and Facilities Reservation
+-- immediately. This version is generated FROM the live DB dump
+-- (source of truth), not the other way around. See the review notes
+-- for the full list of what changed:
+--   - team8_visitors: replaced with the columns actually in use
+--     (person_to_visit, purpose, check_in_time, check_out_time,
+--     logged_by). id_number kept (still live, never dropped).
+--   - team8_reservations: `description` added (matches live DB and
+--     modules/reservation/index.php — NOT `purpose`, which an older
+--     migration added but was never actually applied anywhere).
+--   - team8_reservations: delete-request-workflow columns added
+--     (previous_status, delete_reason, delete_requested_by,
+--     delete_requested_at, rejection_reason) — NOT yet in the live
+--     DB as of this regeneration. Included here because the feature
+--     is being built against this schema next; run
+--     database/migrations/2026_07_22_reservation_delete_workflow.sql
+--     against the live shared DB to bring it up to date with this
+--     file before that feature goes live.
+--   - team8_reservation_approvals: NO `remarks` column — an older
+--     migration/doc claimed one was added, but the live DB and the
+--     current code both agree it was never actually added. Left out
+--     here to match reality; add it back via a real migration if/when
+--     the code starts using it.
 -- =========================================================
 -- NOTE: The "SHARED CORE TABLES" section below is NOT owned by Team 8.
 -- It is included here only so this file can run standalone during
@@ -90,11 +103,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 -- MODULE: FACILITIES RESERVATION
 -- =========================================================
 
+-- Facilities are archived, never deleted, since team8_reservations.
+-- facility_id and team8_equipment.home_facility_id both hold FKs
+-- into this table. Matches live DB / modules/facilities/index.php.
 CREATE TABLE team8_facilities (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     name        VARCHAR(150) NOT NULL,
     location    VARCHAR(200) NOT NULL,
     capacity    INT NOT NULL DEFAULT 0,
+    description TEXT NULL,
+    status      ENUM('active','archived') NOT NULL DEFAULT 'active',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
@@ -109,18 +127,31 @@ CREATE TABLE team8_equipment (
     CONSTRAINT fk_team8_equipment_facility FOREIGN KEY (home_facility_id) REFERENCES team8_facilities(id)
 ) ENGINE=InnoDB;
 
+-- `description` matches live DB + modules/reservation/index.php.
+-- The five delete-request-workflow columns below (previous_status
+-- through rejection_reason) are NOT yet in the live shared DB — run
+-- database/migrations/2026_07_22_reservation_delete_workflow.sql
+-- against it before shipping that feature. They're included here so
+-- a fresh install/import already has them.
 CREATE TABLE team8_reservations (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    facility_id INT NOT NULL,
-    user_id     INT NOT NULL,
-    start_time  DATETIME NOT NULL,
-    end_time    DATETIME NOT NULL,
-    status      VARCHAR(30) NOT NULL DEFAULT 'pending',
-    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at  DATETIME NULL,
+    id                    INT AUTO_INCREMENT PRIMARY KEY,
+    facility_id           INT NOT NULL,
+    user_id               INT NOT NULL,
+    start_time            DATETIME NOT NULL,
+    end_time              DATETIME NOT NULL,
+    status                VARCHAR(30) NOT NULL DEFAULT 'pending',
+    previous_status       VARCHAR(30) NULL,
+    description           VARCHAR(255) NULL,
+    delete_reason         TEXT NULL,
+    delete_requested_by   INT NULL,
+    delete_requested_at   DATETIME NULL,
+    rejection_reason      TEXT NULL,
+    created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at            DATETIME NULL,
     CONSTRAINT fk_team8_reservations_facility FOREIGN KEY (facility_id) REFERENCES team8_facilities(id),
-    CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id)
+    CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_team8_reservations_delete_requester FOREIGN KEY (delete_requested_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_reservation_equipment (
@@ -133,6 +164,11 @@ CREATE TABLE team8_reservation_equipment (
     CONSTRAINT fk_team8_resequip_equipment FOREIGN KEY (equipment_id) REFERENCES team8_equipment(id)
 ) ENGINE=InnoDB;
 
+-- NOTE: kept as a single-step approval table by design decision -
+-- one row per reservation decision (step_order = 1, approver = the
+-- Administrator), even though the schema supports multi-step chains.
+-- No `remarks` column — matches live DB and current code; an earlier
+-- migration/doc claiming one exists was never actually applied.
 CREATE TABLE team8_reservation_approvals (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     reservation_id  INT NOT NULL,
@@ -149,15 +185,28 @@ CREATE TABLE team8_reservation_approvals (
 -- MODULE: VISITOR MANAGEMENT
 -- =========================================================
 
+-- Matches live DB + modules/visitor/index.php exactly: a single
+-- check-in/check-out log row per visit, no separate "visit" record.
+-- id_number stays (optional, still live — never dropped despite an
+-- old unapplied migration proposing to). team8_visits below is kept
+-- for compatibility but is UNUSED by the app (0 rows in production);
+-- do not build new features against it without confirming first.
 CREATE TABLE team8_visitors (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    full_name   VARCHAR(150) NOT NULL,
-    id_number   VARCHAR(100) NULL,
-    contact     VARCHAR(150) NULL,
-    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    full_name       VARCHAR(150) NOT NULL,
+    contact         VARCHAR(150) NULL,
+    person_to_visit VARCHAR(150) NOT NULL,
+    purpose         VARCHAR(255) NOT NULL,
+    check_in_time   DATETIME NOT NULL,
+    check_out_time  DATETIME NULL,
+    logged_by       INT NOT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_team8_visitors_logged_by FOREIGN KEY (logged_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
+-- UNUSED by the application today (see note above) — kept only
+-- because it already exists in the live shared DB.
 CREATE TABLE team8_visits (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     visitor_id  INT NOT NULL,
@@ -234,7 +283,6 @@ CREATE TABLE team8_records (
     CONSTRAINT fk_team8_records_custodian FOREIGN KEY (custodian_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
--- NEW TABLE (patch): periodic compliance audits, distinct from retention scheduling
 CREATE TABLE team8_compliance_checks (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     record_id   INT NOT NULL,
@@ -346,7 +394,8 @@ ALTER TABLE team8_legal_cases
 
 CREATE INDEX idx_team8_reservations_status ON team8_reservations(status);
 CREATE INDEX idx_team8_reservations_dates ON team8_reservations(start_time, end_time);
-CREATE INDEX idx_team8_visits_status ON team8_visits(status);
+CREATE INDEX idx_team8_reservations_deleted_at ON team8_reservations(deleted_at);
+CREATE INDEX idx_team8_facilities_status ON team8_facilities(status);
 CREATE INDEX idx_team8_documents_title ON team8_documents(title);
 CREATE INDEX idx_team8_records_status ON team8_records(status);
 CREATE INDEX idx_team8_records_disposition ON team8_records(disposition_date);

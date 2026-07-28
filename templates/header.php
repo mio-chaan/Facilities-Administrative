@@ -2,20 +2,6 @@
 /**
  * templates/header.php
  *
- * REDESIGN: added Google Fonts (Poppins) and Font Awesome (icons used
- * throughout the new sidebar/navbar/dashboard). Everything else about
- * this file's contract is unchanged from the previous version - see
- * the original docblock notes below.
- *
- * FIX (Medium, code review): this template reaches into the including
- * scope's local variables ($pageTitle, $page) implicitly rather than
- * receiving them as parameters - that's fine for `require` (shares
- * scope), but it's an implicit contract that breaks silently (e.g.
- * the dashboard.css link below just stops loading, no error/warning)
- * if index.php ever renames $page. Documented explicitly here, and
- * given a safe fallback via current_page() so a missing $page doesn't
- * silently disable the page-specific stylesheet.
- *
  * Expects (optionally) from the including scope:
  *   $pageTitle - string, defaults to APP_NAME
  *   $page      - route key string, defaults to current_page()
@@ -40,6 +26,9 @@ $page      = $page ?? current_page();
     <link rel="stylesheet" href="<?= e(asset('css/components.css')) ?>">
     <?php if ($page === 'dashboard'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/dashboard.css')) ?>">
+    <?php endif; ?>
+    <?php if ($page === 'reservation'): ?>
+        <link rel="stylesheet" href="<?= e(asset('css/reservation.css')) ?>">
     <?php endif; ?>
 </head>
 <body>

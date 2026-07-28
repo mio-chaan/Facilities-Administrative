@@ -36,6 +36,25 @@ URL the auth team's login flow can point to.
 3. If the page needs a role restriction, call `t8_require_role([...])`
    at the top of the module's `index.php` (see `app/includes/permissions.php`).
 
+## Milestone 3 — Facilities Reservation actions
+The reservation module (`modules/reservation/index.php`) is still a
+single file, but it now handles more than a GET render — it's the
+project's first module with real POST actions. Convention set here,
+to be reused by later modules:
+
+- All state-changing requests are `POST` to
+  `index.php?page=reservation&action={create|cancel|approve|reject}`,
+  each CSRF-protected (`t8_csrf_field()` / `t8_csrf_verify()`).
+- Every action ends in a `redirect()` back to a plain GET
+  `page_url('reservation')` (POST/redirect/GET) so refreshing the
+  result page never resubmits the form.
+- Every action writes to `audit_logs` via `t8_audit_log()` with
+  `entity_type = 'reservation'`.
+- Role gate: any authenticated user can create/view/cancel their own
+  reservations; only `admin`/`facilities_staff` can approve or reject
+  (see `t8_require_role()` calls inline, not a blanket page-level gate,
+  since the same page serves both requesters and approvers).
+
 ## Fix notes (code review)
 - **Medium**: `routes.php`, `constants.php`'s `T8_PAGES`, and
   `sidebar.php`'s `$navItems` used to be three hand-maintained lists of
@@ -51,5 +70,5 @@ URL the auth team's login flow can point to.
 If a module ends up needing AJAX (e.g. a calendar widget fetching
 reservations), the convention will be a sibling `modules/{name}/ajax.php`
 that sets `header('Content-Type: application/json')` and returns early —
-no separate `/api` tree unless the project outgrows this. Not needed as
-of Milestone 0.
+no separate `/api` tree unless the project outgrows this. Not needed yet
+for Milestone 3's plain-HTML calendar grid.

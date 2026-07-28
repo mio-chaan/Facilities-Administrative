@@ -1,14 +1,7 @@
 <?php
 /**
- * logout.php  —  TEMPORARY AUTH SYSTEM
- * Destroys the session created by login.php. Delete alongside
- * login.php once real auth is integrated.
- *
- * FIX (High, code review): logout used to be a bare GET link
- * (templates/navbar.php), so a stray <img src>, link prefetch, or
- * crawler could silently log a user out. templates/navbar.php now
- * submits this as a POST form; this script rejects anything that
- * isn't POST.
+ * logout.php
+ * Destroys the session created by login.php.
  */
 
 declare(strict_types=1);
@@ -20,7 +13,8 @@ t8_session_start();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    header('Location: ' . APP_URL . '/index.php?page=dashboard');
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo "405 Method Not Allowed - logout must be a POST request.";
     exit;
 }
 

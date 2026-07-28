@@ -32,9 +32,10 @@
   
 - **`audit_logs` is now written to**, not just defined in the schema.
   `app/includes/audit.php`'s `t8_audit_log()` currently logs: login,
-  logout, and 403 (role-denied) events. More entity types (reservations,
-  documents, etc.) should log through the same helper as those modules
-  land, so Milestone 2's "Recent Activity" feed has real data to read.
+  logout, 403 (role-denied), and — as of Milestone 3 — reservation
+  create/cancel/approve/reject events. More entity types (documents,
+  contracts, etc.) should log through the same helper as those modules
+  land.
 
 ## Modules → tables
 | Module | Tables |
@@ -60,6 +61,20 @@
   `team8_retention_schedules` / `team8_records` — retention is *when*
   something expires, compliance checks are periodic *reviews* of a
   record's state.
+- **Milestone 3 additions**: `team8_reservations.purpose` (short free
+  text on why the facility is being booked) and
+  `team8_reservation_approvals.remarks` (approver's note on
+  approve/reject) were added — the latter matches the schema
+  review-patch's standing recommendation to prefer a `remarks TEXT`
+  field on approval/rejection tables. Both are additive, nullable
+  columns; see `database/migrations/2026_07_17_reservation_module_additions.sql`
+  for the diff against any database created from an older schema.sql.
+- **Reservation status flow**: `pending` (on create) →
+  `approved`/`rejected` (via `team8_reservation_approvals`, written by
+  an `admin`/`facilities_staff` user) → the requester (or an approver)
+  can move an `approved` or still-`pending` reservation to `cancelled`.
+  `team8_reservations.status` is kept in sync with the latest approval
+  decision rather than requiring a join on every read.
 
 ## Setup
 ```bash
@@ -68,4 +83,5 @@ mysql -u root -p < database/seed.sql   # optional local test data
 ```
 
 Migrations for schema changes after initial setup go in
-`database/migrations/` (currently empty — nothing has needed a diff yet).
+`database/migrations/` — the first real one landed with Milestone 3
+(see above).

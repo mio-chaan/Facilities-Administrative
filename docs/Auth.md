@@ -54,6 +54,14 @@ reads these, nothing reads `$_SESSION` directly outside `auth_check.php`:
   `t8_require_role()`) are written to the shared `audit_logs` table
   via `app/includes/audit.php`'s `t8_audit_log()`. Best-effort only —
   a logging failure never blocks the actual login/logout/403 response.
+  Milestone 3 extends this same helper to reservation create/cancel/
+  approve/reject events (see `docs/Database.md`).
+
+## Roles relevant to Milestone 3 (Facilities Reservation)
+- Any authenticated role can submit and view/cancel their own
+  reservation requests.
+- `admin` and `facilities_staff` can additionally see and act on the
+  approvals queue (approve/reject pending requests for any user).
 
 ## Dev convenience
 `AUTH_DEV_BYPASS` is a constant in `app/config/config.php` (no `.env`

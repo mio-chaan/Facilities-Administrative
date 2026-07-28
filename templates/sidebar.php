@@ -2,16 +2,11 @@
 /**
  * templates/sidebar.php
  *
- * REDESIGN: dark maroon gradient sidebar with the real RAM-YUM logo,
- * icon + label nav items, rounded active state, and an optional
- * desktop collapse toggle (public/js/app.js, additive only).
- *
  * Labels/routes still come from app/config/routes.php - the single
- * source of truth (see docs/API.md's Medium fix note). $t8NavIcons
- * below is a purely cosmetic, LOCAL lookup for which Font Awesome
- * icon each route gets; it does not change routes.php's contract or
- * T8_PAGES, and a route missing from this map just falls back to a
- * generic icon instead of breaking.
+ * source of truth. $t8NavIcons below is a purely cosmetic, LOCAL
+ * lookup for which Font Awesome icon each route gets; it does not
+ * change routes.php's contract or T8_PAGES, and a route missing from
+ * this map just falls back to a generic icon instead of breaking.
  */
 declare(strict_types=1);
 
@@ -21,6 +16,7 @@ $active   = current_page();
 $t8NavIcons = [
     'dashboard'   => 'fa-gauge-high',
     'reservation' => 'fa-calendar-check',
+    'facilities'  => 'fa-building',
     'visitor'     => 'fa-id-card-clip',
     'documents'   => 'fa-file-lines',
     'retention'   => 'fa-box-archive',
@@ -39,6 +35,9 @@ $t8NavIcons = [
 
     <nav class="t8-sidebar-nav">
         <?php foreach ($t8Routes as $key => $route): ?>
+            <?php if (!empty($route['roles']) && !t8_has_role($route['roles'])): ?>
+                <?php continue; ?>
+            <?php endif; ?>
             <a href="<?= e(page_url($key)) ?>"
                class="t8-sidebar-link<?= $active === $key ? ' t8-sidebar-link-active' : '' ?>">
                 <i class="fa-solid <?= e($t8NavIcons[$key] ?? 'fa-circle-dot') ?>"></i>

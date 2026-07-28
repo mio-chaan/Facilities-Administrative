@@ -15,5 +15,4 @@ node_modules/
 # Logs
 *.log
 
-# Local database config
-app/config/database.php
+

@@ -1,16 +1,8 @@
 <?php
 /**
- * login.php  —  TEMPORARY AUTH SYSTEM
- * ---------------------------------------------------------------
- * Stand-in login until the system-wide auth team's real module is
- * integrated. Verifies email/password against the shared `users`
- * table, looks up the user's role from user_roles/roles, and sets
+ * login.php
+ * Verifies email/password against the shared users table and sets
  * the session contract documented in app/includes/auth_check.php.
- *
- * Delete this file (and logout.php) once real auth lands — nothing
- * else in the codebase depends on *how* the session gets populated,
- * only on the session keys themselves.
- * ---------------------------------------------------------------
  */
 
 declare(strict_types=1);
@@ -20,8 +12,6 @@ require_once __DIR__ . '/app/includes/db_connect.php';
 require_once __DIR__ . '/app/includes/helpers.php';
 require_once __DIR__ . '/app/includes/audit.php';
 
-// FIX (Medium, code review): was a raw session_start(); now goes
-// through the shared, hardened t8_session_start().
 t8_session_start();
 
 // Already logged in? Skip the form.
@@ -29,11 +19,6 @@ if (!empty($_SESSION['user_id'])) {
     redirect(APP_URL . '/index.php?page=dashboard');
 }
 
-// FIX (Medium, code review): docs/Auth.md claimed "temporary ≠
-// sloppy" but there was no attempt throttling at all. This is a
-// simple session-based lockout — good enough for a capstone demo,
-// not a substitute for a real rate limiter if this ever sits on a
-// shared/public server.
 const T8_LOGIN_MAX_ATTEMPTS  = 5;
 const T8_LOGIN_LOCKOUT_SECS  = 300; // 5 minutes
 
@@ -118,12 +103,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="t8-auth-wrapper">
     <div class="t8-card t8-auth-card">
         <img class="t8-auth-logo" src="<?= e(asset('img/ramyumlogo.jpg')) ?>" alt="RAM-YUM Korean and Japanese Store">
-        <div class="t8-auth-badge">Temporary Login</div>
+        <div class="t8-auth-badge"></div>
         <h1 class="t8-auth-title"><?= e(APP_NAME) ?></h1>
-        <p class="t8-help-text">
-            This is a stand-in sign-in built by Team 8. It will be replaced by
-            the shared system-wide login once that team's module is integrated.
-        </p>
+    
 
         <?php foreach ($errors as $error): ?>
             <div class="t8-alert t8-alert-danger"><?= e($error) ?></div>

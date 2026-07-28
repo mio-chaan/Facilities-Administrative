@@ -6,6 +6,7 @@
 
 /* ---- Buttons ---- */
 .t8-btn {
+   
     display: inline-flex;
     align-items: center;
     gap: var(--t8-space-2);
@@ -22,8 +23,8 @@
 }
 .t8-btn:hover { background: var(--t8-primary-dark); transform: translateY(-1px); box-shadow: var(--t8-shadow-lift); }
 .t8-btn:active { transform: translateY(0); }
-.t8-btn-accent { background: var(--t8-primary); color: #fff; }
-.t8-btn-accent:hover { background: var(--t8-primary-dark); }
+.t8-btn-accent { background: var(--t8-primary); color: #ffffff; }
+.t8-btn-accent:hover { background: var(--t8-primary-dark); color: #ffffff; }
 .t8-btn-ghost { background: transparent; border-color: rgba(255,255,255,0.35); color: inherit; }
 .t8-btn-ghost:hover { background: rgba(255,255,255,0.1); box-shadow: none; transform: none; }
 .t8-btn-outline { background: #fff; border-color: var(--t8-border); color: var(--t8-text); }
@@ -142,6 +143,7 @@
 .t8-badge-role { background: rgba(255,255,255,0.2); color: #fff; }
 .t8-badge-pending, .t8-badge-expected { background: #fff3d6; color: #8a5c10; }
 .t8-badge-approved, .t8-badge-active, .t8-badge-checked_in, .t8-badge-compliant { background: #e2f4e4; color: #2e7d32; }
+.t8-badge-completed { background: #e2f4e4; color: #2e7d32; }
 .t8-badge-rejected, .t8-badge-denied, .t8-badge-terminated, .t8-badge-non_compliant { background: #fbe4e1; color: #c62828; }
 .t8-badge-cancelled, .t8-badge-archived, .t8-badge-closed, .t8-badge-checked_out { background: var(--t8-fog-100); color: var(--t8-text-muted); }
 
@@ -158,16 +160,13 @@
 .t8-alert-warning { background: #fff8e6; border-color: var(--t8-warning); color: #8a5c10; }
 .t8-alert-info    { background: #f3e9e9; border-color: var(--t8-primary); color: var(--t8-primary-dark); }
 
-/* ---- Auth (temporary login page) — kept for reference, no longer
-   used since login.php now uses public/css/login.css instead ---- */
 .t8-auth-wrapper {
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
     background:
-        linear-gradient(rgba(92, 16, 16, 0.72), rgba(92, 16, 16, 0.72)),
-        url('../img/bg.png') center / cover no-repeat;
+        url('../img/ramyunbg.jpg') center / cover no-repeat;
     padding: var(--t8-space-4);
 }
 .t8-auth-card {

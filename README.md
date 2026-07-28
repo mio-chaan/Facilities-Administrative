@@ -75,6 +75,14 @@ isn't just a Team 8 problem. See `docs/Database.md` and `docs/Auth.md`
 for the rest of the hardening in place (session cookie flags, login
 throttling, POST-only logout).
 
+## Modules
+- **Facilities Reservation** (Milestone 3, built) — book a facility,
+  optionally reserve equipment, track approval status, and browse a
+  monthly calendar of bookings. See `modules/reservation/index.php`.
+- Visitor Management, Document Management, Records Retention, Legal
+  Management, Contract Management — scaffolded and routed, not yet
+  built (see `docs/Milestones.md`).
+
 ## Docs
 - `docs/Milestones.md` — milestone checklist
 - `docs/Database.md` — schema/table ownership notes

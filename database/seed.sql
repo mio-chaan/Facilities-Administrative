@@ -52,6 +52,13 @@ INSERT INTO team8_facilities (id, name, location, capacity) VALUES
     (2, 'Training Hall', 'Building B, Ground Floor', 60)
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
+INSERT INTO team8_equipment (id, home_facility_id, name, quantity) VALUES
+    (1, 1, 'Projector', 2),
+    (2, 1, 'Wireless Microphone', 4),
+    (3, 2, 'Portable Speaker', 3),
+    (4, 2, 'Foldable Chairs', 60)
+ON DUPLICATE KEY UPDATE name = VALUES(name);
+
 INSERT INTO team8_document_categories (id, name) VALUES
     (1, 'Policies'),
     (2, 'Contracts'),

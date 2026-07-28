@@ -2,16 +2,6 @@
 /**
  * templates/navbar.php
  *
- * REDESIGN: white sticky top bar with search/notification/avatar per
- * the reference dashboard. #t8SidebarToggle keeps its id (public/js/app.js
- * binds a click listener to it for the mobile sidebar) - only its
- * visual style changed. Logout is still the same POST <form> to
- * logout.php (see docs/Auth.md / TechDebt.md - do not revert to a
- * GET link).
- *
- * Search remains decorative. The notification bell links to the dashboard's
- * live current-user notification list; its count is prepared by index.php.
- *
  * Expects (optionally) from the including scope:
  *   $pageTitle - string, defaults to APP_NAME (same contract as header.php)
  */
@@ -69,12 +59,6 @@ $t8UnreadNotifications = $t8UnreadNotifications ?? 0;
             <span class="t8-navbar-role-text"><?= e(t8_current_role() ?? 'guest') ?></span>
         </span>
 
-        <!--
-            FIX (High, code review): logout used to be a bare GET
-            <a href>, which is a known anti-pattern for state-changing
-            actions (prefetch/crawlers can silently log a user out).
-            Now a POST form; logout.php rejects non-POST requests.
-        -->
         <form method="post" action="<?= e(APP_URL) ?>/logout.php" class="t8-navbar-logout-form">
             <button type="submit" class="t8-btn t8-btn-outline t8-btn-sm">
                 <i class="fa-solid fa-arrow-right-from-bracket"></i>
