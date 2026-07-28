@@ -14,7 +14,7 @@ declare(strict_types=1);
 define('APP_NAME', 'RAM YUM - Facilities & Administrative Management');
 define('APP_ENV', 'local');              // 'local' | 'production'
 define('APP_DEBUG', true);               // true = show real PHP errors (local only)
-define('APP_URL', 'http://192.168.254.191:8000'); 
+define('APP_URL', 'http://localhost:8000'); 
 define('APP_TIMEZONE', 'Asia/Manila');
 
 define('DB_TEAM8_PREFIX', 'team8_');
@@ -25,7 +25,7 @@ define('UPLOAD_DIR', dirname(__DIR__, 2) . '/public/uploads');
 // When true, skips the login form entirely and auto-logs in as the
 // seeded "Dev Tester" (user_id 1). Leave false unless doing quick
 // local testing.
-define('AUTH_DEV_BYPASS', true);
+define('AUTH_DEV_BYPASS', false);
 
 // ---- End editable section ------------------------------------------------
 
