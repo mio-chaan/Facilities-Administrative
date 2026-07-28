@@ -25,7 +25,7 @@ define('UPLOAD_DIR', dirname(__DIR__, 2) . '/public/uploads');
 // When true, skips the login form entirely and auto-logs in as the
 // seeded "Dev Tester" (user_id 1). Leave false unless doing quick
 // local testing.
-define('AUTH_DEV_BYPASS', false);
+define('AUTH_DEV_BYPASS', true);
 
 // ---- End editable section ------------------------------------------------
 

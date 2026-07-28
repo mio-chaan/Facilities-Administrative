@@ -47,17 +47,6 @@ INSERT INTO user_roles (user_id, role_id) VALUES
     (4, 5)  -- Legal Lena -> legal_officer
 ON DUPLICATE KEY UPDATE role_id = VALUES(role_id);
 
-INSERT INTO team8_facilities (id, name, location, capacity) VALUES
-    (1, 'Main Conference Room', 'Building A, 2nd Floor', 20),
-    (2, 'Training Hall', 'Building B, Ground Floor', 60)
-ON DUPLICATE KEY UPDATE name = VALUES(name);
-
-INSERT INTO team8_equipment (id, home_facility_id, name, quantity) VALUES
-    (1, 1, 'Projector', 2),
-    (2, 1, 'Wireless Microphone', 4),
-    (3, 2, 'Portable Speaker', 3),
-    (4, 2, 'Foldable Chairs', 60)
-ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO team8_document_categories (id, name) VALUES
     (1, 'Policies'),
