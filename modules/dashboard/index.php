@@ -107,24 +107,50 @@ $activityIcons = [
 </div>
 
 <div class="t8-dashboard-grid">
-    <div class="t8-card">
-        <div class="t8-card-header">
-            <h2 class="t8-card-title">Quick Actions</h2>
+    <div class="t8-dashboard-column">
+        <div class="t8-card">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title">Quick Actions</h2>
+            </div>
+            <div class="t8-quick-actions">
+                <a class="t8-btn t8-btn-accent" href="<?= e(page_url('reservation')) ?>">
+                    <i class="fa-solid fa-calendar-plus"></i> New Reservation
+                </a>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('visitor')) ?>">
+                    <i class="fa-solid fa-id-card-clip"></i> Register Visitor
+                </a>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">
+                    <i class="fa-solid fa-file-arrow-up"></i> Upload Document
+                </a>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('contracts')) ?>">
+                    <i class="fa-solid fa-file-contract"></i> New Contract
+                </a>
+            </div>
         </div>
-        <div class="t8-quick-actions">
-            <a class="t8-btn t8-btn-accent" href="<?= e(page_url('reservation')) ?>">
-                <i class="fa-solid fa-calendar-plus"></i> New Reservation
-            </a>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('visitor')) ?>">
-                <i class="fa-solid fa-id-card-clip"></i> Register Visitor
-            </a>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">
-                <i class="fa-solid fa-file-arrow-up"></i> Upload Document
-            </a>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('contracts')) ?>">
-                <i class="fa-solid fa-file-contract"></i> New Contract
-            </a>
-        </div>
+
+        <section class="t8-card t8-notifications-card" id="notifications">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title">Notifications</h2>
+                <?php if ($t8UnreadNotifications > 0): ?>
+                    <span class="t8-notification-count"><?= e((string) $t8UnreadNotifications) ?> unread</span>
+                <?php endif; ?>
+            </div>
+            <?php if ($notifications === []): ?>
+                <div class="t8-empty">You have no notifications.</div>
+            <?php else: ?>
+                <div class="t8-notification-list">
+                    <?php foreach ($notifications as $notification): ?>
+                        <div class="t8-notification-item<?= $notification['status'] === 'unread' ? ' t8-notification-unread' : '' ?>">
+                            <i class="fa-regular fa-bell"></i>
+                            <div>
+                                <p><?= e((string) $notification['message']) ?></p>
+                                <time datetime="<?= e((string) $notification['created_at']) ?>"><?= e(format_date((string) $notification['created_at'], 'M d, Y g:i A')) ?></time>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </section>
     </div>
 
     <div class="t8-card">
@@ -150,27 +176,3 @@ $activityIcons = [
         <?php endif; ?>
     </div>
 </div>
-
-<section class="t8-card t8-notifications-card" id="notifications">
-    <div class="t8-card-header">
-        <h2 class="t8-card-title">Notifications</h2>
-        <?php if ($t8UnreadNotifications > 0): ?>
-            <span class="t8-notification-count"><?= e((string) $t8UnreadNotifications) ?> unread</span>
-        <?php endif; ?>
-    </div>
-    <?php if ($notifications === []): ?>
-        <div class="t8-empty">You have no notifications.</div>
-    <?php else: ?>
-        <div class="t8-notification-list">
-            <?php foreach ($notifications as $notification): ?>
-                <div class="t8-notification-item<?= $notification['status'] === 'unread' ? ' t8-notification-unread' : '' ?>">
-                    <i class="fa-regular fa-bell"></i>
-                    <div>
-                        <p><?= e((string) $notification['message']) ?></p>
-                        <time datetime="<?= e((string) $notification['created_at']) ?>"><?= e(format_date((string) $notification['created_at'], 'M d, Y g:i A')) ?></time>
-                    </div>
-                </div>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
-</section>

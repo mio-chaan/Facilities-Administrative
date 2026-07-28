@@ -194,7 +194,6 @@ CREATE TABLE team8_reservation_approvals (
 CREATE TABLE team8_visitors (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     full_name       VARCHAR(150) NOT NULL,
-    id_number       VARCHAR(100) NULL,
     contact         VARCHAR(150) NULL,
     person_to_visit VARCHAR(150) NOT NULL,
     purpose         VARCHAR(255) NOT NULL,

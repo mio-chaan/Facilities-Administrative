@@ -65,6 +65,10 @@
     grid-template-columns: 1fr;
     gap: var(--t8-space-4);
 }
+.t8-dashboard-column {
+    display: grid;
+    gap: var(--t8-space-4);
+}
 @media (min-width: 900px) {
     .t8-dashboard-grid { grid-template-columns: 1.4fr 1fr; align-items: start; }
 }
@@ -94,7 +98,7 @@
 .t8-activity-text { flex: 1; min-width: 0; }
 .t8-activity-time { color: var(--t8-text-muted); font-family: var(--t8-font-data); font-size: 0.76rem; white-space: nowrap; }
 
-.t8-notifications-card { margin-top: var(--t8-space-4); }
+.t8-notifications-card { margin-top: 0; }
 .t8-notification-count { color: var(--t8-primary); background: var(--t8-secondary); border-radius: 999px; font-size: 0.76rem; font-weight: 600; padding: 0.25rem 0.55rem; }
 .t8-notification-list { display: flex; flex-direction: column; }
 .t8-notification-item { display: flex; gap: var(--t8-space-3); align-items: flex-start; padding: var(--t8-space-3) 0; border-bottom: 1px solid var(--t8-border); color: var(--t8-text-muted); }

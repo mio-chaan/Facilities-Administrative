@@ -56,7 +56,6 @@ function t8_normalize_datetime(string $value): string
 
 $formValues = [
     'full_name'       => '',
-    'id_number'       => '',
     'contact'         => '',
     'person_to_visit' => '',
     'purpose'         => '',
@@ -68,7 +67,6 @@ switch ($action) {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $formValues = [
                 'full_name'       => trim((string) ($_POST['full_name'] ?? '')),
-                'id_number'       => trim((string) ($_POST['id_number'] ?? '')),
                 'contact'         => trim((string) ($_POST['contact'] ?? '')),
                 'person_to_visit' => trim((string) ($_POST['person_to_visit'] ?? '')),
                 'purpose'         => trim((string) ($_POST['purpose'] ?? '')),
@@ -93,12 +91,11 @@ switch ($action) {
 
                 if (!$errors) {
                     $stmt = $pdo->prepare(
-                        'INSERT INTO team8_visitors (full_name, id_number, contact, person_to_visit, purpose, check_in_time, logged_by)
-                         VALUES (:full_name, :id_number, :contact, :person_to_visit, :purpose, :check_in_time, :logged_by)'
+                        'INSERT INTO team8_visitors (full_name, contact, person_to_visit, purpose, check_in_time, logged_by)
+                         VALUES (:full_name, :contact, :person_to_visit, :purpose, :check_in_time, :logged_by)'
                     );
                     $stmt->execute([
                         'full_name'       => $formValues['full_name'],
-                        'id_number'       => $formValues['id_number'] !== '' ? $formValues['id_number'] : null,
                         'contact'         => $formValues['contact'] !== '' ? $formValues['contact'] : null,
                         'person_to_visit' => $formValues['person_to_visit'],
                         'purpose'         => $formValues['purpose'],
@@ -178,12 +175,6 @@ if (!$showForm) {
                 <label class="t8-label" for="full_name">Visitor Name</label>
                 <input class="t8-input" type="text" id="full_name" name="full_name"
                        value="<?= e($formValues['full_name']) ?>" required>
-            </div>
-
-            <div class="t8-field">
-                <label class="t8-label" for="id_number">Valid ID Number</label>
-                <input class="t8-input" type="text" id="id_number" name="id_number"
-                       value="<?= e($formValues['id_number']) ?>" placeholder="Optional">
             </div>
 
             <div class="t8-field">
