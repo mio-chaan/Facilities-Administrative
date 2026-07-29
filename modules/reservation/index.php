@@ -1,50 +1,4 @@
 <?php
-/**
- * modules/reservation/index.php
- * Milestone 3 - Facilities Reservation.
- *
- * Workflow:
- *   Facilities Staff creates a reservation -> status = 'pending'
- *   Administrator approves/rejects -> status = 'approved'/'rejected'
- *   Administrator-created reservations skip Pending and are recorded
- *   as auto-approved (still logged as a single approval step, below).
- *
- * Facilities Staff may edit or cancel ONLY their own reservation, and
- * ONLY while it's still 'pending'. Administrator's only lever over
- * someone else's request is Approve/Reject - editing/cancelling stays
- * exclusive to the original requester by design decision.
- *
- * Approvals are recorded in team8_reservation_approvals as a single
- * row per reservation (step_order = 1, approver = the Administrator
- * who decided) - kept as one row per decision by design, even though
- * the table's shape supports multi-step chains, to stay aligned with
- * the schema instead of leaving the table unused.
- *
- * Backing tables: team8_facilities (status='active' only, managed via
- * modules/facilities/), team8_reservations, team8_reservation_approvals.
- * team8_equipment / team8_reservation_equipment are intentionally not
- * used here - Equipment Management is out of scope for this iteration.
- *
- * REVISION NOTES (professor feedback):
- *   - Pending Approvals already lists every 'pending' request, and a
- *     reservation moves out of Pending and into All Reservations
- *     automatically the moment its status flips away from 'pending' -
- *     this was already true of the status-based design, no new logic
- *     needed for that specific ask.
- *   - New fields added (see database/reservation_revision_fields.sql):
- *     department, key_person, expected_participants, event_category.
- *     event_category is a dropdown (T8_EVENT_CATEGORIES below) per the
- *     "minimize manual typing" automation guidance; 'description'
- *     remains free-text but is now framed as "additional details/notes"
- *     only, not the primary event descriptor.
- *   - description column added earlier (reservation_add_description.sql)
- *     is still used - just relabeled in the form.
- *   - Delete is available, but ONLY for reservations whose status is
- *     'cancelled'.
- *   - Conflict checking (t8_reservation_has_conflict) is surfaced on
- *     every reservation table, not just Pending Approvals.
- */
-
 declare(strict_types=1);
 
 $pageTitle = 'Facilities Reservation';
@@ -232,24 +186,16 @@ switch ($action) {
                     $newId = (int) $pdo->lastInsertId();
 
                     if ($isAdmin) {
-                        // Administrator-created reservations bypass Pending -
-                        // still recorded as a single decided approval step so
-                        // team8_reservation_approvals reflects who approved it,
-                        // same as a normal Approve click would.
+                        // Administrator-created reservations are recorded as a
+                        // single approval step in the approvals table.
                         $pdo->prepare(
                             'INSERT INTO team8_reservation_approvals (reservation_id, approver_id, step_order, status, decided_at)
                              VALUES (:reservation_id, :approver_id, 1, "approved", NOW())'
                         )->execute(['reservation_id' => $newId, 'approver_id' => $currentUserId]);
                         t8_audit_log($pdo, $currentUserId, 'reservation', $newId, 'create_auto_approved');
 
-                        // FIX (code review, 2026-07-18): admin-created reservations
-                        // are auto-approved and never pass through Pending
-                        // Approvals, which is the only other place a
-                        // double-booking conflict gets surfaced. Without this,
-                        // an Administrator could silently double-book a
-                        // facility with zero warning. Same "warn, don't
-                        // block" rule as Pending Approvals - the reservation
-                        // is still created either way.
+                        // Conflict warnings are shown when an auto-approved
+                        // reservation overlaps with another approved booking.
                         $hasConflict = t8_reservation_has_conflict(
                             $pdo, $facilityId, $formValues['start_time'], $formValues['end_time'], $newId
                         );

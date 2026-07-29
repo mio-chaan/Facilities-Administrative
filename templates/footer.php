@@ -1,14 +1,4 @@
 <?php
-/**
- * templates/footer.php
- * See templates/header.php for the $page scope-coupling note (Medium,
- * code review) - same contract applies here.
- *
- * REDESIGN: visual only - same JS include logic as before.
- *
- * Expects (optionally) from the including scope:
- *   $page - route key string, defaults to current_page()
- */
 declare(strict_types=1);
 $page = $page ?? current_page();
 ?>

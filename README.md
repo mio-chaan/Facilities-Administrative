@@ -15,7 +15,7 @@ framework — routing is a small hand-rolled front controller
 - MySQL 8+
 - Git
 - Apache with `mod_rewrite` + `mod_authz_core` (or an nginx equivalent
-  of the deny rules in `.htaccess` — see the note below)
+  of the deny rules in `.htaccess`)
 
 ## Setup
 
@@ -23,9 +23,8 @@ framework — routing is a small hand-rolled front controller
 2. Open `app/config/database.php` and edit `DB_HOST`/`DB_NAME`/`DB_USER`/
    `DB_PASS` for your local MySQL setup (defaults match a stock XAMPP
    install — `root` with no password). App-level settings like
-   `APP_URL` live in `app/config/config.php`, edited the same way —
-   this project uses plain PHP constants instead of a `.env` file (see
-   the note at the top of each of those files for why).
+   `APP_URL` live in `app/config/config.php`, edited the same way;
+   this project uses plain PHP constants instead of a `.env` file.
 3. Create the database and import the schema (Team 8's tables only —
    see `docs/Database.md` for why the shared-table section exists):
    ```bash
@@ -51,18 +50,16 @@ framework — routing is a small hand-rolled front controller
 
 > **Note:** PHP's built-in dev server (`php -S`) does **not** read
 > `.htaccess`. The deny rules that block `database/`/`app/` from being
-> served (see Security note below) only take effect under Apache.
-> That's fine for local dev via `php -S`, but before this ever runs
-> under Apache/XAMPP on a shared server, confirm those rules are
-> actually active (`curl http://host/app/config/database.php` should
-> 403, not return source code).
+> served only take effect under Apache. That is fine for local dev via
+> `php -S`, but before this runs under Apache/XAMPP on a shared server,
+> confirm those rules are active.
 
 ## Auth note
 Login/logout/session/RBAC is owned by another team and is meant to be
-system-wide. Until it's integrated, Team 8 built a real **temporary**
-login (`login.php` / `logout.php`) against the shared `users` table —
-see `docs/Auth.md` for the full contract, seeded demo accounts, and
-how to swap it out later. Default seeded login:
+system-wide. Until it's integrated, the project uses a local login flow
+(`login.php` / `logout.php`) against the shared `users` table. See
+`docs/Auth.md` for the full contract, seeded demo accounts, and how to
+swap it out later. Default seeded login:
 `dev.tester@example.local` / `Password123!`.
 
 ## Security note
@@ -87,7 +84,7 @@ throttling, POST-only logout).
 - `docs/Milestones.md` — milestone checklist
 - `docs/Database.md` — schema/table ownership notes
 - `docs/API.md` — routing conventions
-- `docs/Auth.md` — temporary auth system, demo accounts, swap-out plan
+- `docs/Auth.md` — authentication flow, demo accounts, and swap-out plan
 - `docs/TechDebt.md` — code-review findings and fix status
 - `docs/ERD.pdf` — entity-relationship diagram
 

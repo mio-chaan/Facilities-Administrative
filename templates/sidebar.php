@@ -2,23 +2,9 @@
 /**
  * templates/sidebar.php
  *
- * REDESIGN: dark maroon gradient sidebar with the real RAM-YUM logo,
- * icon + label nav items, rounded active state, and an optional
- * desktop collapse toggle (public/js/app.js, additive only).
- *
- * Labels/routes still come from app/config/routes.php - the single
- * source of truth (see docs/API.md's Medium fix note). $t8NavIcons
- * below is a purely cosmetic, LOCAL lookup for which Font Awesome
- * icon each route gets; it does not change routes.php's contract or
- * T8_PAGES, and a route missing from this map just falls back to a
- * generic icon instead of breaking.
- *
- * FIX (Facility Management, 2026-07-17): routes.php can now carry an
- * optional 'roles' key. A route with no 'roles' key stays visible to
- * every authenticated user, same as before - this loop only ADDS a
- * skip for routes that declare roles the current user doesn't have
- * (e.g. 'facilities' => admin-only). Uses the same t8_has_role()
- * helper permissions.php already provides, no new role-checking logic.
+ * Dark maroon sidebar with the RAM-YUM logo and route-based navigation.
+ * Icons are a local display mapping for each route and do not affect
+ * the route configuration itself.
  */
 declare(strict_types=1);
 
