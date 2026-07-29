@@ -1,8 +1,4 @@
-/* =========================================================
-   components.css — Reusable UI pieces, all under .t8- namespace
-   REDESIGN: rounded, shadowed, red/cream palette per design brief.
-   Class names unchanged from the previous version — only values.
-   ========================================================= */
+
 
 /* ---- Buttons ---- */
 .t8-btn {
@@ -166,8 +162,7 @@
     align-items: center;
     justify-content: center;
     background:
-        linear-gradient(rgba(92, 16, 16, 0.72), rgba(92, 16, 16, 0.72)),
-        url('../img/bg.png') center / cover no-repeat;
+        url('../img/ramyunbg.jpg') center / cover no-repeat;
     padding: var(--t8-space-4);
 }
 .t8-auth-card {
@@ -206,25 +201,7 @@
     border-radius: var(--t8-radius);
     background: var(--t8-secondary);
 }
-/* =========================================================
-   FIX: <a class="t8-btn ...">  buttons losing their text color
-   on hover/visited/active/focus.
 
-   Cause: style.css has a global `a:hover { color: ... }` rule.
-   Because that selector combines a type selector (a) with a
-   pseudo-class (:hover), its specificity (0,1,1) beats a plain
-   class selector like `.t8-btn-accent` (0,1,0) - so hovering a
-   button-styled <a> replaced its white/dark text color with the
-   link color, making the label nearly invisible against the
-   button's own background. <button> elements were never affected
-   (different type selector), only <a class="t8-btn ...">.
-
-   Fix: restate each variant's text color using the `a.t8-btn...`
-   selector (adds the 'a' type selector so specificity ties with
-   `a:hover`, and this file loads AFTER style.css so it wins the
-   cascade tie) across :link/:visited/:hover/:focus/:active, so the
-   color never depends on link state.
-   ========================================================= */
 a.t8-btn,
 a.t8-btn:link,
 a.t8-btn:visited,

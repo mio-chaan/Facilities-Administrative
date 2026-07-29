@@ -459,6 +459,17 @@ if (!$showForm) {
         )->fetchAll(PDO::FETCH_ASSOC);
         $pendingReservations = t8_reservations_annotate_conflicts($pdo, $pendingReservations);
     } else {
+        $allReservationsStmt = $pdo->prepare(
+            'SELECT r.*, f.name AS facility_name, u.full_name AS requester_name
+             FROM team8_reservations r
+             JOIN team8_facilities f ON f.id = r.facility_id
+             JOIN users u ON u.id = r.user_id
+             ORDER BY r.start_time DESC'
+        );
+        $allReservationsStmt->execute();
+        $allReservations = $allReservationsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $allReservations = t8_reservations_annotate_conflicts($pdo, $allReservations);
+
         $myStmt = $pdo->prepare(
             'SELECT r.*, f.name AS facility_name
              FROM team8_reservations r
@@ -476,7 +487,7 @@ if (!$showForm) {
 <p class="t8-help-text">
     <?= $isAdmin
         ? 'Review pending requests and manage all reservations.'
-        : 'Submit a reservation request and track its approval status.' ?>
+        : 'Submit a reservation request and track your bookings. Review your own reservations and the full reservation list.' ?>
 </p>
 
 <?php if ($showForm): ?>
@@ -825,6 +836,61 @@ if (!$showForm) {
                                                     <i class="fa-solid fa-trash"></i> Delete
                                                 </button>
                                             </form>
+                                        <?php else: ?>
+                                            <span class="t8-help-text">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <div class="t8-card">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title">All Reservations</h2>
+            </div>
+            <?php if ($allReservations === []): ?>
+                <div class="t8-empty">No reservations have been made yet.</div>
+            <?php else: ?>
+                <div class="t8-table-wrap">
+                    <table class="t8-table">
+                        <thead>
+                            <tr>
+                                <th>Facility</th>
+                                <th>Department</th>
+                                <th>Key Person</th>
+                                <th>Category</th>
+                                <th>Requested By</th>
+                                <th>Start</th>
+                                <th>End</th>
+                                <th>Participants</th>
+                                <th>Notes</th>
+                                <th>Status</th>
+                                <th>Conflict</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($allReservations as $r): ?>
+                                <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
+                                    <td><?= e($r['facility_name']) ?></td>
+                                    <td><?= e((string) ($r['department'] ?? '—')) ?></td>
+                                    <td><?= e((string) ($r['key_person'] ?? '—')) ?></td>
+                                    <td><?= e((string) ($r['event_category'] ?? '—')) ?></td>
+                                    <td><?= e((string) ($r['requester_name'] ?? '—')) ?></td>
+                                    <td><?= e(format_date($r['start_time'], 'M d, Y g:i A')) ?></td>
+                                    <td><?= e(format_date($r['end_time'], 'M d, Y g:i A')) ?></td>
+                                    <td><?= e((string) ($r['expected_participants'] ?? '—')) ?></td>
+                                    <td><?= e((string) ($r['description'] ?? '—')) ?></td>
+                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
+                                    <td>
+                                        <?php if ($r['has_conflict']): ?>
+                                            <span class="t8-badge" title="Time Conflict"
+                                                  style="background:#E67E22; color:#fff; font-weight:700;">
+                                                <i class="fa-solid fa-triangle-exclamation"></i> !
+                                            </span>
                                         <?php else: ?>
                                             <span class="t8-help-text">—</span>
                                         <?php endif; ?>
