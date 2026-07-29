@@ -14,7 +14,7 @@ declare(strict_types=1);
 define('APP_NAME', 'RAM YUM - Facilities & Administrative Management');
 define('APP_ENV', 'local');              // 'local' | 'production'
 define('APP_DEBUG', true);               // true = show real PHP errors (local only)
-define('APP_URL', 'http://192.168.254.191:8000'); 
+define('APP_URL', 'http://localhost:8000'); // no trailing slash
 define('APP_TIMEZONE', 'Asia/Manila');
 
 define('DB_TEAM8_PREFIX', 'team8_');
