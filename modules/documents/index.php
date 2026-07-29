@@ -3,24 +3,17 @@
  * modules/documents/index.php
  * Document Management - upload, version, and archive documents.
  *
- * Matches the existing schema:
- *   team8_documents (id, category_id, uploaded_by, title, file_path,
- *     current_version, created_at, updated_at, deleted_at)
- *   team8_document_versions (id, document_id, version_no, file_path,
- *     file_size, checksum, uploaded_at)
- *   team8_document_categories (id, name, created_at)
- *
- * "Archived" = deleted_at IS NOT NULL (soft delete, nothing removed
- * from disk or DB). team8_documents.file_path / current_version always
- * mirror the newest row in team8_document_versions for that document,
- * so anything else in the app that reads documents.file_path directly
- * keeps working without needing to know about versioning.
- *
- * Any logged-in user (staff or admin) can upload, version, archive,
- * or restore a document.
  */
 
 declare(strict_types=1);
+
+// AI Document Summarizer support - defensive require, safe even if
+// already loaded centrally (require_once is idempotent). Adjust path
+// if your app/ folder isn't two levels up from modules/documents/.
+$aiHelperPath = __DIR__ . '/../../app/includes/ai_helper.php';
+if (is_file($aiHelperPath)) {
+    require_once $aiHelperPath;
+}
 
 $pageTitle = 'Document Management';
 $currentUserId = t8_current_user_id();
@@ -280,6 +273,57 @@ switch ($action) {
         header('Content-Length: ' . filesize($filePath));
         readfile($filePath);
         exit;
+
+    case 'summarize':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            redirect(page_url('documents'));
+        }
+        if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('documents'));
+        }
+        $summaryVersionId = (int) ($_POST['version_id'] ?? 0);
+        $stmt = $pdo->prepare(
+            'SELECT v.*, d.title FROM team8_document_versions v
+             JOIN team8_documents d ON d.id = v.document_id
+             WHERE v.id = :id LIMIT 1'
+        );
+        $stmt->execute(['id' => $summaryVersionId]);
+        $summaryVersion = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$summaryVersion) {
+            t8_flash_set('danger', 'Version not found.');
+            redirect(page_url('documents'));
+        }
+        $summaryDocumentId = (int) $summaryVersion['document_id'];
+        $summaryFilePath = UPLOAD_DIR . '/' . $summaryVersion['file_path'];
+        $summaryExt = pathinfo($summaryFilePath, PATHINFO_EXTENSION);
+        $extractedText = is_file($summaryFilePath) && function_exists('t8_extract_text_for_summary')
+            ? t8_extract_text_for_summary($summaryFilePath, $summaryExt)
+            : null;
+
+        if ($extractedText === null || trim($extractedText) === '') {
+            t8_flash_set('danger', 'This file type (.' . strtoupper($summaryExt) . ') isn\'t supported for AI summarization yet. Currently supported: .txt, .docx.');
+            redirect(page_url('documents', ['action' => 'versions', 'id' => $summaryDocumentId]));
+        }
+
+        // Cap input length to stay within a reasonable token budget.
+        $extractedText = mb_substr($extractedText, 0, 12000);
+
+        try {
+            $aiSummary = t8_openai_chat([
+                ['role' => 'system', 'content' => 'You summarize documents for a facilities & administrative management system. Produce a concise summary (3-6 sentences), followed by up to 5 key bullet points if relevant.'],
+                ['role' => 'user', 'content' => "Summarize this document titled \"{$summaryVersion['title']}\":\n\n" . $extractedText],
+            ]);
+            t8_audit_log($pdo, $currentUserId, 'document', $summaryDocumentId, 'ai_summarize');
+            // Stashed in session and consumed once on the redirected-to
+            // page below - avoids storing AI output in the database.
+            $_SESSION['t8_ai_summary_' . $summaryVersionId] = $aiSummary;
+        } catch (Throwable $e) {
+            t8_flash_set('danger', 'AI summarization failed: ' . $e->getMessage());
+        }
+        redirect(page_url('documents', ['action' => 'versions', 'id' => $summaryDocumentId, 'summary_version' => $summaryVersionId]));
+        break;
 }
 
 $showCreateForm = $action === 'create';
@@ -294,6 +338,14 @@ if ($showVersions) {
         redirect(page_url('documents'));
     }
     $versions = t8_document_all_versions($pdo, $documentId);
+
+    // One-time AI summary, if the person just clicked "AI Summarize".
+    $aiSummaryText = null;
+    $aiSummaryVersionId = (int) ($_GET['summary_version'] ?? 0);
+    if ($aiSummaryVersionId && isset($_SESSION['t8_ai_summary_' . $aiSummaryVersionId])) {
+        $aiSummaryText = $_SESSION['t8_ai_summary_' . $aiSummaryVersionId];
+        unset($_SESSION['t8_ai_summary_' . $aiSummaryVersionId]);
+    }
 }
 
 $showList = !$showCreateForm && !$showUploadVersionForm && !$showVersions;
@@ -320,6 +372,130 @@ function t8_format_filesize(int $bytes): string
         return round($bytes / 1024, 1) . ' KB';
     }
     return $bytes . ' B';
+}
+
+/**
+ * Shared camera-capture widget markup + script. Renders a "Take Photo"
+ * button beside the existing #file input; captured photos are pushed
+ * into that same input via DataTransfer, so no other code needs to
+ * change. Safe to include on any page with an <input id="file">.
+ */
+function t8_render_camera_capture(): void
+{
+    ?>
+    <div class="t8-camera-capture" style="margin-top: var(--t8-space-2);">
+        <button type="button" class="t8-btn t8-btn-outline t8-btn-sm" id="t8CameraBtn">
+            <i class="fa-solid fa-camera"></i> Take Photo
+        </button>
+
+        <div id="t8CameraPanel" style="display:none; margin-top: var(--t8-space-3); padding: var(--t8-space-3); border: 1px solid var(--t8-border); border-radius: var(--t8-radius-sm); background: var(--t8-cream);">
+            <video id="t8CameraVideo" playsinline autoplay muted style="width:100%; max-width:480px; border-radius:8px; display:block; background:#000;"></video>
+            <canvas id="t8CameraCanvas" style="display:none;"></canvas>
+            <img id="t8CameraPreview" alt="Captured photo preview" style="width:100%; max-width:480px; border-radius:8px; display:none;">
+            <div style="margin-top: var(--t8-space-2); display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="t8-btn t8-btn-accent t8-btn-sm" id="t8CameraCapture">
+                    <i class="fa-solid fa-camera"></i> Capture
+                </button>
+                <button type="button" class="t8-btn t8-btn-outline t8-btn-sm" id="t8CameraRetake" style="display:none;">
+                    <i class="fa-solid fa-rotate-left"></i> Retake
+                </button>
+                <button type="button" class="t8-btn t8-btn-success t8-btn-sm" id="t8CameraUse" style="display:none;">
+                    <i class="fa-solid fa-check"></i> Use Photo
+                </button>
+                <button type="button" class="t8-btn t8-btn-danger t8-btn-sm" id="t8CameraCancel">
+                    <i class="fa-solid fa-xmark"></i> Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var cameraBtn = document.getElementById('t8CameraBtn');
+        var panel = document.getElementById('t8CameraPanel');
+        var video = document.getElementById('t8CameraVideo');
+        var canvas = document.getElementById('t8CameraCanvas');
+        var preview = document.getElementById('t8CameraPreview');
+        var captureBtn = document.getElementById('t8CameraCapture');
+        var retakeBtn = document.getElementById('t8CameraRetake');
+        var useBtn = document.getElementById('t8CameraUse');
+        var cancelBtn = document.getElementById('t8CameraCancel');
+        var fileInput = document.getElementById('file');
+        var stream = null;
+
+        if (!cameraBtn || !fileInput) { return; }
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            cameraBtn.style.display = 'none';
+            return;
+        }
+
+        function stopStream() {
+            if (stream) {
+                stream.getTracks().forEach(function (t) { t.stop(); });
+                stream = null;
+            }
+        }
+
+        function resetPanelToLive() {
+            video.style.display = 'block';
+            preview.style.display = 'none';
+            captureBtn.style.display = 'inline-flex';
+            retakeBtn.style.display = 'none';
+            useBtn.style.display = 'none';
+        }
+
+        cameraBtn.addEventListener('click', function () {
+            panel.style.display = 'block';
+            resetPanelToLive();
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                .then(function (s) {
+                    stream = s;
+                    video.srcObject = s;
+                })
+                .catch(function () {
+                    alert('Could not access the camera. Please check permissions, or use the file upload option instead.');
+                    panel.style.display = 'none';
+                });
+        });
+
+        captureBtn.addEventListener('click', function () {
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            preview.src = canvas.toDataURL('image/jpeg', 0.9);
+            video.style.display = 'none';
+            preview.style.display = 'block';
+            captureBtn.style.display = 'none';
+            retakeBtn.style.display = 'inline-flex';
+            useBtn.style.display = 'inline-flex';
+        });
+
+        retakeBtn.addEventListener('click', function () {
+            resetPanelToLive();
+        });
+
+        useBtn.addEventListener('click', function () {
+            canvas.toBlob(function (blob) {
+                if (!blob) { return; }
+                var capturedFile = new File([blob], 'capture-' + Date.now() + '.jpg', { type: 'image/jpeg' });
+                var dt = new DataTransfer();
+                dt.items.add(capturedFile);
+                fileInput.files = dt.files;
+                stopStream();
+                panel.style.display = 'none';
+            }, 'image/jpeg', 0.9);
+        });
+
+        cancelBtn.addEventListener('click', function () {
+            stopStream();
+            panel.style.display = 'none';
+        });
+
+        window.addEventListener('beforeunload', stopStream);
+    })();
+    </script>
+    <?php
 }
 ?>
 <h1>Document Management</h1>
@@ -360,6 +536,7 @@ function t8_format_filesize(int $bytes): string
                 <span class="t8-help-text">
                     Max <?= e((string) UPLOAD_MAX_SIZE_MB) ?>MB. Allowed: <?= e(implode(', ', T8_DOC_ALLOWED_EXT)) ?>
                 </span>
+                <?php t8_render_camera_capture(); ?>
             </div>
 
             <button class="t8-btn t8-btn-accent" type="submit">
@@ -385,6 +562,7 @@ function t8_format_filesize(int $bytes): string
                 <span class="t8-help-text">
                     Max <?= e((string) UPLOAD_MAX_SIZE_MB) ?>MB. Allowed: <?= e(implode(', ', T8_DOC_ALLOWED_EXT)) ?>
                 </span>
+                <?php t8_render_camera_capture(); ?>
             </div>
 
             <button class="t8-btn t8-btn-accent" type="submit">
@@ -401,6 +579,15 @@ function t8_format_filesize(int $bytes): string
             <i class="fa-solid fa-arrow-left"></i> Back to Documents
         </a>
     </div>
+
+    <?php if ($aiSummaryText !== null): ?>
+        <div class="t8-card" style="border-left: 4px solid var(--t8-primary);">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title"><i class="fa-solid fa-robot"></i> AI Summary</h2>
+            </div>
+            <p style="white-space: pre-wrap; padding: 0 var(--t8-space-4) var(--t8-space-4);"><?= e($aiSummaryText) ?></p>
+        </div>
+    <?php endif; ?>
 
     <div class="t8-card">
         <div class="t8-card-header">
@@ -430,10 +617,17 @@ function t8_format_filesize(int $bytes): string
                             </td>
                             <td><?= e(t8_format_filesize((int) $v['file_size'])) ?></td>
                             <td><?= e(format_date($v['uploaded_at'], 'M d, Y g:i A')) ?></td>
-                            <td>
+                            <td style="display:flex; gap:8px; flex-wrap:wrap;">
                                 <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $v['id']])) ?>">
                                     <i class="fa-solid fa-download"></i> Download
                                 </a>
+                                <form method="post" action="<?= e(page_url('documents', ['action' => 'summarize'])) ?>" style="display:inline;">
+                                    <?= t8_csrf_field() ?>
+                                    <input type="hidden" name="version_id" value="<?= e((string) $v['id']) ?>">
+                                    <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">
+                                        <i class="fa-solid fa-robot"></i> AI Summarize
+                                    </button>
+                                </form>
                             </td>
                         </tr>
                     <?php endforeach; ?>

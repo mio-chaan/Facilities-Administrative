@@ -1,6 +1,10 @@
 <?php
 /**
  * templates/footer.php
+ * See templates/header.php for the $page scope-coupling note (Medium,
+ * code review) - same contract applies here.
+ *
+ * REDESIGN: visual only - same JS include logic as before.
  *
  * Expects (optionally) from the including scope:
  *   $page - route key string, defaults to current_page()
@@ -19,5 +23,7 @@ $page = $page ?? current_page();
 <?php if ($page === 'reservation'): ?>
     <script src="<?= e(asset('js/reservation.js')) ?>"></script>
 <?php endif; ?>
+
+<?php include __DIR__ . '/ai_widget.php'; ?>
 </body>
 </html>

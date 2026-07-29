@@ -35,7 +35,7 @@ final class Database
             // die() here bypasses any future error-handling/logging
             // layer. Acceptable for now — a DB-less app can't do
             // anything else useful anyway.
-            die('Database connection failed: ' . $e->getMessage());
+            die('Database connection failed: ' . $e->getMessage()); //In production, you might want to remove the error message to avoid exposing sensitive information.
         }
 
         return self::$connection;

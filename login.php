@@ -103,9 +103,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="t8-auth-wrapper">
     <div class="t8-card t8-auth-card">
         <img class="t8-auth-logo" src="<?= e(asset('img/ramyumlogo.jpg')) ?>" alt="RAM-YUM Korean and Japanese Store">
-        <div class="t8-auth-badge"></div>
+        <div class="t8-auth-badge">Temporary Login</div>
         <h1 class="t8-auth-title"><?= e(APP_NAME) ?></h1>
-    
+      
 
         <?php foreach ($errors as $error): ?>
             <div class="t8-alert t8-alert-danger"><?= e($error) ?></div>

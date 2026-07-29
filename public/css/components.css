@@ -6,7 +6,6 @@
 
 /* ---- Buttons ---- */
 .t8-btn {
-   
     display: inline-flex;
     align-items: center;
     gap: var(--t8-space-2);
@@ -23,8 +22,8 @@
 }
 .t8-btn:hover { background: var(--t8-primary-dark); transform: translateY(-1px); box-shadow: var(--t8-shadow-lift); }
 .t8-btn:active { transform: translateY(0); }
-.t8-btn-accent { background: var(--t8-primary); color: #ffffff; }
-.t8-btn-accent:hover { background: var(--t8-primary-dark); color: #ffffff; }
+.t8-btn-accent { background: var(--t8-primary); color: #fff; }
+.t8-btn-accent:hover { background: var(--t8-primary-dark); }
 .t8-btn-ghost { background: transparent; border-color: rgba(255,255,255,0.35); color: inherit; }
 .t8-btn-ghost:hover { background: rgba(255,255,255,0.1); box-shadow: none; transform: none; }
 .t8-btn-outline { background: #fff; border-color: var(--t8-border); color: var(--t8-text); }
@@ -143,7 +142,6 @@
 .t8-badge-role { background: rgba(255,255,255,0.2); color: #fff; }
 .t8-badge-pending, .t8-badge-expected { background: #fff3d6; color: #8a5c10; }
 .t8-badge-approved, .t8-badge-active, .t8-badge-checked_in, .t8-badge-compliant { background: #e2f4e4; color: #2e7d32; }
-.t8-badge-completed { background: #e2f4e4; color: #2e7d32; }
 .t8-badge-rejected, .t8-badge-denied, .t8-badge-terminated, .t8-badge-non_compliant { background: #fbe4e1; color: #c62828; }
 .t8-badge-cancelled, .t8-badge-archived, .t8-badge-closed, .t8-badge-checked_out { background: var(--t8-fog-100); color: var(--t8-text-muted); }
 
@@ -160,13 +158,16 @@
 .t8-alert-warning { background: #fff8e6; border-color: var(--t8-warning); color: #8a5c10; }
 .t8-alert-info    { background: #f3e9e9; border-color: var(--t8-primary); color: var(--t8-primary-dark); }
 
+/* ---- Auth (temporary login page) — kept for reference, no longer
+   used since login.php now uses public/css/login.css instead ---- */
 .t8-auth-wrapper {
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
     background:
-        url('../img/ramyunbg.jpg') center / cover no-repeat;
+        linear-gradient(rgba(92, 16, 16, 0.72), rgba(92, 16, 16, 0.72)),
+        url('../img/bg.png') center / cover no-repeat;
     padding: var(--t8-space-4);
 }
 .t8-auth-card {
@@ -204,4 +205,78 @@
     border: 1.5px dashed var(--t8-border);
     border-radius: var(--t8-radius);
     background: var(--t8-secondary);
+}
+/* =========================================================
+   FIX: <a class="t8-btn ...">  buttons losing their text color
+   on hover/visited/active/focus.
+
+   Cause: style.css has a global `a:hover { color: ... }` rule.
+   Because that selector combines a type selector (a) with a
+   pseudo-class (:hover), its specificity (0,1,1) beats a plain
+   class selector like `.t8-btn-accent` (0,1,0) - so hovering a
+   button-styled <a> replaced its white/dark text color with the
+   link color, making the label nearly invisible against the
+   button's own background. <button> elements were never affected
+   (different type selector), only <a class="t8-btn ...">.
+
+   Fix: restate each variant's text color using the `a.t8-btn...`
+   selector (adds the 'a' type selector so specificity ties with
+   `a:hover`, and this file loads AFTER style.css so it wins the
+   cascade tie) across :link/:visited/:hover/:focus/:active, so the
+   color never depends on link state.
+   ========================================================= */
+a.t8-btn,
+a.t8-btn:link,
+a.t8-btn:visited,
+a.t8-btn:hover,
+a.t8-btn:focus,
+a.t8-btn:active {
+    color: #fff;
+}
+
+a.t8-btn-outline,
+a.t8-btn-outline:link,
+a.t8-btn-outline:visited {
+    color: var(--t8-text);
+}
+a.t8-btn-outline:hover,
+a.t8-btn-outline:focus,
+a.t8-btn-outline:active {
+    color: var(--t8-primary);
+}
+
+a.t8-btn-ghost,
+a.t8-btn-ghost:link,
+a.t8-btn-ghost:visited,
+a.t8-btn-ghost:hover,
+a.t8-btn-ghost:focus,
+a.t8-btn-ghost:active {
+    color: inherit;
+}
+
+a.t8-btn-success,
+a.t8-btn-success:link,
+a.t8-btn-success:visited,
+a.t8-btn-success:hover,
+a.t8-btn-success:focus,
+a.t8-btn-success:active {
+    color: #fff;
+}
+
+a.t8-btn-warning,
+a.t8-btn-warning:link,
+a.t8-btn-warning:visited,
+a.t8-btn-warning:hover,
+a.t8-btn-warning:focus,
+a.t8-btn-warning:active {
+    color: #4a3800;
+}
+
+a.t8-btn-danger,
+a.t8-btn-danger:link,
+a.t8-btn-danger:visited,
+a.t8-btn-danger:hover,
+a.t8-btn-danger:focus,
+a.t8-btn-danger:active {
+    color: #fff;
 }

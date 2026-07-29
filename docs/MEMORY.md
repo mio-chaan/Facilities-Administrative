@@ -29,7 +29,19 @@
   structure is Team 8's proactive choice, open to revision if the
   class aligns on a standard.
 
-## Architecture Decisions
+## Milestone Status
+- [x] **Milestone 0 — Project Setup** (complete, smoke-tested end to
+      end: schema import, seed import, PHP dev server, all routes
+      returning correct status codes, dashboard pulling live DB
+      counts)
+- [ ] **Milestone 1 — Authentication** — owned by another team; Team 8
+      has nothing to build here beyond keeping `auth_check.php`'s
+      contract (the session var names above) ready to swap in.
+- [ ] Milestone 2 — Dashboard (stat cards are live; recent
+      activity/notifications still pending)
+- [ ] Milestones 3–10 — not started (see `docs/Milestones.md`)
+
+## Architecture Decisions (Milestone 0)
 - **Folder structure:** `team8-facilities-admin/` root, with `app/`
   (config, controllers, models, middleware, services, includes),
   `modules/` (one folder per module), `templates/` (header, navbar,

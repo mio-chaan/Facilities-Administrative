@@ -27,6 +27,7 @@ if ($devBypass && empty($_SESSION['user_id'])) {
 }
 // ---- END dev bypass -------------------------------------------------------
 
+// Real guard — sends anyone without a session to the temporary login form.
 if (empty($_SESSION['user_id'])) {
     header('Location: ' . APP_URL . '/login.php');
     exit;

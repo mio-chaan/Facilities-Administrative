@@ -13,8 +13,16 @@
  * facility with any history would either violate the FK or orphan
  * historical reservations.
  *
- * Backing table: team8_facilities (name, location, capacity,
- * description, status).
+ * Backing table: team8_facilities (name, location, facility_type,
+ * capacity, description, status).
+ *
+ * REVISION (professor feedback - "design for future business
+ * expansion"): added facility_type as a dropdown (T8_FACILITY_TYPES
+ * below), so new categories of facility (e.g. "Function Hall 2",
+ * additional sports courts, parking areas) can be added just by
+ * picking/adding a type - no other code changes needed. Adding a new
+ * TYPE (not just a new facility of an existing type) only requires
+ * editing the T8_FACILITY_TYPES array below.
  *
  * Whole module is admin-only (guarded below), per project decision —
  * Facilities Staff never reaches this page even by direct URL (see
@@ -31,6 +39,19 @@ $currentUserId = t8_current_user_id();
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
+// Dropdown options for Facility Type. Add new types here as the
+// business grows - no other code needs to change.
+const T8_FACILITY_TYPES = [
+    'Function Hall',
+    'Conference Room',
+    'Meeting Room',
+    'Training Room',
+    'Sports Facility',
+    'Parking Area',
+    'Outdoor Area',
+    'Other',
+];
+
 /** Fetch a single facility row or null. */
 function t8_facility_fetch(PDO $pdo, int $id): ?array
 {
@@ -41,7 +62,7 @@ function t8_facility_fetch(PDO $pdo, int $id): ?array
 }
 
 /** Shared validation for both create and edit forms. */
-function t8_facility_validate(string $name, string $location, int $capacity): array
+function t8_facility_validate(string $name, string $location, string $facilityType, int $capacity): array
 {
     $errors = [];
     if ($name === '') {
@@ -54,40 +75,45 @@ function t8_facility_validate(string $name, string $location, int $capacity): ar
     } elseif (mb_strlen($location) > 200) {
         $errors[] = 'Location must be 200 characters or fewer.';
     }
+    if (!in_array($facilityType, T8_FACILITY_TYPES, true)) {
+        $errors[] = 'Please select a valid facility type.';
+    }
     if ($capacity < 1) {
         $errors[] = 'Capacity must be at least 1.';
     }
     return $errors;
 }
 
-$facility = ['name' => '', 'location' => '', 'capacity' => '', 'description' => ''];
+$facility = ['name' => '', 'location' => '', 'facility_type' => '', 'capacity' => '', 'description' => ''];
 
 switch ($action) {
     case 'create':
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $facility = [
-                'name'        => trim((string) ($_POST['name'] ?? '')),
-                'location'    => trim((string) ($_POST['location'] ?? '')),
-                'capacity'    => (string) ($_POST['capacity'] ?? ''),
-                'description' => trim((string) ($_POST['description'] ?? '')),
+                'name'          => trim((string) ($_POST['name'] ?? '')),
+                'location'      => trim((string) ($_POST['location'] ?? '')),
+                'facility_type' => (string) ($_POST['facility_type'] ?? ''),
+                'capacity'      => (string) ($_POST['capacity'] ?? ''),
+                'description'   => trim((string) ($_POST['description'] ?? '')),
             ];
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
                 $capacityInt = (int) $facility['capacity'];
-                $errors = t8_facility_validate($facility['name'], $facility['location'], $capacityInt);
+                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt);
 
                 if (!$errors) {
                     $stmt = $pdo->prepare(
-                        'INSERT INTO team8_facilities (name, location, capacity, description, status)
-                         VALUES (:name, :location, :capacity, :description, "active")'
+                        'INSERT INTO team8_facilities (name, location, facility_type, capacity, description, status)
+                         VALUES (:name, :location, :facility_type, :capacity, :description, "active")'
                     );
                     $stmt->execute([
-                        'name'        => $facility['name'],
-                        'location'    => $facility['location'],
-                        'capacity'    => $capacityInt,
-                        'description' => $facility['description'] !== '' ? $facility['description'] : null,
+                        'name'          => $facility['name'],
+                        'location'      => $facility['location'],
+                        'facility_type' => $facility['facility_type'],
+                        'capacity'      => $capacityInt,
+                        'description'   => $facility['description'] !== '' ? $facility['description'] : null,
                     ]);
                     $newId = (int) $pdo->lastInsertId();
                     t8_audit_log($pdo, $currentUserId, 'facility', $newId, 'create', null, $facility['name']);
@@ -108,29 +134,32 @@ switch ($action) {
         $facility = $existing;
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $facility['name']        = trim((string) ($_POST['name'] ?? ''));
-            $facility['location']    = trim((string) ($_POST['location'] ?? ''));
-            $facility['capacity']    = (string) ($_POST['capacity'] ?? '');
-            $facility['description'] = trim((string) ($_POST['description'] ?? ''));
+            $facility['name']          = trim((string) ($_POST['name'] ?? ''));
+            $facility['location']      = trim((string) ($_POST['location'] ?? ''));
+            $facility['facility_type'] = (string) ($_POST['facility_type'] ?? '');
+            $facility['capacity']      = (string) ($_POST['capacity'] ?? '');
+            $facility['description']   = trim((string) ($_POST['description'] ?? ''));
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
                 $capacityInt = (int) $facility['capacity'];
-                $errors = t8_facility_validate($facility['name'], $facility['location'], $capacityInt);
+                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt);
 
                 if (!$errors) {
                     $stmt = $pdo->prepare(
                         'UPDATE team8_facilities
-                         SET name = :name, location = :location, capacity = :capacity, description = :description
+                         SET name = :name, location = :location, facility_type = :facility_type,
+                             capacity = :capacity, description = :description
                          WHERE id = :id'
                     );
                     $stmt->execute([
-                        'name'        => $facility['name'],
-                        'location'    => $facility['location'],
-                        'capacity'    => $capacityInt,
-                        'description' => $facility['description'] !== '' ? $facility['description'] : null,
-                        'id'          => $id,
+                        'name'          => $facility['name'],
+                        'location'      => $facility['location'],
+                        'facility_type' => $facility['facility_type'],
+                        'capacity'      => $capacityInt,
+                        'description'   => $facility['description'] !== '' ? $facility['description'] : null,
+                        'id'            => $id,
                     ]);
                     t8_audit_log($pdo, $currentUserId, 'facility', $id, 'update', null, $facility['name']);
                     t8_flash_set('success', 'Facility "' . $facility['name'] . '" was updated.');
@@ -191,7 +220,18 @@ if (!$showForm) {
             <div class="t8-field">
                 <label class="t8-label" for="name">Facility Name</label>
                 <input class="t8-input" type="text" id="name" name="name" maxlength="150"
-                       value="<?= e((string) $facility['name']) ?>" required autofocus>
+                       value="<?= e((string) $facility['name']) ?>" placeholder="e.g. Function Hall 2" required autofocus>
+            </div>
+
+            <div class="t8-field">
+                <label class="t8-label" for="facility_type">Facility Type</label>
+                <select class="t8-select" id="facility_type" name="facility_type" required>
+                    <option value="">Select a type…</option>
+                    <?php foreach (T8_FACILITY_TYPES as $type): ?>
+                        <option value="<?= e($type) ?>" <?= $type === $facility['facility_type'] ? 'selected' : '' ?>><?= e($type) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <span class="t8-help-text">Add new types anytime by editing T8_FACILITY_TYPES in the code — no database change needed.</span>
             </div>
 
             <div class="t8-field">
@@ -206,7 +246,10 @@ if (!$showForm) {
                        value="<?= e((string) $facility['capacity']) ?>" required>
             </div>
 
-    
+            <div class="t8-field">
+                <label class="t8-label" for="description">Description <span class="t8-help-text">(optional)</span></label>
+                <textarea class="t8-textarea" id="description" name="description" rows="3"><?= e((string) $facility['description']) ?></textarea>
+            </div>
 
             <button class="t8-btn t8-btn-accent" type="submit">
                 <i class="fa-solid fa-check"></i> <?= $action === 'edit' ? 'Save Changes' : 'Add Facility' ?>
@@ -237,6 +280,7 @@ if (!$showForm) {
                 <thead>
                     <tr>
                         <th>Name</th>
+                        <th>Type</th>
                         <th>Location</th>
                         <th>Capacity</th>
                         <th>Status</th>
@@ -247,6 +291,7 @@ if (!$showForm) {
                     <?php foreach ($facilities as $f): ?>
                         <tr>
                             <td><?= e($f['name']) ?></td>
+                            <td><?= e((string) ($f['facility_type'] ?? '—')) ?></td>
                             <td><?= e($f['location']) ?></td>
                             <td><?= e((string) $f['capacity']) ?></td>
                             <td><span class="t8-badge t8-badge-<?= e($f['status']) ?>"><?= e(ucfirst($f['status'])) ?></span></td>

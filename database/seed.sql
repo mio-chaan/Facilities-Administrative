@@ -5,18 +5,6 @@
 -- once real UI exists, not a full test dataset.
 -- =========================================================
 
--- NOTE: auth_check.php's optional dev bypass (AUTH_DEV_BYPASS=true)
--- hardcodes user_id = 1, so keep that row present if you rely on it.
---
--- All seeded accounts below use the SAME password for convenience:
---     Password123!
--- This is a bcrypt hash of that string. Never reuse this pattern
--- outside local/dev seed data.
---
--- NOTE (code review, Critical): this file is now blocked from direct
--- HTTP access by database/.htaccess and the root .htaccess - see
--- those files for details. Never rely on that alone in production;
--- these are dev-only credentials.
 
 INSERT INTO departments (id, name) VALUES
     (1, 'Facilities & Administration'),

@@ -12,40 +12,10 @@
 
 document.addEventListener("DOMContentLoaded", function () {
     var form = document.getElementById("t8ReservationForm");
-    var startInput = document.getElementById("start_time");
-    var endInput = document.getElementById("end_time");
-
-    var openDateTimePicker = function (input) {
-        if (!input) return;
-        if (typeof input.showPicker === 'function') {
-            input.showPicker();
-        } else {
-            input.focus();
-        }
-    };
-
-    [startInput, endInput].forEach(function (input) {
-        if (!input) return;
-        input.addEventListener('focus', function () { openDateTimePicker(input); });
-        input.addEventListener('click', function () { openDateTimePicker(input); });
-    });
-
     if (!form) return;
 
-    var openDateTimePicker = function (input) {
-        if (!input) return;
-        if (typeof input.showPicker === 'function') {
-            input.showPicker();
-        } else {
-            input.focus();
-        }
-    };
-
-    [startInput, endInput].forEach(function (input) {
-        if (!input) return;
-        input.addEventListener('focus', function () { openDateTimePicker(input); });
-        input.addEventListener('click', function () { openDateTimePicker(input); });
-    });
+    var startInput = document.getElementById("start_time");
+    var endInput = document.getElementById("end_time");
 
     // Equipment rows: quantity input only usable once its checkbox is
     // checked, and clamped to the "of N available" max on that input.

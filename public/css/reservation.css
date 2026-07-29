@@ -61,13 +61,6 @@
     display: flex;
     gap: var(--t8-space-2);
 }
-
-.t8-table-row-conflict {
-    background: rgba(255, 243, 205, 0.85);
-}
-.t8-table-row-conflict td {
-    border-top: 1px solid rgba(255, 205, 60, 0.2);
-}
 .t8-calendar-weekdays {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
