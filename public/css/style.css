@@ -328,6 +328,12 @@ code { font-family: var(--t8-font-data); }
 }
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-link { justify-content: center; }
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-brand { justify-content: center; }
+/* Keep the logo from compressing when the sidebar collapses by
+   removing large horizontal padding on the brand container. */
+.t8-shell.t8-sidebar-collapsed .t8-sidebar-brand {
+    padding-left: 8px;
+    padding-right: 8px;
+}
 
 .t8-sidebar-brand { min-width: 0; }
 
