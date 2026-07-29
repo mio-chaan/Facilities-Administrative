@@ -37,10 +37,55 @@ document.addEventListener("DOMContentLoaded", function () {
 document.addEventListener("DOMContentLoaded", function () {
     var collapseBtn = document.getElementById("t8SidebarCollapseToggle");
     var shell = document.querySelector(".t8-shell");
+    var storageKey = "t8SidebarCollapsed";
+
+    function setCollapsedState(collapsed) {
+        if (!shell) {
+            return;
+        }
+
+        if (collapsed) {
+            shell.classList.add("t8-sidebar-collapsed");
+            if (collapseBtn) {
+                collapseBtn.setAttribute("aria-label", "Expand sidebar");
+                collapseBtn.querySelector("i")?.classList.replace("fa-angles-left", "fa-angles-right");
+                collapseBtn.querySelector("span").textContent = "Expand";
+            }
+        } else {
+            shell.classList.remove("t8-sidebar-collapsed");
+            if (collapseBtn) {
+                collapseBtn.setAttribute("aria-label", "Collapse sidebar");
+                collapseBtn.querySelector("i")?.classList.replace("fa-angles-right", "fa-angles-left");
+                collapseBtn.querySelector("span").textContent = "Collapse";
+            }
+        }
+
+        try {
+            localStorage.setItem(storageKey, collapsed ? "1" : "0");
+        } catch (error) {
+            // ignore storage errors in private mode or restricted browsers
+        }
+    }
+
+    if (shell) {
+        var savedState = null;
+        try {
+            savedState = localStorage.getItem(storageKey);
+        } catch (error) {
+            savedState = null;
+        }
+
+        if (savedState === "0") {
+            setCollapsedState(false);
+        } else if (savedState === "1") {
+            setCollapsedState(true);
+        }
+    }
 
     if (collapseBtn && shell) {
         collapseBtn.addEventListener("click", function () {
-            shell.classList.toggle("t8-sidebar-collapsed");
+            var isCollapsed = shell.classList.contains("t8-sidebar-collapsed");
+            setCollapsedState(!isCollapsed);
         });
     }
 });

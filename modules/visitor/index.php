@@ -85,6 +85,45 @@ function t8_normalize_datetime(string $value): string
     return $value;
 }
 
+function t8_normalize_ph_contact(string $contact): string
+{
+    $contact = trim($contact);
+    if ($contact === '') {
+        return '';
+    }
+
+    $digits = preg_replace('/[^\d\+]/', '', $contact);
+
+    if ($digits === '+63' || $digits === '63') {
+        return '';
+    }
+    if (preg_match('/^\+63\d{10}$/', $digits)) {
+        return $digits;
+    }
+    if (preg_match('/^0(\d{10})$/', $digits, $matches)) {
+        return '+63' . $matches[1];
+    }
+    if (preg_match('/^63(\d{10})$/', $digits, $matches)) {
+        return '+63' . $matches[1];
+    }
+    if (preg_match('/^(\d{10})$/', $digits, $matches)) {
+        return '+63' . $matches[1];
+    }
+
+    return $contact;
+}
+
+function t8_validate_ph_contact(string $contact): bool
+{
+    $contact = trim($contact);
+    if ($contact === '') {
+        return true;
+    }
+
+    $normalized = t8_normalize_ph_contact($contact);
+    return preg_match('/^\+63\d{10}$/', $normalized) === 1;
+}
+
 function t8_visitor_status_badge(string $status): string
 {
     $map = [
@@ -99,7 +138,7 @@ function t8_visitor_status_badge(string $status): string
 $formValues = [
     'full_name'       => '',
     'visitor_type'    => '',
-    'contact'         => '',
+    'contact_suffix'  => '',
     'person_to_visit' => '',
     'purpose'         => '',
     'scheduled_date'  => date('Y-m-d\TH:i'), // default to "now" for the form
@@ -112,7 +151,7 @@ switch ($action) {
             $formValues = [
                 'full_name'       => trim((string) ($_POST['full_name'] ?? '')),
                 'visitor_type'    => (string) ($_POST['visitor_type'] ?? ''),
-                'contact'         => trim((string) ($_POST['contact'] ?? '')),
+                'contact_suffix'  => trim((string) ($_POST['contact_suffix'] ?? '')),
                 'person_to_visit' => trim((string) ($_POST['person_to_visit'] ?? '')),
                 'purpose'         => trim((string) ($_POST['purpose'] ?? '')),
                 'scheduled_date'  => t8_normalize_datetime((string) ($_POST['scheduled_date'] ?? '')),
@@ -134,15 +173,18 @@ switch ($action) {
                 if ($formValues['purpose'] === '') {
                     $errors[] = 'Purpose of visit is required.';
                 }
-                if ($formValues['scheduled_date'] === '' || strtotime($formValues['scheduled_date']) === false) {
+                $arrivingNow = $formValues['arriving_now'] === '1';
+                if (!$arrivingNow && ($formValues['scheduled_date'] === '' || strtotime($formValues['scheduled_date']) === false)) {
                     $errors[] = 'Scheduled date/time must be valid.';
+                }
+                if ($formValues['contact_suffix'] !== '' && !preg_match('/^\d{10}$/', $formValues['contact_suffix'])) {
+                    $errors[] = 'Contact number must be 10 digits after +63.';
                 }
 
                 if (!$errors) {
-                    $arrivingNow = $formValues['arriving_now'] === '1';
+                    $contact = $formValues['contact_suffix'] !== '' ? '+63' . $formValues['contact_suffix'] : '';
                     $status = $arrivingNow ? 'checked_in' : 'scheduled';
-                    $checkInTime = $arrivingNow ? date('Y-m-d H:i:s') : null;
-
+                    $checkInTime = $arrivingNow ? date('Y-m-d H:i:s') : $formValues['scheduled_date'];                    $scheduledDate = $arrivingNow ? date('Y-m-d H:i:s') : $formValues['scheduled_date'];
                     $stmt = $pdo->prepare(
                         'INSERT INTO team8_visitors
                             (full_name, visitor_type, contact, person_to_visit, purpose, scheduled_date, status, check_in_time, logged_by)
@@ -152,10 +194,10 @@ switch ($action) {
                     $stmt->execute([
                         'full_name'       => $formValues['full_name'],
                         'visitor_type'    => $formValues['visitor_type'],
-                        'contact'         => $formValues['contact'] !== '' ? $formValues['contact'] : null,
+                        'contact'         => $contact !== '' ? $contact : null,
                         'person_to_visit' => $formValues['person_to_visit'],
                         'purpose'         => $formValues['purpose'],
-                        'scheduled_date'  => $formValues['scheduled_date'],
+                        'scheduled_date'  => $scheduledDate,
                         'status'          => $status,
                         'check_in_time'   => $checkInTime,
                         'logged_by'       => $currentUserId,
@@ -298,9 +340,19 @@ if (!$showForm) {
             </div>
 
             <div class="t8-field">
-                <label class="t8-label" for="contact">Contact Number</label>
-                <input class="t8-input" type="text" id="contact" name="contact"
-                       value="<?= e($formValues['contact']) ?>" placeholder="Optional">
+                <label class="t8-label" for="contact_suffix">Contact Number</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span style="padding: 12px 14px; background: var(--t8-secondary); border: 1.5px solid var(--t8-border); border-radius: var(--t8-radius-sm) 0 0 var(--t8-radius-sm);">+63</span>
+                    <input class="t8-input" type="tel" id="contact_suffix" name="contact_suffix"
+                           value="<?= e($formValues['contact_suffix']) ?>"
+                           inputmode="tel"
+                           maxlength="10"
+                           placeholder="9123456789"
+                           pattern="[0-9]{10}"
+                           title="Enter 10 digits after +63"
+                           style="border-radius: 0 var(--t8-radius-sm) var(--t8-radius-sm) 0; flex: 1;">
+                </div>
+                <span class="t8-help-text">Optional. Enter exactly 10 digits after +63, e.g. 9123456789.</span>
             </div>
 
             <div class="t8-field">

@@ -54,7 +54,7 @@ $pageTitle = ucfirst($page);
 require __DIR__ . '/templates/header.php';
 require __DIR__ . '/templates/navbar.php';
 ?>
-<div class="t8-shell">
+<div class="t8-shell t8-sidebar-collapsed">
     <?php require __DIR__ . '/templates/sidebar.php'; ?>
     <main class="t8-main">
         <?php

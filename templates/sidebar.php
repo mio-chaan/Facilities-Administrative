@@ -61,8 +61,8 @@ $t8NavIcons = [
         <?php endforeach; ?>
     </nav>
 
-    <button class="t8-sidebar-collapse-btn" id="t8SidebarCollapseToggle" type="button" aria-label="Collapse sidebar">
-        <i class="fa-solid fa-angles-left"></i>
-        <span>Collapse</span>
+    <button class="t8-sidebar-collapse-btn" id="t8SidebarCollapseToggle" type="button" aria-label="Expand sidebar">
+        <i class="fa-solid fa-angles-right"></i>
+        <span>Expand</span>
     </button>
 </aside>
