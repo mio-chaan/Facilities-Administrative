@@ -1,6 +1,28 @@
 -- =========================================================
 -- TEAM 8 — FACILITIES & ADMINISTRATIVE MANAGEMENT
 -- Subsystem schema (integrates into shared capstone database)
+--
+-- QA FIX PASS (2026-07-29): this file previously diverged from what
+-- the PHP modules actually query. See database/migrations/
+-- 2026_07_29_qa_fixes.sql for the equivalent ALTERs to apply to an
+-- EXISTING database instead of re-importing this file from scratch.
+-- Summary of what changed here vs. the prior version:
+--   - team8_reservations gained: department, key_person,
+--     expected_participants, event_category, description (all used
+--     by modules/reservation/index.php but never previously defined
+--     anywhere), plus the delete-request workflow columns
+--     (previous_status, delete_reason, delete_requested_by,
+--     delete_requested_at, rejection_reason).
+--   - team8_facilities gained: facility_type (used throughout
+--     modules/facilities/index.php and modules/reservation/index.php,
+--     never previously defined).
+--   - team8_visitors / team8_visits were replaced with a single
+--     team8_visitors table matching what modules/visitor/index.php
+--     and modules/dashboard/index.php actually query. The old
+--     two-table (visitor directory + visit log) design was never
+--     used by any PHP file and has been removed.
+--   - team8_document_versions gained a UNIQUE(document_id, version_no)
+--     constraint to close a version-numbering race condition.
 -- =========================================================
 
 SET FOREIGN_KEY_CHECKS = 0;
@@ -64,26 +86,31 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     CONSTRAINT fk_audit_logs_user FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
+-- QA FIX: dedicated persistent login-throttle table (login.php previously
+-- rate-limited by $_SESSION, which is trivially bypassed by dropping
+-- cookies — see database/migrations/2026_07_29_qa_fixes.sql / H1).
+CREATE TABLE IF NOT EXISTS team8_login_throttle (
+    identifier      VARCHAR(191) PRIMARY KEY, -- lowercased email
+    attempts        INT NOT NULL DEFAULT 0,
+    locked_until    DATETIME NULL,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
 
 -- =========================================================
 -- MODULE: FACILITIES RESERVATION
 -- =========================================================
 
--- CHANGED (Facility Management module, 2026-07-17): added
--- `description` (optional detail shown in the admin UI) and `status`
--- (active/archived) so facilities can be managed entirely through
--- modules/facilities/index.php instead of direct SQL. Facilities are
--- archived, never deleted, since team8_reservations.facility_id and
--- team8_equipment.home_facility_id both hold FKs into this table.
 CREATE TABLE team8_facilities (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    name        VARCHAR(150) NOT NULL,
-    location    VARCHAR(200) NOT NULL,
-    capacity    INT NOT NULL DEFAULT 0,
-    description TEXT NULL,
-    status      ENUM('active','archived') NOT NULL DEFAULT 'active',
-    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    name          VARCHAR(150) NOT NULL,
+    location      VARCHAR(200) NOT NULL,
+    facility_type VARCHAR(100) NULL,
+    capacity      INT NOT NULL DEFAULT 0,
+    description   TEXT NULL,
+    status        ENUM('active','archived') NOT NULL DEFAULT 'active',
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_equipment (
@@ -97,17 +124,31 @@ CREATE TABLE team8_equipment (
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_reservations (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    facility_id INT NOT NULL,
-    user_id     INT NOT NULL,
-    start_time  DATETIME NOT NULL,
-    end_time    DATETIME NOT NULL,
-    status      VARCHAR(30) NOT NULL DEFAULT 'pending',
-    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at  DATETIME NULL,
+    id                      INT AUTO_INCREMENT PRIMARY KEY,
+    facility_id             INT NOT NULL,
+    user_id                 INT NOT NULL,
+    start_time              DATETIME NOT NULL,
+    end_time                DATETIME NOT NULL,
+    status                  VARCHAR(30) NOT NULL DEFAULT 'pending',
+    department              VARCHAR(150) NULL,
+    key_person              VARCHAR(150) NULL,
+    expected_participants   INT NULL,
+    event_category          VARCHAR(100) NULL,
+    description             VARCHAR(500) NULL,
+    -- Delete-request workflow (QA FIX: previously added by a migration
+    -- but never actually used by any code path; now implemented — see
+    -- modules/reservation/index.php request_delete/approve_delete/reject_delete).
+    previous_status         VARCHAR(30) NULL,
+    delete_reason           TEXT NULL,
+    delete_requested_by     INT NULL,
+    delete_requested_at     DATETIME NULL,
+    rejection_reason        TEXT NULL,
+    created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at              DATETIME NULL,
     CONSTRAINT fk_team8_reservations_facility FOREIGN KEY (facility_id) REFERENCES team8_facilities(id),
-    CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id)
+    CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_team8_reservations_delete_requester FOREIGN KEY (delete_requested_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_reservation_equipment (
@@ -120,16 +161,13 @@ CREATE TABLE team8_reservation_equipment (
     CONSTRAINT fk_team8_resequip_equipment FOREIGN KEY (equipment_id) REFERENCES team8_equipment(id)
 ) ENGINE=InnoDB;
 
--- NOTE: kept as a single-step approval table by design decision -
--- one row per reservation decision (step_order = 1, approver = the
--- Administrator), even though the schema supports multi-step chains.
--- See modules/reservation/index.php.
 CREATE TABLE team8_reservation_approvals (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     reservation_id  INT NOT NULL,
     approver_id     INT NOT NULL,
     step_order      INT NOT NULL DEFAULT 1,
     status          VARCHAR(30) NOT NULL DEFAULT 'pending',
+    remarks         TEXT NULL,
     decided_at      DATETIME NULL,
     CONSTRAINT fk_team8_resapproval_reservation FOREIGN KEY (reservation_id) REFERENCES team8_reservations(id),
     CONSTRAINT fk_team8_resapproval_approver FOREIGN KEY (approver_id) REFERENCES users(id)
@@ -138,27 +176,28 @@ CREATE TABLE team8_reservation_approvals (
 
 -- =========================================================
 -- MODULE: VISITOR MANAGEMENT
+-- QA FIX (C1): replaces the old two-table (team8_visitors directory +
+-- team8_visits log) design, which no PHP file ever queried, with the
+-- single-table shape modules/visitor/index.php and
+-- modules/dashboard/index.php actually use.
 -- =========================================================
 
 CREATE TABLE team8_visitors (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    full_name   VARCHAR(150) NOT NULL,
-    contact     VARCHAR(150) NULL,
-    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-
-CREATE TABLE team8_visits (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    visitor_id  INT NOT NULL,
-    host_id     INT NOT NULL,
-    status      VARCHAR(30) NOT NULL DEFAULT 'expected', -- expected | checked_in | checked_out | denied
-    check_in    DATETIME NULL,
-    check_out   DATETIME NULL,
-    purpose     VARCHAR(255) NULL,
-    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_team8_visits_visitor FOREIGN KEY (visitor_id) REFERENCES team8_visitors(id),
-    CONSTRAINT fk_team8_visits_host FOREIGN KEY (host_id) REFERENCES users(id)
+    id                      INT AUTO_INCREMENT PRIMARY KEY,
+    full_name               VARCHAR(150) NOT NULL,
+    visitor_type            VARCHAR(100) NULL,
+    contact                 VARCHAR(30) NULL,
+    company                 VARCHAR(150) NULL,
+    person_to_visit         VARCHAR(150) NOT NULL,
+    purpose                 VARCHAR(255) NOT NULL,
+    scheduled_date          DATETIME NOT NULL,
+    status                  VARCHAR(30) NOT NULL DEFAULT 'scheduled', -- scheduled | checked_in | checked_out | cancelled
+    check_in_time           DATETIME NULL,
+    check_out_time          DATETIME NULL,
+    logged_by               INT NOT NULL,
+    created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_team8_visitors_logger FOREIGN KEY (logged_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 
@@ -194,7 +233,11 @@ CREATE TABLE team8_document_versions (
     file_size   BIGINT NOT NULL DEFAULT 0,
     checksum    VARCHAR(128) NULL,
     uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_team8_docversions_document FOREIGN KEY (document_id) REFERENCES team8_documents(id)
+    CONSTRAINT fk_team8_docversions_document FOREIGN KEY (document_id) REFERENCES team8_documents(id),
+    -- QA FIX (M2): closes a race condition where two concurrent
+    -- "upload new version" requests could both compute and insert the
+    -- same version_no.
+    CONSTRAINT uq_team8_docversions_doc_version UNIQUE (document_id, version_no)
 ) ENGINE=InnoDB;
 
 
@@ -206,7 +249,9 @@ CREATE TABLE team8_retention_schedules (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     record_type     VARCHAR(150) NOT NULL,
     retention_years INT NOT NULL,
-    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- QA FIX (L4): prevents duplicate schedules for the same record type.
+    CONSTRAINT uq_team8_retention_record_type UNIQUE (record_type)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_records (
@@ -224,7 +269,6 @@ CREATE TABLE team8_records (
     CONSTRAINT fk_team8_records_custodian FOREIGN KEY (custodian_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
--- NEW TABLE (patch): periodic compliance audits, distinct from retention scheduling
 CREATE TABLE team8_compliance_checks (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     record_id   INT NOT NULL,
@@ -336,8 +380,10 @@ ALTER TABLE team8_legal_cases
 
 CREATE INDEX idx_team8_reservations_status ON team8_reservations(status);
 CREATE INDEX idx_team8_reservations_dates ON team8_reservations(start_time, end_time);
+CREATE INDEX idx_team8_reservations_deleted_at ON team8_reservations(deleted_at);
 CREATE INDEX idx_team8_facilities_status ON team8_facilities(status);
-CREATE INDEX idx_team8_visits_status ON team8_visits(status);
+CREATE INDEX idx_team8_visitors_status ON team8_visitors(status);
+CREATE INDEX idx_team8_visitors_scheduled ON team8_visitors(scheduled_date);
 CREATE INDEX idx_team8_documents_title ON team8_documents(title);
 CREATE INDEX idx_team8_records_status ON team8_records(status);
 CREATE INDEX idx_team8_records_disposition ON team8_records(disposition_date);
