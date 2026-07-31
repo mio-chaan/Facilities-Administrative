@@ -123,6 +123,12 @@
 .t8-table tbody tr { transition: background 0.15s ease; }
 .t8-table tbody tr:hover { background: var(--t8-secondary); }
 .t8-table tbody tr:last-child td { border-bottom: none; }
+.t8-table-empty-row {
+    text-align: center;
+    padding: 28px 16px;
+    color: var(--t8-text-muted);
+    background: var(--t8-fog-100);
+}
 .t8-table-ref { font-family: var(--t8-font-data); color: var(--t8-text-muted); }
 
 /* ---- Badges / status pills ---- */

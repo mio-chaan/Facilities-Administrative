@@ -575,27 +575,32 @@ if (!$showForm) {
                     <span class="t8-notification-count"><?= e((string) count($pendingReservations)) ?> pending</span>
                 <?php endif; ?>
             </div>
-            <?php if ($pendingReservations === []): ?>
-                <div class="t8-empty">No reservations are waiting for approval.</div>
-            <?php else: ?>
-                <div class="t8-table-wrap">
-                    <table class="t8-table">
-                        <thead>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead>
+                        <tr>
+                            <th>Facility</th>
+                            <th>Department</th>
+                            <th>Key Person</th>
+                            <th>Category</th>
+                            <th>Requested By</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Participants</th>
+                            <th>Notes</th>
+                            <th>Conflict</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($pendingReservations === []): ?>
                             <tr>
-                                <th>Facility</th>
-                                <th>Department</th>
-                                <th>Key Person</th>
-                                <th>Category</th>
-                                <th>Requested By</th>
-                                <th>Start</th>
-                                <th>End</th>
-                                <th>Participants</th>
-                                <th>Notes</th>
-                                <th>Conflict</th>
-                                <th>Actions</th>
+                                <td colspan="11" class="t8-table-empty-row">
+                                    No reservation requests are waiting for approval yet.
+                                    Once a request is submitted, it will appear here.
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody>
+                        <?php else: ?>
                             <?php foreach ($pendingReservations as $p): ?>
                                 <tr <?= $p['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($p['facility_name']) ?></td>
@@ -636,38 +641,43 @@ if (!$showForm) {
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endif; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
             </div>
-            <?php if ($allReservations === []): ?>
-                <div class="t8-empty">No reservations have been made yet.</div>
-            <?php else: ?>
-                <div class="t8-table-wrap">
-                    <table class="t8-table">
-                        <thead>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead>
+                        <tr>
+                            <th>Facility</th>
+                            <th>Department</th>
+                            <th>Key Person</th>
+                            <th>Category</th>
+                            <th>Requested By</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Participants</th>
+                            <th>Notes</th>
+                            <th>Status</th>
+                            <th>Conflict</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($allReservations === []): ?>
                             <tr>
-                                <th>Facility</th>
-                                <th>Department</th>
-                                <th>Key Person</th>
-                                <th>Category</th>
-                                <th>Requested By</th>
-                                <th>Start</th>
-                                <th>End</th>
-                                <th>Participants</th>
-                                <th>Notes</th>
-                                <th>Status</th>
-                                <th>Conflict</th>
-                                <th>Actions</th>
+                                <td colspan="12" class="t8-table-empty-row">
+                                    No reservations have been made yet.
+                                    Once a reservation is submitted, it will appear here.
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody>
+                        <?php else: ?>
                             <?php foreach ($allReservations as $r): ?>
                                 <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
@@ -706,10 +716,10 @@ if (!$showForm) {
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endif; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
     <?php else: ?>
@@ -718,27 +728,32 @@ if (!$showForm) {
             <div class="t8-card-header">
                 <h2 class="t8-card-title">My Reservations</h2>
             </div>
-            <?php if ($myReservations === []): ?>
-                <div class="t8-empty">You haven't made any reservations yet.</div>
-            <?php else: ?>
-                <div class="t8-table-wrap">
-                    <table class="t8-table">
-                        <thead>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead>
+                        <tr>
+                            <th>Facility</th>
+                            <th>Department</th>
+                            <th>Key Person</th>
+                            <th>Category</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Participants</th>
+                            <th>Notes</th>
+                            <th>Status</th>
+                            <th>Conflict</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($myReservations === []): ?>
                             <tr>
-                                <th>Facility</th>
-                                <th>Department</th>
-                                <th>Key Person</th>
-                                <th>Category</th>
-                                <th>Start</th>
-                                <th>End</th>
-                                <th>Participants</th>
-                                <th>Notes</th>
-                                <th>Status</th>
-                                <th>Conflict</th>
-                                <th>Actions</th>
+                                <td colspan="11" class="t8-table-empty-row">
+                                    You haven't made any reservations yet.
+                                    Create one to see it listed here.
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody>
+                        <?php else: ?>
                             <?php foreach ($myReservations as $r): ?>
                                 <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
@@ -788,37 +803,42 @@ if (!$showForm) {
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endif; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
             </div>
-            <?php if ($allReservations === []): ?>
-                <div class="t8-empty">No reservations have been made yet.</div>
-            <?php else: ?>
-                <div class="t8-table-wrap">
-                    <table class="t8-table">
-                        <thead>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead>
+                        <tr>
+                            <th>Facility</th>
+                            <th>Department</th>
+                            <th>Key Person</th>
+                            <th>Category</th>
+                            <th>Requested By</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Participants</th>
+                            <th>Notes</th>
+                            <th>Status</th>
+                            <th>Conflict</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($allReservations === []): ?>
                             <tr>
-                                <th>Facility</th>
-                                <th>Department</th>
-                                <th>Key Person</th>
-                                <th>Category</th>
-                                <th>Requested By</th>
-                                <th>Start</th>
-                                <th>End</th>
-                                <th>Participants</th>
-                                <th>Notes</th>
-                                <th>Status</th>
-                                <th>Conflict</th>
+                                <td colspan="11" class="t8-table-empty-row">
+                                    No reservations have been made yet.
+                                    Once a reservation is submitted, it will appear here.
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody>
+                        <?php else: ?>
                             <?php foreach ($allReservations as $r): ?>
                                 <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
@@ -843,10 +863,10 @@ if (!$showForm) {
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endif; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
     <?php endif; ?>
