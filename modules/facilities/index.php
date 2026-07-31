@@ -39,17 +39,44 @@ $currentUserId = t8_current_user_id();
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
-// Dropdown options for Facility Type. Add new types here as the
-// business grows - no other code needs to change.
-const T8_FACILITY_TYPES = [
-    'Function Hall',
-    'Conference Room',
-    'Meeting Room',
-    'Training Room',
-    'Sports Facility',
-    'Parking Area',
-    'Outdoor Area',
-    'Other',
+// Dropdown options for Facility Type and supported Location values.
+// Add new types or locations here in one place so both server and client logic stay in sync.
+const T8_FACILITY_LOCATION_OPTIONS = [
+    'Room' => [
+        'Ground Floor',
+        'Second Floor',
+        'Main Building',
+        'Annex Building',
+    ],
+    'Area' => [
+        'Dining Area',
+        'Parking Area',
+        'Receiving Area',
+        'Outdoor Area',
+    ],
+    'Equipment' => [
+        'Kitchen',
+        'Dining Area',
+        'Storage Room',
+        'Office',
+    ],
+    'Asset' => [
+        'Kitchen',
+        'Dining Area',
+        'Storage Room',
+        'Office',
+    ],
+    'Vehicle' => [
+        'Parking Area',
+        'Garage',
+        'Off-site',
+    ],
+    'Utility' => [
+        'Kitchen',
+        'Electrical Room',
+        'Server Room',
+        'Roof Deck',
+    ],
 ];
 
 /** Fetch a single facility row or null. */
@@ -75,8 +102,11 @@ function t8_facility_validate(string $name, string $location, string $facilityTy
     } elseif (mb_strlen($location) > 200) {
         $errors[] = 'Location must be 200 characters or fewer.';
     }
-    if (!in_array($facilityType, T8_FACILITY_TYPES, true)) {
+    if (!array_key_exists($facilityType, T8_FACILITY_LOCATION_OPTIONS)) {
         $errors[] = 'Please select a valid facility type.';
+    }
+    if ($facilityType !== '' && !in_array($location, T8_FACILITY_LOCATION_OPTIONS[$facilityType] ?? [], true)) {
+        $errors[] = 'Please select a valid location for the chosen facility type.';
     }
     if ($capacity < 1) {
         $errors[] = 'Capacity must be at least 1.';
@@ -202,6 +232,9 @@ if (!$showForm) {
 ?>
 <h1>Facility Management</h1>
 <p class="t8-help-text">Add, edit, archive, and reactivate the facilities available for reservation.</p>
+<script>
+    window.t8FacilityLocationMap = <?= json_encode(T8_FACILITY_LOCATION_OPTIONS, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+</script>
 
 <?php if ($showForm): ?>
 
@@ -227,17 +260,25 @@ if (!$showForm) {
                 <label class="t8-label" for="facility_type">Facility Type</label>
                 <select class="t8-select" id="facility_type" name="facility_type" required>
                     <option value="">Select a type…</option>
-                    <?php foreach (T8_FACILITY_TYPES as $type): ?>
+                    <?php foreach (array_keys(T8_FACILITY_LOCATION_OPTIONS) as $type): ?>
                         <option value="<?= e($type) ?>" <?= $type === $facility['facility_type'] ? 'selected' : '' ?>><?= e($type) ?></option>
                     <?php endforeach; ?>
                 </select>
-                <span class="t8-help-text">Add new types anytime by editing T8_FACILITY_TYPES in the code — no database change needed.</span>
+                <span class="t8-help-text">Add new types anytime by editing the facility location map in the code — no database change needed.</span>
             </div>
 
             <div class="t8-field">
                 <label class="t8-label" for="location">Location</label>
-                <input class="t8-input" type="text" id="location" name="location" maxlength="200"
-                       value="<?= e((string) $facility['location']) ?>" required>
+                <select class="t8-select" id="location" name="location" required <?= $facility['facility_type'] === '' ? 'disabled' : '' ?>>
+                    <?php if ($facility['facility_type'] === ''): ?>
+                        <option value="" selected disabled>Select a facility type first</option>
+                    <?php else: ?>
+                        <option value="" selected disabled>Select a location</option>
+                        <?php foreach (T8_FACILITY_LOCATION_OPTIONS[$facility['facility_type']] ?? [] as $locationOption): ?>
+                            <option value="<?= e($locationOption) ?>" <?= $locationOption === $facility['location'] ? 'selected' : '' ?>><?= e($locationOption) ?></option>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </select>
             </div>
 
             <div class="t8-field">

@@ -108,18 +108,52 @@ function t8_document_store_upload(array $file, string $title, int $versionNo): a
 }
 
 $categories = $pdo->query('SELECT id, name FROM team8_document_categories ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+$categoryTypeTemplates = [
+    'Administrative'   => ['Meeting Minutes', 'Forms', 'General Correspondence'],
+    'Contracts'        => ['Supplier Contract', 'Lease Agreement', 'Service Agreement'],
+    'Finance'          => ['Invoice', 'Purchase Order', 'Financial Report'],
+    'Inventory'        => ['Stock Record', 'Asset Register', 'Inventory Adjustment'],
+    'Compliance'       => [
+        'Business Permit',
+        'BIR Certificate of Registration',
+        'Mayor\'s Permit',
+        'Sanitary Permit',
+        'Fire Safety Inspection Certificate',
+        'Barangay Clearance',
+        'DTI/SEC Registration',
+        'Occupational Permit',
+    ],
+    'Facilities'       => ['Maintenance Request', 'Equipment Inspection', 'Floor Plan'],
+    'Human Resources'  => ['Employment Contract', 'Performance Review', 'Training Record'],
+    'Others'           => ['General Document', 'Reference Material', 'Ad Hoc Record'],
+];
+$documentTypeOptions = [];
+foreach ($categories as $category) {
+    if (isset($categoryTypeTemplates[$category['name']])) {
+        $documentTypeOptions[(string) $category['id']] = $categoryTypeTemplates[$category['name']];
+    }
+}
 
 switch ($action) {
     case 'create':
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $title = trim((string) ($_POST['title'] ?? ''));
             $categoryId = (string) ($_POST['category_id'] ?? '') !== '' ? (int) $_POST['category_id'] : null;
+            $documentType = trim((string) ($_POST['document_type'] ?? ''));
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
                 if ($title === '') {
                     $errors[] = 'Document title is required.';
+                }
+                if ($categoryId === null) {
+                    $errors[] = 'Please choose a document category.';
+                }
+                if ($documentType === '') {
+                    $errors[] = 'Please choose a document type.';
+                } elseif (!isset($documentTypeOptions[(string) $categoryId]) || !in_array($documentType, $documentTypeOptions[(string) $categoryId], true)) {
+                    $errors[] = 'The selected document type does not match the chosen category.';
                 }
                 $uploadError = t8_document_validate_upload($_FILES['file'] ?? []);
                 if ($uploadError !== '') {
@@ -132,14 +166,15 @@ switch ($action) {
                     $pdo->beginTransaction();
                     try {
                         $stmt = $pdo->prepare(
-                            'INSERT INTO team8_documents (category_id, uploaded_by, title, file_path, current_version)
-                             VALUES (:category_id, :uploaded_by, :title, :file_path, 1)'
+                            'INSERT INTO team8_documents (category_id, document_type, uploaded_by, title, file_path, current_version)
+                             VALUES (:category_id, :document_type, :uploaded_by, :title, :file_path, 1)'
                         );
                         $stmt->execute([
-                            'category_id' => $categoryId,
-                            'uploaded_by' => $currentUserId,
-                            'title'       => $title,
-                            'file_path'   => $stored['file_path'],
+                            'category_id'   => $categoryId,
+                            'document_type' => $documentType !== '' ? $documentType : null,
+                            'uploaded_by'   => $currentUserId,
+                            'title'         => $title,
+                            'file_path'     => $stored['file_path'],
                         ]);
                         $documentId = (int) $pdo->lastInsertId();
 
@@ -522,11 +557,18 @@ function t8_render_camera_capture(): void
 
             <div class="t8-field">
                 <label class="t8-label" for="category_id">Category</label>
-                <select class="t8-select" id="category_id" name="category_id">
-                    <option value="">Uncategorized</option>
+                <select class="t8-select" id="category_id" name="category_id" required>
+                    <option value="" disabled selected>Choose a category</option>
                     <?php foreach ($categories as $cat): ?>
-                        <option value="<?= e((string) $cat['id']) ?>"><?= e($cat['name']) ?></option>
+                        <option value="<?= e((string) $cat['id']) ?>" <?= isset($_POST['category_id']) && (string) $_POST['category_id'] === (string) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option>
                     <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div class="t8-field">
+                <label class="t8-label" for="document_type">Document Type</label>
+                <select class="t8-select" id="document_type" name="document_type" required disabled>
+                    <option value="" disabled selected>Choose a document type</option>
                 </select>
             </div>
 
@@ -545,6 +587,44 @@ function t8_render_camera_capture(): void
             <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">Cancel</a>
         </form>
     </div>
+
+    <script>
+    (function () {
+        var categorySelect = document.getElementById('category_id');
+        var typeSelect = document.getElementById('document_type');
+        var documentTypeOptions = <?= json_encode($documentTypeOptions, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+        var selectedType = <?= json_encode((string) ($_POST['document_type'] ?? '')) ?>;
+
+        function updateTypeOptions() {
+            var selectedCategory = categorySelect.value;
+            typeSelect.innerHTML = '<option value="" disabled>Choose a document type</option>';
+            typeSelect.disabled = true;
+            if (!selectedCategory || !documentTypeOptions[selectedCategory]) {
+                return;
+            }
+            documentTypeOptions[selectedCategory].forEach(function (type) {
+                var option = document.createElement('option');
+                option.value = type;
+                option.textContent = type;
+                if (type === selectedType) {
+                    option.selected = true;
+                }
+                typeSelect.appendChild(option);
+            });
+            typeSelect.disabled = false;
+            if (!selectedType) {
+                typeSelect.selectedIndex = 0;
+            }
+        }
+
+        categorySelect.addEventListener('change', function () {
+            selectedType = '';
+            updateTypeOptions();
+        });
+
+        updateTypeOptions();
+    })();
+    </script>
 
 <?php elseif ($showUploadVersionForm): ?>
 
@@ -668,6 +748,7 @@ function t8_render_camera_capture(): void
                         <tr>
                             <th>Title</th>
                             <th>Category</th>
+                            <th>Document Type</th>
                             <th>Current Version</th>
                             <th>Last Updated</th>
                             <th>Uploaded By</th>
@@ -679,6 +760,7 @@ function t8_render_camera_capture(): void
                             <tr>
                                 <td><?= e($doc['title']) ?></td>
                                 <td><?= e($doc['category_name'] ?? '—') ?></td>
+                                <td><?= e($doc['document_type'] ?? '—') ?></td>
                                 <td>v<?= e((string) $doc['current_version']) ?></td>
                                 <td><?= e(format_date($doc['updated_at'], 'M d, Y g:i A')) ?></td>
                                 <td><?= e($doc['uploaded_by_name']) ?></td>

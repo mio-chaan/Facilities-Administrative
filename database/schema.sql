@@ -2,28 +2,7 @@
 -- TEAM 8 — FACILITIES & ADMINISTRATIVE MANAGEMENT
 -- Subsystem schema (integrates into shared capstone database)
 --
--- QA FIX PASS (2026-07-29): this file previously diverged from what
--- the PHP modules actually query. See database/migrations/
--- 2026_07_29_qa_fixes.sql for the equivalent ALTERs to apply to an
--- EXISTING database instead of re-importing this file from scratch.
--- Summary of what changed here vs. the prior version:
---   - team8_reservations gained: department, key_person,
---     expected_participants, event_category, description (all used
---     by modules/reservation/index.php but never previously defined
---     anywhere), plus the delete-request workflow columns
---     (previous_status, delete_reason, delete_requested_by,
---     delete_requested_at, rejection_reason).
---   - team8_facilities gained: facility_type (used throughout
---     modules/facilities/index.php and modules/reservation/index.php,
---     never previously defined).
---   - team8_visitors / team8_visits were replaced with a single
---     team8_visitors table matching what modules/visitor/index.php
---     and modules/dashboard/index.php actually query. The old
---     two-table (visitor directory + visit log) design was never
---     used by any PHP file and has been removed.
---   - team8_document_versions gained a UNIQUE(document_id, version_no)
---     constraint to close a version-numbering race condition.
--- =========================================================
+
 
 SET FOREIGN_KEY_CHECKS = 0;
 
@@ -127,14 +106,19 @@ CREATE TABLE team8_reservations (
     id                      INT AUTO_INCREMENT PRIMARY KEY,
     facility_id             INT NOT NULL,
     user_id                 INT NOT NULL,
-    start_time              DATETIME NOT NULL,
-    end_time                DATETIME NOT NULL,
+    start_time              DATETIME NULL,
+    end_time                DATETIME NULL,
     status                  VARCHAR(30) NOT NULL DEFAULT 'pending',
     department              VARCHAR(150) NULL,
     key_person              VARCHAR(150) NULL,
     expected_participants   INT NULL,
+    quantity                INT NULL,
     event_category          VARCHAR(100) NULL,
     description             VARCHAR(500) NULL,
+    expected_return_date    DATE NULL,
+    remarks                 VARCHAR(500) NULL,
+    schedule                DATETIME NULL,
+    requirements            VARCHAR(500) NULL,
     -- Delete-request workflow (QA FIX: previously added by a migration
     -- but never actually used by any code path; now implemented — see
     -- modules/reservation/index.php request_delete/approve_delete/reject_delete).
@@ -176,10 +160,6 @@ CREATE TABLE team8_reservation_approvals (
 
 -- =========================================================
 -- MODULE: VISITOR MANAGEMENT
--- QA FIX (C1): replaces the old two-table (team8_visitors directory +
--- team8_visits log) design, which no PHP file ever queried, with the
--- single-table shape modules/visitor/index.php and
--- modules/dashboard/index.php actually use.
 -- =========================================================
 
 CREATE TABLE team8_visitors (
@@ -214,6 +194,7 @@ CREATE TABLE team8_document_categories (
 CREATE TABLE team8_documents (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     category_id     INT NULL,
+    document_type   VARCHAR(150) NULL,
     uploaded_by     INT NOT NULL,
     title           VARCHAR(200) NOT NULL,
     file_path       VARCHAR(500) NOT NULL, -- path of CURRENT version

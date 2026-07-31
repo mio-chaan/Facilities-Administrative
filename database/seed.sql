@@ -37,9 +37,14 @@ ON DUPLICATE KEY UPDATE role_id = VALUES(role_id);
 
 
 INSERT INTO team8_document_categories (id, name) VALUES
-    (1, 'Policies'),
+    (1, 'Administrative'),
     (2, 'Contracts'),
-    (3, 'Legal Filings')
+    (3, 'Compliance'),
+    (4, 'Finance'),
+    (5, 'Inventory'),
+    (6, 'Facilities'),
+    (7, 'Human Resources'),
+    (8, 'Others')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO team8_retention_schedules (id, record_type, retention_years) VALUES

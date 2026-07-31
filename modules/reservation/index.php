@@ -7,18 +7,6 @@ $isAdmin = t8_has_role('admin');
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
-// Dropdown options for Event Category. Edit this list to match your
-// organization's actual event types - no other code needs to change.
-const T8_EVENT_CATEGORIES = [
-    'Meeting',
-    'Training / Seminar',
-    'Client / Guest Event',
-    'Celebration / Social Event',
-    'Community / Barangay Event',
-    'Equipment Demonstration',
-    'Other',
-];
-
 // Dropdown options for Department. Edit or extend these values as needed.
 const T8_DEPARTMENTS = [
     'Administration',
@@ -34,11 +22,68 @@ const T8_DEPARTMENTS = [
     'Customer Service',
 ];
 
+// Single source of truth for facility-type-driven reservation fields.
+const T8_FACILITY_RESERVATION_CONFIG = [
+    'Room' => [
+        'event_categories' => [
+            'Meeting',
+            'Training / Seminar',
+            'Client / Guest Event',
+            'Celebration / Social Event',
+            'Orientation',
+        ],
+        'visible_fields' => ['participants', 'time_range'],
+        'required_fields' => ['participants', 'time_range'],
+    ],
+    'Equipment' => [
+        'event_categories' => [
+            'Equipment Borrowing',
+            'Maintenance',
+            'Repair',
+            'Inspection',
+            'Demonstration',
+        ],
+        'visible_fields' => ['quantity', 'return_date'],
+        'required_fields' => ['quantity', 'return_date'],
+    ],
+    'Asset' => [
+        'event_categories' => [
+            'Asset Borrowing',
+            'Event Setup',
+            'Inventory Check',
+            'Maintenance',
+        ],
+        'visible_fields' => ['quantity', 'return_date'],
+        'required_fields' => ['quantity', 'return_date'],
+    ],
+    'Area' => [
+        'event_categories' => [
+            'Event',
+            'Maintenance',
+            'Inspection',
+            'Cleaning',
+            'Setup',
+        ],
+        'visible_fields' => ['participants', 'time_range'],
+        'required_fields' => ['time_range'],
+    ],
+    'Utility' => [
+        'event_categories' => [
+            'Maintenance',
+            'Repair',
+            'Inspection',
+            'Installation',
+        ],
+        'visible_fields' => ['remarks', 'schedule', 'requirements'],
+        'required_fields' => ['remarks', 'schedule', 'requirements'],
+    ],
+];
+
 /** Fetch a single reservation with its facility/requester names, or null. */
 function t8_reservation_fetch(PDO $pdo, int $id): ?array
 {
     $stmt = $pdo->prepare(
-        'SELECT r.*, f.name AS facility_name, f.location AS facility_location, u.full_name AS requester_name
+        'SELECT r.*, f.name AS facility_name, f.location AS facility_location, f.facility_type, u.full_name AS requester_name
          FROM team8_reservations r
          JOIN team8_facilities f ON f.id = r.facility_id
          JOIN users u ON u.id = r.user_id
@@ -100,13 +145,89 @@ function t8_normalize_datetime(string $value): string
     return $value;
 }
 
+/** Return the config for a facility type, or an empty config if it is unknown. */
+function t8_reservation_get_facility_type_config(string $facilityType): array
+{
+    return T8_FACILITY_RESERVATION_CONFIG[$facilityType] ?? [
+        'event_categories' => [],
+        'visible_fields' => [],
+        'required_fields' => [],
+    ];
+}
+
+/** Resolve a facility type from the selected facility id. */
+function t8_reservation_detect_facility_type(array $activeFacilities, string $facilityId): string
+{
+    foreach ($activeFacilities as $facility) {
+        if ((string) $facility['id'] === $facilityId) {
+            return (string) ($facility['facility_type'] ?? '');
+        }
+    }
+    return '';
+}
+
+/** Extract a return date stored alongside notes for equipment/asset reservations. */
+function t8_reservation_extract_return_date(string $description): string
+{
+    if (preg_match('/Return Date:\s*(\d{4}-\d{2}-\d{2})/i', $description, $matches)) {
+        return $matches[1];
+    }
+    return '';
+}
+
+/** Extract notes from the description field, if any. */
+function t8_reservation_extract_notes(string $description): string
+{
+    $description = trim($description);
+    if (preg_match('/^Remarks:\s*(.+)$/i', $description, $matches)) {
+        return '';
+    }
+    if (preg_match('/\bNotes:\s*(.+)$/i', $description, $matches)) {
+        return trim($matches[1]);
+    }
+    return trim(preg_replace('/\s*Return Date:\s*\d{4}-\d{2}-\d{2}\s*/i', '', $description));
+}
+
+/** Extract remarks from the description field, if any. */
+function t8_reservation_extract_remarks(string $description): string
+{
+    $description = trim($description);
+    if (preg_match('/^Remarks:\s*(.+)$/i', $description, $matches)) {
+        return trim($matches[1]);
+    }
+    if (preg_match('/\bRemarks:\s*(.+)$/i', $description, $matches)) {
+        return trim($matches[1]);
+    }
+    return '';
+}
+
+/** Normalize posted reservation values shared by create and edit. */
+function t8_reservation_form_values(array $source): array
+{
+    return [
+        'facility_id' => (string) ($source['facility_id'] ?? ''),
+        'start_time' => t8_normalize_datetime((string) ($source['start_time'] ?? '')),
+        'end_time' => t8_normalize_datetime((string) ($source['end_time'] ?? '')),
+        'department' => trim((string) ($source['department'] ?? '')),
+        'key_person' => trim((string) ($source['key_person'] ?? '')),
+        'expected_participants' => trim((string) ($source['expected_participants'] ?? '')),
+        'quantity' => trim((string) ($source['quantity'] ?? '')),
+        'event_category' => trim((string) ($source['event_category'] ?? '')),
+        'description' => trim((string) ($source['description'] ?? '')),
+        'return_date' => trim((string) ($source['return_date'] ?? '')),
+        'remarks' => trim((string) ($source['remarks'] ?? '')),
+        'schedule' => t8_normalize_datetime((string) ($source['schedule'] ?? '')),
+        'requirements' => trim((string) ($source['requirements'] ?? '')),
+    ];
+}
+
 /** Shared create/edit field validation. Returns an errors array. */
-function t8_reservation_validate(array $activeFacilities, int $facilityId, string $start, string $end, string $department, string $keyPerson, string $expectedParticipants, string $eventCategory): array
+function t8_reservation_validate(array $activeFacilities, array $values, string $facilityType): array
 {
     $errors = [];
     $validFacility = false;
     foreach ($activeFacilities as $f) {
-        if ((int) $f['id'] === $facilityId) {
+        if ((int) $f['id'] === (int) $values['facility_id']) {
             $validFacility = true;
             break;
         }
@@ -114,35 +235,83 @@ function t8_reservation_validate(array $activeFacilities, int $facilityId, strin
     if (!$validFacility) {
         $errors[] = 'Please select a valid, active facility.';
     }
-    if ($start === '' || $end === '') {
-        $errors[] = 'Start and end time are both required.';
-    } elseif (strtotime($start) === false || strtotime($end) === false) {
-        $errors[] = 'Start and end time must be valid dates/times.';
-    } elseif (strtotime($start) >= strtotime($end)) {
-        $errors[] = 'End time must be after start time.';
+
+    $config = t8_reservation_get_facility_type_config($facilityType);
+    $requiredFields = $config['required_fields'] ?? [];
+    if ($facilityType === '' || $config['event_categories'] === []) {
+        $errors[] = 'The selected facility does not have a supported reservation type.';
     }
-    if ($department === '') {
-        $errors[] = 'Department is required.';
+
+    if (in_array('time_range', $requiredFields, true)) {
+        if ($values['start_time'] === '' || $values['end_time'] === '') {
+            $errors[] = 'Start and end time are both required.';
+        } elseif (strtotime($values['start_time']) === false || strtotime($values['end_time']) === false) {
+            $errors[] = 'Start and end time must be valid dates/times.';
+        } elseif (strtotime($values['start_time']) >= strtotime($values['end_time'])) {
+            $errors[] = 'End time must be after start time.';
+        }
     }
-    if ($keyPerson === '') {
-        $errors[] = 'Key person / point of contact is required.';
-    }
-    if ($expectedParticipants !== '') {
-        if (!ctype_digit($expectedParticipants) || (int) $expectedParticipants < 1) {
-            $errors[] = 'Expected participants must be a positive whole number.';
+
+    foreach (['participants' => 'expected_participants', 'quantity' => 'quantity'] as $field => $valueKey) {
+        if (!in_array($field, $requiredFields, true) && $values[$valueKey] === '') {
+            continue;
+        }
+        if ($values[$valueKey] === '') {
+            $errors[] = in_array('quantity', $requiredFields, true)
+                ? 'Quantity is required for this reservation type.'
+                : 'Participants are required for this reservation type.';
+        } elseif (!ctype_digit($values[$valueKey]) || (int) $values[$valueKey] < 1) {
+            $errors[] = in_array('quantity', $requiredFields, true)
+                ? 'Quantity must be a positive whole number.'
+                : 'Participants must be a positive whole number.';
         } else {
             foreach ($activeFacilities as $f) {
-                if ((int) $f['id'] === $facilityId) {
-                    if ((int) $expectedParticipants > (int) $f['capacity']) {
-                        $errors[] = 'Expected participants cannot exceed the selected facility capacity (' . e((string) $f['capacity']) . ').';
+                if ((int) $f['id'] === (int) $values['facility_id']) {
+                    if ((int) $values[$valueKey] > (int) $f['capacity']) {
+                        $errors[] = ($field === 'quantity' ? 'The selected quantity' : 'Participants') . ' cannot exceed the selected facility capacity (' . e((string) $f['capacity']) . ').';
                     }
                     break;
                 }
             }
         }
     }
-    if (!in_array($eventCategory, T8_EVENT_CATEGORIES, true)) {
-        $errors[] = 'Please select a valid event category.';
+
+    if (in_array('return_date', $requiredFields, true)) {
+        if ($values['return_date'] === '') {
+            $errors[] = 'Expected return date is required.';
+        } elseif (strtotime($values['return_date']) === false) {
+            $errors[] = 'Expected return date must be a valid date.';
+        }
+    }
+
+    if (in_array('remarks', $requiredFields, true)) {
+        if ($values['remarks'] === '') {
+            $errors[] = 'Remarks are required.';
+        }
+    }
+
+    if (in_array('schedule', $requiredFields, true)) {
+        if ($values['schedule'] === '') {
+            $errors[] = 'Schedule is required.';
+        } elseif (strtotime($values['schedule']) === false) {
+            $errors[] = 'Schedule must be a valid date/time.';
+        }
+    }
+
+    if (in_array('requirements', $requiredFields, true) && $values['requirements'] === '') {
+        $errors[] = 'Requirements are required.';
+    }
+    if ($values['department'] === '') {
+        $errors[] = 'Department is required.';
+    }
+    if ($values['key_person'] === '') {
+        $errors[] = 'Key person / point of contact is required.';
+    }
+    $eventCategories = $config['event_categories'] ?? [];
+    if ($values['event_category'] !== '' && $eventCategories !== [] && !in_array($values['event_category'], $eventCategories, true)) {
+        $errors[] = 'Please select a valid event category for the chosen facility type.';
+    } elseif ($values['event_category'] === '' && $eventCategories !== []) {
+        $errors[] = 'Please select an event category.';
     }
     return $errors;
 }
@@ -159,23 +328,19 @@ $formValues = [
     'department'            => '',
     'key_person'            => '',
     'expected_participants' => '',
+    'quantity'              => '',
     'event_category'        => '',
     'description'           => '',
+    'return_date'           => '',
+    'remarks'               => '',
+    'schedule'              => '',
+    'requirements'          => '',
 ];
 
 switch ($action) {
     case 'create':
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $formValues = [
-                'facility_id'           => (string) ($_POST['facility_id'] ?? ''),
-                'start_time'            => t8_normalize_datetime((string) ($_POST['start_time'] ?? '')),
-                'end_time'              => t8_normalize_datetime((string) ($_POST['end_time'] ?? '')),
-                'department'            => trim((string) ($_POST['department'] ?? '')),
-                'key_person'            => trim((string) ($_POST['key_person'] ?? '')),
-                'expected_participants' => trim((string) ($_POST['expected_participants'] ?? '')),
-                'event_category'        => (string) ($_POST['event_category'] ?? ''),
-                'description'           => trim((string) ($_POST['description'] ?? '')),
-            ];
+            $formValues = t8_reservation_form_values($_POST);
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
@@ -183,34 +348,42 @@ switch ($action) {
                 $errors[] = 'No active facilities are available to reserve right now.';
             } else {
                 $facilityId = (int) $formValues['facility_id'];
-                $errors = t8_reservation_validate(
-                    $activeFacilities, $facilityId, $formValues['start_time'], $formValues['end_time'],
-                    $formValues['department'], $formValues['key_person'], $formValues['expected_participants'], $formValues['event_category']
-                );
-                $participants = $formValues['expected_participants'] !== '' ? (int) $formValues['expected_participants'] : null;
-                if ($participants !== null && $participants < 1) {
-                    $errors[] = 'Expected participants must be at least 1.';
+                $facilityType = t8_reservation_detect_facility_type($activeFacilities, $formValues['facility_id']);
+                $config = t8_reservation_get_facility_type_config($facilityType);
+                $visibleFields = $config['visible_fields'];
+                foreach (['expected_participants' => 'participants', 'quantity' => 'quantity', 'return_date' => 'return_date', 'remarks' => 'remarks', 'schedule' => 'schedule', 'requirements' => 'requirements', 'start_time' => 'time_range', 'end_time' => 'time_range'] as $key => $field) {
+                    if (!in_array($field, $visibleFields, true)) {
+                        $formValues[$key] = '';
+                    }
                 }
+                $errors = t8_reservation_validate($activeFacilities, $formValues, $facilityType);
+                $participants = $formValues['expected_participants'] !== '' ? (int) $formValues['expected_participants'] : null;
+                $quantity = $formValues['quantity'] !== '' ? (int) $formValues['quantity'] : null;
 
                 if (!$errors) {
                     $status = $isAdmin ? 'approved' : 'pending';
                     $stmt = $pdo->prepare(
                         'INSERT INTO team8_reservations
-                            (facility_id, user_id, start_time, end_time, status, department, key_person, expected_participants, event_category, description)
+                            (facility_id, user_id, start_time, end_time, status, department, key_person, expected_participants, quantity, event_category, description, expected_return_date, remarks, schedule, requirements)
                          VALUES
-                            (:facility_id, :user_id, :start_time, :end_time, :status, :department, :key_person, :expected_participants, :event_category, :description)'
+                            (:facility_id, :user_id, :start_time, :end_time, :status, :department, :key_person, :expected_participants, :quantity, :event_category, :description, :return_date, :remarks, :schedule, :requirements)'
                     );
                     $stmt->execute([
                         'facility_id'           => $facilityId,
                         'user_id'               => $currentUserId,
-                        'start_time'            => $formValues['start_time'],
-                        'end_time'              => $formValues['end_time'],
+                        'start_time'            => $formValues['start_time'] !== '' ? $formValues['start_time'] : null,
+                        'end_time'              => $formValues['end_time'] !== '' ? $formValues['end_time'] : null,
                         'status'                => $status,
                         'department'            => $formValues['department'],
                         'key_person'            => $formValues['key_person'],
                         'expected_participants' => $participants,
+                        'quantity'              => $quantity,
                         'event_category'        => $formValues['event_category'],
                         'description'           => $formValues['description'] !== '' ? $formValues['description'] : null,
+                        'return_date'           => $formValues['return_date'] !== '' ? $formValues['return_date'] : null,
+                        'remarks'               => $formValues['remarks'] !== '' ? $formValues['remarks'] : null,
+                        'schedule'              => $formValues['schedule'] !== '' ? $formValues['schedule'] : null,
+                        'requirements'          => $formValues['requirements'] !== '' ? $formValues['requirements'] : null,
                     ]);
                     $newId = (int) $pdo->lastInsertId();
 
@@ -252,59 +425,64 @@ switch ($action) {
             redirect(page_url('reservation'));
         }
 
-        $formValues = [
+        $formValues = t8_reservation_form_values([
             'facility_id'           => (string) $existing['facility_id'],
             'start_time'            => (string) $existing['start_time'],
             'end_time'              => (string) $existing['end_time'],
             'department'            => (string) ($existing['department'] ?? ''),
             'key_person'            => (string) ($existing['key_person'] ?? ''),
             'expected_participants' => (string) ($existing['expected_participants'] ?? ''),
+            'quantity'              => (string) ($existing['quantity'] ?? ''),
             'event_category'        => (string) ($existing['event_category'] ?? ''),
-            'description'           => (string) ($existing['description'] ?? ''),
-        ];
+            'description'           => t8_reservation_extract_notes((string) ($existing['description'] ?? '')),
+            'return_date'           => (string) ($existing['expected_return_date'] ?? t8_reservation_extract_return_date((string) ($existing['description'] ?? ''))),
+            'remarks'               => (string) ($existing['remarks'] ?? t8_reservation_extract_remarks((string) ($existing['description'] ?? ''))),
+            'schedule'              => (string) ($existing['schedule'] ?? ''),
+            'requirements'          => (string) ($existing['requirements'] ?? ''),
+        ]);
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $formValues = [
-                'facility_id'           => (string) ($_POST['facility_id'] ?? ''),
-                'start_time'            => t8_normalize_datetime((string) ($_POST['start_time'] ?? '')),
-                'end_time'              => t8_normalize_datetime((string) ($_POST['end_time'] ?? '')),
-                'department'            => trim((string) ($_POST['department'] ?? '')),
-                'key_person'            => trim((string) ($_POST['key_person'] ?? '')),
-                'expected_participants' => trim((string) ($_POST['expected_participants'] ?? '')),
-                'event_category'        => (string) ($_POST['event_category'] ?? ''),
-                'description'           => trim((string) ($_POST['description'] ?? '')),
-            ];
+            $formValues = t8_reservation_form_values($_POST);
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
                 $facilityId = (int) $formValues['facility_id'];
-                $errors = t8_reservation_validate(
-                    $activeFacilities, $facilityId, $formValues['start_time'], $formValues['end_time'],
-                    $formValues['department'], $formValues['key_person'], $formValues['expected_participants'], $formValues['event_category']
-                );
-                $participants = $formValues['expected_participants'] !== '' ? (int) $formValues['expected_participants'] : null;
-                if ($participants !== null && $participants < 1) {
-                    $errors[] = 'Expected participants must be at least 1.';
+                $facilityType = t8_reservation_detect_facility_type($activeFacilities, $formValues['facility_id']);
+                $config = t8_reservation_get_facility_type_config($facilityType);
+                $visibleFields = $config['visible_fields'];
+                foreach (['expected_participants' => 'participants', 'quantity' => 'quantity', 'return_date' => 'return_date', 'remarks' => 'remarks', 'schedule' => 'schedule', 'requirements' => 'requirements', 'start_time' => 'time_range', 'end_time' => 'time_range'] as $key => $field) {
+                    if (!in_array($field, $visibleFields, true)) {
+                        $formValues[$key] = '';
+                    }
                 }
+                $errors = t8_reservation_validate($activeFacilities, $formValues, $facilityType);
+                $participants = $formValues['expected_participants'] !== '' ? (int) $formValues['expected_participants'] : null;
+                $quantity = $formValues['quantity'] !== '' ? (int) $formValues['quantity'] : null;
 
                 if (!$errors) {
                     $pdo->prepare(
                         'UPDATE team8_reservations SET
                             facility_id = :facility_id, start_time = :start_time, end_time = :end_time,
                             department = :department, key_person = :key_person,
-                            expected_participants = :expected_participants, event_category = :event_category,
-                            description = :description
+                            expected_participants = :expected_participants, quantity = :quantity, event_category = :event_category,
+                            description = :description, expected_return_date = :return_date, remarks = :remarks,
+                            schedule = :schedule, requirements = :requirements
                          WHERE id = :id'
                     )->execute([
                         'facility_id'           => $facilityId,
-                        'start_time'            => $formValues['start_time'],
-                        'end_time'              => $formValues['end_time'],
+                        'start_time'            => $formValues['start_time'] !== '' ? $formValues['start_time'] : null,
+                        'end_time'              => $formValues['end_time'] !== '' ? $formValues['end_time'] : null,
                         'department'            => $formValues['department'],
                         'key_person'            => $formValues['key_person'],
                         'expected_participants' => $participants,
+                        'quantity'              => $quantity,
                         'event_category'        => $formValues['event_category'],
                         'description'           => $formValues['description'] !== '' ? $formValues['description'] : null,
+                        'return_date'           => $formValues['return_date'] !== '' ? $formValues['return_date'] : null,
+                        'remarks'               => $formValues['remarks'] !== '' ? $formValues['remarks'] : null,
+                        'schedule'              => $formValues['schedule'] !== '' ? $formValues['schedule'] : null,
+                        'requirements'          => $formValues['requirements'] !== '' ? $formValues['requirements'] : null,
                         'id'                    => $id,
                     ]);
                     t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'update');
@@ -409,6 +587,8 @@ switch ($action) {
 }
 
 $showForm = in_array($action, ['create', 'edit'], true);
+$selectedFacilityType = t8_reservation_detect_facility_type($activeFacilities, $formValues['facility_id']);
+$selectedReservationConfig = t8_reservation_get_facility_type_config($selectedFacilityType);
 
 // ---- Data for the list view ----
 if (!$showForm) {
@@ -487,9 +667,9 @@ if (!$showForm) {
                 <?php endif; ?>
             </div>
         <?php else: ?>
-            <form method="post"
+            <form id="t8ReservationForm" method="post"
                   action="<?= e(page_url('reservation', array_filter(['action' => $action, 'id' => $_GET['id'] ?? null]))) ?>"
-                  novalidate>
+                  novalidate data-facility-config="<?= e((string) json_encode(T8_FACILITY_RESERVATION_CONFIG)) ?>">
                 <?= t8_csrf_field() ?>
 
                 <div class="t8-field">
@@ -497,7 +677,7 @@ if (!$showForm) {
                     <select class="t8-select" id="facility_id" name="facility_id" required>
                         <option value="">Select a facility…</option>
                         <?php foreach ($activeFacilities as $f): ?>
-                            <option value="<?= e((string) $f['id']) ?>" <?= (string) $f['id'] === $formValues['facility_id'] ? 'selected' : '' ?>>
+                            <option value="<?= e((string) $f['id']) ?>" data-facility-type="<?= e((string) $f['facility_type']) ?>" <?= (string) $f['id'] === $formValues['facility_id'] ? 'selected' : '' ?>>
 
                              <?= e($f['name']) ?><?= $f['facility_type'] ? ' — ' . e($f['facility_type']) : '' ?> — <?= e($f['location']) ?> (cap. <?= e((string) $f['capacity']) ?>)
                             </option>
@@ -507,9 +687,9 @@ if (!$showForm) {
 
                 <div class="t8-field">
                     <label class="t8-label" for="event_category">Event Category</label>
-                    <select class="t8-select" id="event_category" name="event_category" required>
+                    <select class="t8-select" id="event_category" name="event_category" required <?= $selectedFacilityType === '' ? 'disabled' : '' ?>>
                         <option value="">Select a category…</option>
-                        <?php foreach (T8_EVENT_CATEGORIES as $cat): ?>
+                        <?php foreach ($selectedReservationConfig['event_categories'] as $cat): ?>
                             <option value="<?= e($cat) ?>" <?= $cat === $formValues['event_category'] ? 'selected' : '' ?>><?= e($cat) ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -531,10 +711,16 @@ if (!$showForm) {
                            value="<?= e($formValues['key_person']) ?>" placeholder="Name of the person to coordinate with" required>
                 </div>
 
-                <div class="t8-field">
-                    <label class="t8-label" for="expected_participants">Expected Participants</label>
+                <div class="t8-field" data-reservation-field="participants">
+                    <label class="t8-label" for="expected_participants">Participants</label>
                     <input class="t8-input" type="number" id="expected_participants" name="expected_participants" min="1"
                            value="<?= e($formValues['expected_participants']) ?>" placeholder="Optional headcount">
+                </div>
+
+                <div class="t8-field" data-reservation-field="quantity">
+                    <label class="t8-label" for="quantity">Quantity</label>
+                    <input class="t8-input" type="number" id="quantity" name="quantity" min="1"
+                           value="<?= e($formValues['quantity']) ?>" placeholder="Quantity to reserve">
                 </div>
 
                 <!--
@@ -546,18 +732,39 @@ if (!$showForm) {
                     icon. Browsers without showPicker() silently no-op and
                     fall back to normal native behavior - nothing breaks.
                 -->
-                <div class="t8-field">
+                <div class="t8-field" data-reservation-field="time_range">
                     <label class="t8-label" for="start_time">Start</label>
                     <input class="t8-input t8-datetime-input" type="datetime-local" id="start_time" name="start_time"
                            value="<?= e(str_replace(' ', 'T', substr($formValues['start_time'], 0, 16))) ?>"
-                           onclick="this.showPicker && this.showPicker();" required>
+                           onclick="this.showPicker && this.showPicker();">
                 </div>
 
-                <div class="t8-field">
+                <div class="t8-field" data-reservation-field="time_range">
                     <label class="t8-label" for="end_time">End</label>
                     <input class="t8-input t8-datetime-input" type="datetime-local" id="end_time" name="end_time"
                            value="<?= e(str_replace(' ', 'T', substr($formValues['end_time'], 0, 16))) ?>"
-                           onclick="this.showPicker && this.showPicker();" required>
+                           onclick="this.showPicker && this.showPicker();">
+                </div>
+
+                <div class="t8-field" data-reservation-field="return_date">
+                    <label class="t8-label" for="return_date">Expected Return Date</label>
+                    <input class="t8-input" type="date" id="return_date" name="return_date" value="<?= e($formValues['return_date']) ?>">
+                </div>
+
+                <div class="t8-field" data-reservation-field="remarks">
+                    <label class="t8-label" for="remarks">Remarks</label>
+                    <input class="t8-input" type="text" id="remarks" name="remarks" value="<?= e($formValues['remarks']) ?>">
+                </div>
+
+                <div class="t8-field" data-reservation-field="schedule">
+                    <label class="t8-label" for="schedule">Schedule</label>
+                    <input class="t8-input t8-datetime-input" type="datetime-local" id="schedule" name="schedule"
+                           value="<?= e(str_replace(' ', 'T', substr($formValues['schedule'], 0, 16))) ?>">
+                </div>
+
+                <div class="t8-field" data-reservation-field="requirements">
+                    <label class="t8-label" for="requirements">Requirements</label>
+                    <input class="t8-input" type="text" id="requirements" name="requirements" value="<?= e($formValues['requirements']) ?>">
                 </div>
 
                 <div class="t8-field">
