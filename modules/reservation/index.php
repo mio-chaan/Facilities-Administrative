@@ -19,6 +19,21 @@ const T8_EVENT_CATEGORIES = [
     'Other',
 ];
 
+// Dropdown options for Department. Edit or extend these values as needed.
+const T8_DEPARTMENTS = [
+    'Administration',
+    'Finance',
+    'Human Resources',
+    'Information Technology',
+    'Legal',
+    'Operations',
+    'Procurement',
+    'Facilities',
+    'Security',
+    'Marketing',
+    'Customer Service',
+];
+
 /** Fetch a single reservation with its facility/requester names, or null. */
 function t8_reservation_fetch(PDO $pdo, int $id): ?array
 {
@@ -86,7 +101,7 @@ function t8_normalize_datetime(string $value): string
 }
 
 /** Shared create/edit field validation. Returns an errors array. */
-function t8_reservation_validate(array $activeFacilities, int $facilityId, string $start, string $end, string $department, string $keyPerson, string $eventCategory): array
+function t8_reservation_validate(array $activeFacilities, int $facilityId, string $start, string $end, string $department, string $keyPerson, string $expectedParticipants, string $eventCategory): array
 {
     $errors = [];
     $validFacility = false;
@@ -111,6 +126,20 @@ function t8_reservation_validate(array $activeFacilities, int $facilityId, strin
     }
     if ($keyPerson === '') {
         $errors[] = 'Key person / point of contact is required.';
+    }
+    if ($expectedParticipants !== '') {
+        if (!ctype_digit($expectedParticipants) || (int) $expectedParticipants < 1) {
+            $errors[] = 'Expected participants must be a positive whole number.';
+        } else {
+            foreach ($activeFacilities as $f) {
+                if ((int) $f['id'] === $facilityId) {
+                    if ((int) $expectedParticipants > (int) $f['capacity']) {
+                        $errors[] = 'Expected participants cannot exceed the selected facility capacity (' . e((string) $f['capacity']) . ').';
+                    }
+                    break;
+                }
+            }
+        }
     }
     if (!in_array($eventCategory, T8_EVENT_CATEGORIES, true)) {
         $errors[] = 'Please select a valid event category.';
@@ -156,7 +185,7 @@ switch ($action) {
                 $facilityId = (int) $formValues['facility_id'];
                 $errors = t8_reservation_validate(
                     $activeFacilities, $facilityId, $formValues['start_time'], $formValues['end_time'],
-                    $formValues['department'], $formValues['key_person'], $formValues['event_category']
+                    $formValues['department'], $formValues['key_person'], $formValues['expected_participants'], $formValues['event_category']
                 );
                 $participants = $formValues['expected_participants'] !== '' ? (int) $formValues['expected_participants'] : null;
                 if ($participants !== null && $participants < 1) {
@@ -252,7 +281,7 @@ switch ($action) {
                 $facilityId = (int) $formValues['facility_id'];
                 $errors = t8_reservation_validate(
                     $activeFacilities, $facilityId, $formValues['start_time'], $formValues['end_time'],
-                    $formValues['department'], $formValues['key_person'], $formValues['event_category']
+                    $formValues['department'], $formValues['key_person'], $formValues['expected_participants'], $formValues['event_category']
                 );
                 $participants = $formValues['expected_participants'] !== '' ? (int) $formValues['expected_participants'] : null;
                 if ($participants !== null && $participants < 1) {
@@ -488,8 +517,12 @@ if (!$showForm) {
 
                 <div class="t8-field">
                     <label class="t8-label" for="department">Department</label>
-                    <input class="t8-input" type="text" id="department" name="department"
-                           value="<?= e($formValues['department']) ?>" placeholder="e.g. HR, Finance, IT" required>
+                    <select class="t8-select" id="department" name="department" required>
+                        <option value="">Select a department…</option>
+                        <?php foreach (T8_DEPARTMENTS as $dept): ?>
+                            <option value="<?= e($dept) ?>" <?= $dept === $formValues['department'] ? 'selected' : '' ?>><?= e($dept) ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
 
                 <div class="t8-field">
