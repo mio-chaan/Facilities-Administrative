@@ -337,6 +337,50 @@ $formValues = [
     'requirements'          => '',
 ];
 
+/** Return the compact, type-aware label used in reservation list tables. */
+function t8_reservation_summary(array $reservation): array
+{
+    $category = trim((string) ($reservation['event_category'] ?? ''));
+    $type = trim((string) ($reservation['facility_type'] ?? ''));
+    $detail = '';
+
+    if (in_array($type, ['Equipment', 'Asset'], true) && !empty($reservation['quantity'])) {
+        $detail = 'Qty: ' . (int) $reservation['quantity'];
+    } elseif (in_array($type, ['Room', 'Area'], true) && !empty($reservation['expected_participants'])) {
+        $detail = (int) $reservation['expected_participants'] . ' Participants';
+    }
+
+    return [
+        'category' => $category !== '' ? $category : 'Reservation',
+        'detail' => $detail,
+    ];
+}
+
+/** Return the two-line schedule representation for a reservation list table. */
+function t8_reservation_schedule(array $reservation): array
+{
+    $start = (string) ($reservation['start_time'] ?? '');
+    $end = (string) ($reservation['end_time'] ?? '');
+    if ($start !== '' && $end !== '') {
+        return [
+            'primary' => format_date($start, 'M d, Y'),
+            'secondary' => format_date($start, 'g:i A') . ' – ' . format_date($end, 'g:i A'),
+        ];
+    }
+
+    $schedule = (string) ($reservation['schedule'] ?? '');
+    if ($schedule !== '') {
+        return ['primary' => format_date($schedule, 'M d, Y'), 'secondary' => format_date($schedule, 'g:i A')];
+    }
+
+    $returnDate = (string) ($reservation['expected_return_date'] ?? '');
+    if ($returnDate !== '') {
+        return ['primary' => 'Return by ' . format_date($returnDate, 'M d, Y'), 'secondary' => ''];
+    }
+
+    return ['primary' => 'N/A', 'secondary' => ''];
+}
+
 switch ($action) {
     case 'create':
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -594,7 +638,7 @@ $selectedReservationConfig = t8_reservation_get_facility_type_config($selectedFa
 if (!$showForm) {
     if ($isAdmin) {
         $allReservations = $pdo->query(
-            'SELECT r.*, f.name AS facility_name, u.full_name AS requester_name
+            'SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
@@ -605,7 +649,7 @@ if (!$showForm) {
         // Lists EVERY reservation currently awaiting approval - nothing
         // filters this further, so it's always the complete pending set.
         $pendingReservations = $pdo->query(
-            "SELECT r.*, f.name AS facility_name, u.full_name AS requester_name
+            "SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
@@ -615,7 +659,7 @@ if (!$showForm) {
         $pendingReservations = t8_reservations_annotate_conflicts($pdo, $pendingReservations);
     } else {
         $allReservationsStmt = $pdo->prepare(
-            'SELECT r.*, f.name AS facility_name, u.full_name AS requester_name
+            'SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
@@ -626,7 +670,7 @@ if (!$showForm) {
         $allReservations = t8_reservations_annotate_conflicts($pdo, $allReservations);
 
         $myStmt = $pdo->prepare(
-            'SELECT r.*, f.name AS facility_name
+            'SELECT r.*, f.name AS facility_name, f.facility_type
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              WHERE r.user_id = :user_id
@@ -820,14 +864,10 @@ if (!$showForm) {
                     <thead>
                         <tr>
                             <th>Facility</th>
-                            <th>Department</th>
-                            <th>Key Person</th>
-                            <th>Category</th>
+                            <th>Type</th>
                             <th>Requested By</th>
-                            <th>Start</th>
-                            <th>End</th>
-                            <th>Participants</th>
-                            <th>Notes</th>
+                            <th>Reservation</th>
+                            <th>Schedule</th>
                             <th>Conflict</th>
                             <th>Actions</th>
                         </tr>
@@ -835,23 +875,20 @@ if (!$showForm) {
                     <tbody>
                         <?php if ($pendingReservations === []): ?>
                             <tr>
-                                <td colspan="11" class="t8-table-empty-row">
+                                <td colspan="7" class="t8-table-empty-row">
                                     No reservation requests are waiting for approval yet.
                                     Once a request is submitted, it will appear here.
                                 </td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($pendingReservations as $p): ?>
+                                <?php $summary = t8_reservation_summary($p); $schedule = t8_reservation_schedule($p); ?>
                                 <tr <?= $p['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($p['facility_name']) ?></td>
-                                    <td><?= e((string) ($p['department'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($p['key_person'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($p['event_category'] ?? '—')) ?></td>
+                                    <td><span class="t8-type-pill"><?= e((string) ($p['facility_type'] ?? 'Unknown')) ?></span></td>
                                     <td><?= e($p['requester_name']) ?></td>
-                                    <td><?= e(format_date($p['start_time'], 'M d, Y g:i A')) ?></td>
-                                    <td><?= e(format_date($p['end_time'], 'M d, Y g:i A')) ?></td>
-                                    <td><?= e((string) ($p['expected_participants'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($p['description'] ?? '—')) ?></td>
+                                    <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
+                                    <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td>
                                         <?php if ($p['has_conflict']): ?>
                                             <span class="t8-badge" title="Time Conflict"
@@ -896,14 +933,10 @@ if (!$showForm) {
                     <thead>
                         <tr>
                             <th>Facility</th>
-                            <th>Department</th>
-                            <th>Key Person</th>
-                            <th>Category</th>
+                            <th>Type</th>
                             <th>Requested By</th>
-                            <th>Start</th>
-                            <th>End</th>
-                            <th>Participants</th>
-                            <th>Notes</th>
+                            <th>Reservation</th>
+                            <th>Schedule</th>
                             <th>Status</th>
                             <th>Conflict</th>
                             <th>Actions</th>
@@ -912,23 +945,20 @@ if (!$showForm) {
                     <tbody>
                         <?php if ($allReservations === []): ?>
                             <tr>
-                                <td colspan="12" class="t8-table-empty-row">
+                                <td colspan="8" class="t8-table-empty-row">
                                     No reservations have been made yet.
                                     Once a reservation is submitted, it will appear here.
                                 </td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($allReservations as $r): ?>
+                                <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
                                 <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
-                                    <td><?= e((string) ($r['department'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($r['key_person'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($r['event_category'] ?? '—')) ?></td>
+                                    <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
                                     <td><?= e($r['requester_name']) ?></td>
-                                    <td><?= e(format_date($r['start_time'], 'M d, Y g:i A')) ?></td>
-                                    <td><?= e(format_date($r['end_time'], 'M d, Y g:i A')) ?></td>
-                                    <td><?= e((string) ($r['expected_participants'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($r['description'] ?? '—')) ?></td>
+                                    <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
+                                    <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
                                     <td>
                                         <?php if ($r['has_conflict']): ?>
@@ -973,13 +1003,9 @@ if (!$showForm) {
                     <thead>
                         <tr>
                             <th>Facility</th>
-                            <th>Department</th>
-                            <th>Key Person</th>
-                            <th>Category</th>
-                            <th>Start</th>
-                            <th>End</th>
-                            <th>Participants</th>
-                            <th>Notes</th>
+                            <th>Type</th>
+                            <th>Reservation</th>
+                            <th>Schedule</th>
                             <th>Status</th>
                             <th>Conflict</th>
                             <th>Actions</th>
@@ -988,22 +1014,19 @@ if (!$showForm) {
                     <tbody>
                         <?php if ($myReservations === []): ?>
                             <tr>
-                                <td colspan="11" class="t8-table-empty-row">
+                                <td colspan="7" class="t8-table-empty-row">
                                     You haven't made any reservations yet.
                                     Create one to see it listed here.
                                 </td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($myReservations as $r): ?>
+                                <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
                                 <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
-                                    <td><?= e((string) ($r['department'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($r['key_person'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($r['event_category'] ?? '—')) ?></td>
-                                    <td><?= e(format_date($r['start_time'], 'M d, Y g:i A')) ?></td>
-                                    <td><?= e(format_date($r['end_time'], 'M d, Y g:i A')) ?></td>
-                                    <td><?= e((string) ($r['expected_participants'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($r['description'] ?? '—')) ?></td>
+                                    <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
+                                    <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
+                                    <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
                                     <td>
                                         <?php if ($r['has_conflict']): ?>
@@ -1058,14 +1081,10 @@ if (!$showForm) {
                     <thead>
                         <tr>
                             <th>Facility</th>
-                            <th>Department</th>
-                            <th>Key Person</th>
-                            <th>Category</th>
+                            <th>Type</th>
                             <th>Requested By</th>
-                            <th>Start</th>
-                            <th>End</th>
-                            <th>Participants</th>
-                            <th>Notes</th>
+                            <th>Reservation</th>
+                            <th>Schedule</th>
                             <th>Status</th>
                             <th>Conflict</th>
                         </tr>
@@ -1073,23 +1092,20 @@ if (!$showForm) {
                     <tbody>
                         <?php if ($allReservations === []): ?>
                             <tr>
-                                <td colspan="11" class="t8-table-empty-row">
+                                <td colspan="7" class="t8-table-empty-row">
                                     No reservations have been made yet.
                                     Once a reservation is submitted, it will appear here.
                                 </td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($allReservations as $r): ?>
+                                <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
                                 <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
-                                    <td><?= e((string) ($r['department'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($r['key_person'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($r['event_category'] ?? '—')) ?></td>
+                                    <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
                                     <td><?= e((string) ($r['requester_name'] ?? '—')) ?></td>
-                                    <td><?= e(format_date($r['start_time'], 'M d, Y g:i A')) ?></td>
-                                    <td><?= e(format_date($r['end_time'], 'M d, Y g:i A')) ?></td>
-                                    <td><?= e((string) ($r['expected_participants'] ?? '—')) ?></td>
-                                    <td><?= e((string) ($r['description'] ?? '—')) ?></td>
+                                    <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
+                                    <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
                                     <td>
                                         <?php if ($r['has_conflict']): ?>

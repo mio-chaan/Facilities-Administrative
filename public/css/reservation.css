@@ -135,3 +135,25 @@
     padding: 6px 10px;
     font-size: 0.8rem;
 }
+
+/* ---- Compact, type-driven reservation tables ---- */
+.t8-table-subtext {
+    display: block;
+    margin-top: 3px;
+    color: var(--t8-text-muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.t8-type-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border: 1px solid var(--t8-border);
+    border-radius: 999px;
+    background: var(--t8-secondary);
+    color: var(--t8-ink);
+    font-size: 0.75rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
