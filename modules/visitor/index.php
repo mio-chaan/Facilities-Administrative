@@ -405,23 +405,25 @@ if (!$showForm) {
                 <span class="t8-notification-count"><?= e((string) count($scheduledVisits)) ?> scheduled</span>
             <?php endif; ?>
         </div>
-        <?php if ($scheduledVisits === []): ?>
-            <div class="t8-empty">No visits are currently scheduled.</div>
-        <?php else: ?>
-            <div class="t8-table-wrap">
-                <table class="t8-table">
-                    <thead>
-                        <tr>
-                            <th>Visitor ID</th>
-                            <th>Visitor</th>
-                            <th>Type</th>
-                            <th>Visiting</th>
-                            <th>Purpose</th>
-                            <th>Scheduled For</th>
-                            <th>Actions</th>
+        <div class="t8-table-wrap">
+            <table class="t8-table">
+                <thead>
+                    <tr>
+                        <th>Visitor ID</th>
+                        <th>Visitor</th>
+                        <th>Type</th>
+                        <th>Visiting</th>
+                        <th>Purpose</th>
+                        <th>Scheduled For</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($scheduledVisits === []): ?>
+                        <tr class="t8-table-empty-row">
+                            <td colspan="7">No visits are currently scheduled.</td>
                         </tr>
-                    </thead>
-                    <tbody>
+                    <?php else: ?>
                         <?php foreach ($scheduledVisits as $v): ?>
                             <tr>
                                 <td class="t8-table-ref"><?= e(t8_visitor_id_label((int) $v['id'])) ?></td>
@@ -449,10 +451,10 @@ if (!$showForm) {
                                 </td>
                             </tr>
                         <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endif; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <div class="t8-card">
@@ -462,24 +464,26 @@ if (!$showForm) {
                 <span class="t8-notification-count"><?= e((string) count($currentlyIn)) ?> checked in</span>
             <?php endif; ?>
         </div>
-        <?php if ($currentlyIn === []): ?>
-            <div class="t8-empty">No visitors currently checked in.</div>
-        <?php else: ?>
-            <div class="t8-table-wrap">
-                <table class="t8-table">
-                    <thead>
-                        <tr>
-                            <th>Visitor ID</th>
-                            <th>Visitor</th>
-                            <th>Type</th>
-                            <th>Visiting</th>
-                            <th>Purpose</th>
-                            <th>Check-In Time</th>
-                            <th>Logged By</th>
-                            <th>Actions</th>
+        <div class="t8-table-wrap">
+            <table class="t8-table">
+                <thead>
+                    <tr>
+                        <th>Visitor ID</th>
+                        <th>Visitor</th>
+                        <th>Type</th>
+                        <th>Visiting</th>
+                        <th>Purpose</th>
+                        <th>Check-In Time</th>
+                        <th>Logged By</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($currentlyIn === []): ?>
+                        <tr class="t8-table-empty-row">
+                            <td colspan="8">No visitors currently checked in.</td>
                         </tr>
-                    </thead>
-                    <tbody>
+                    <?php else: ?>
                         <?php foreach ($currentlyIn as $v): ?>
                             <tr>
                                 <td class="t8-table-ref"><?= e(t8_visitor_id_label((int) $v['id'])) ?></td>
@@ -501,10 +505,10 @@ if (!$showForm) {
                                 </td>
                             </tr>
                         <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endif; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <div class="t8-card">
