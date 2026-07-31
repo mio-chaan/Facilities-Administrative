@@ -515,26 +515,28 @@ if (!$showForm) {
         <div class="t8-card-header">
             <h2 class="t8-card-title">Visitor Log (All)</h2>
         </div>
-        <?php if ($allVisitors === []): ?>
-            <div class="t8-empty">No visitors have been logged yet.</div>
-        <?php else: ?>
-            <div class="t8-table-wrap">
-                <table class="t8-table">
-                    <thead>
-                        <tr>
-                            <th>Visitor ID</th>
-                            <th>Visitor</th>
-                            <th>Type</th>
-                            <th>Visiting</th>
-                            <th>Purpose</th>
-                            <th>Scheduled For</th>
-                            <th>Check-In</th>
-                            <th>Check-Out</th>
-                            <th>Status</th>
-                            <th>Logged By</th>
+        <div class="t8-table-wrap">
+            <table class="t8-table">
+                <thead>
+                    <tr>
+                        <th>Visitor ID</th>
+                        <th>Visitor</th>
+                        <th>Type</th>
+                        <th>Visiting</th>
+                        <th>Purpose</th>
+                        <th>Scheduled For</th>
+                        <th>Check-In</th>
+                        <th>Check-Out</th>
+                        <th>Status</th>
+                        <th>Logged By</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($allVisitors === []): ?>
+                        <tr class="t8-table-empty-row">
+                            <td colspan="10">No visitors have been logged yet.</td>
                         </tr>
-                    </thead>
-                    <tbody>
+                    <?php else: ?>
                         <?php foreach ($allVisitors as $v): ?>
                             <tr>
                                 <td class="t8-table-ref"><?= e(t8_visitor_id_label((int) $v['id'])) ?></td>
@@ -553,10 +555,10 @@ if (!$showForm) {
                                 <td><?= e($v['logged_by_name']) ?></td>
                             </tr>
                         <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endif; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 
 <?php endif; ?>
