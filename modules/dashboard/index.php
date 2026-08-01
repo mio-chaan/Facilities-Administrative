@@ -147,19 +147,33 @@ try {
         }
     }
 
-    // Document categories
-    $docStmt = $pdo->query("SELECT COALESCE(category, 'Other') AS category, COUNT(*) AS cnt FROM team8_documents GROUP BY category ORDER BY cnt DESC LIMIT 5");
-    foreach ($docStmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-        $docCategories[] = ['label' => (string) $r['category'], 'count' => (int) $r['cnt']];
+    // Trend: counts for the last 30 days, including dates with zero reservations
+    $trendStart = new DateTimeImmutable('today');
+    $trendStart = $trendStart->sub(new DateInterval('P29D'));
+    $trendEnd = new DateTimeImmutable('today');
+
+    $current = $trendStart;
+    while ($current <= $trendEnd) {
+        $trendCounts[$current->format('Y-m-d')] = 0;
+        $current = $current->add(new DateInterval('P1D'));
     }
 
-    // Trend: counts for last 10 days
-    $trendStmt = $pdo->query("SELECT DATE(start_time) AS d, COUNT(*) AS cnt FROM team8_reservations WHERE start_time >= DATE_SUB(CURDATE(), INTERVAL 10 DAY) GROUP BY d ORDER BY d ASC");
+    $trendStmt = $pdo->prepare(
+        'SELECT DATE(start_time) AS d, COUNT(*) AS cnt
+         FROM team8_reservations
+         WHERE DATE(start_time) BETWEEN :start_date AND :end_date
+         GROUP BY d
+         ORDER BY d ASC'
+    );
+    $trendStmt->execute([
+        'start_date' => $trendStart->format('Y-m-d'),
+        'end_date' => $trendEnd->format('Y-m-d'),
+    ]);
     foreach ($trendStmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $trendCounts[(string) $r['d']] = (int) $r['cnt'];
     }
 } catch (PDOException $e) {
-    // Silently ignore DB errors here; show empty/fallback UI instead.
+    echo '<div class="t8-alert t8-alert-warning">Could not load some dashboard data - has database/schema.sql been imported yet?</div>';
 }
 
 // Compute percentages for reservation status (avoid division by zero)
