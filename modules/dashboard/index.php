@@ -90,18 +90,7 @@ $activityIcons = [
     <div class="t8-alert t8-alert-warning"><?= e($dbError) ?></div>
 <?php endif; ?>
 
-<div class="t8-stat-grid" aria-label="Dashboard summary">
-    <?php foreach ($stats as $label => $value): ?>
-        <?php $meta = $statMeta[$label]; ?>
-        <article class="t8-stat-card">
-            <span class="t8-stat-icon <?= e($meta['variant']) ?>" aria-hidden="true"><i class="fa-solid <?= e($meta['icon']) ?>"></i></span>
-            <div class="t8-stat-body">
-                <div class="t8-stat-value"><?= e((string) $value) ?></div>
-                <div class="t8-stat-label"><?= e($label) ?></div>
-            </div>
-        </article>
-    <?php endforeach; ?>
-</div>
+
 
 <?php
 // Build additional dashboard data from the database. Use fail-safe fallbacks
