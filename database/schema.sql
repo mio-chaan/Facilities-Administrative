@@ -119,14 +119,12 @@ CREATE TABLE team8_reservations (
     remarks                 VARCHAR(500) NULL,
     schedule                DATETIME NULL,
     requirements            VARCHAR(500) NULL,
-    -- Delete-request workflow (QA FIX: previously added by a migration
-    -- but never actually used by any code path; now implemented — see
-    -- modules/reservation/index.php request_delete/approve_delete/reject_delete).
-    previous_status         VARCHAR(30) NULL,
-    delete_reason           TEXT NULL,
-    delete_requested_by     INT NULL,
-    delete_requested_at     DATETIME NULL,
-    rejection_reason        TEXT NULL,
+    -- Delete-request maybe we can use it later, but for now we will just keep it commented out
+   -- previous_status         VARCHAR(30) NULL,
+    -- delete_reason           TEXT NULL,
+    -- delete_requested_by     INT NULL,
+    -- delete_requested_at     DATETIME NULL,
+    -- rejection_reason        TEXT NULL,
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at              DATETIME NULL,

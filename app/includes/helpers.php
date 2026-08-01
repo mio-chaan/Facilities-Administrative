@@ -22,10 +22,10 @@ if (!function_exists('base_url')) {
 }
 
 if (!function_exists('asset')) {
-    /** URL to a file under /public, e.g. asset('css/style.css') */
+    /** URL to a file served from the public web root, e.g. asset('css/style.css') */
     function asset(string $path): string
     {
-        return base_url('public/' . ltrim($path, '/'));
+        return base_url(ltrim($path, '/'));
     }
 }
 

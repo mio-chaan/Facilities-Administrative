@@ -7,10 +7,10 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/app/config/config.php';
-require_once __DIR__ . '/app/includes/db_connect.php';
-require_once __DIR__ . '/app/includes/helpers.php';
-require_once __DIR__ . '/app/includes/audit.php';
+require_once __DIR__ . '/../app/config/config.php';
+require_once __DIR__ . '/../app/includes/db_connect.php';
+require_once __DIR__ . '/../app/includes/helpers.php';
+require_once __DIR__ . '/../app/includes/audit.php';
 
 t8_session_start();
 
