@@ -129,8 +129,8 @@ CREATE TABLE team8_reservations (
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at              DATETIME NULL,
     CONSTRAINT fk_team8_reservations_facility FOREIGN KEY (facility_id) REFERENCES team8_facilities(id),
-    CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id),
-    CONSTRAINT fk_team8_reservations_delete_requester FOREIGN KEY (delete_requested_by) REFERENCES users(id)
+    CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id)
+    -- CONSTRAINT fk_team8_reservations_delete_requester FOREIGN KEY (delete_requested_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_reservation_equipment (

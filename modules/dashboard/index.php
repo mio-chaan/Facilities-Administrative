@@ -190,46 +190,38 @@ foreach ($facilityUsage as $f) { $facilityMax = max($facilityMax, (int) $f['coun
 $docMax = 0;
 foreach ($docCategories as $d) { $docMax = max($docMax, (int) $d['count']); }
 
-// Build trend SVG points from $trendCounts — normalize into 600x180 viewport
-$trendPoints = [];
-if (!empty($trendCounts)) {
-    $widthStep = 600 / max(1, count($trendCounts) - 1);
-    $maxTrend = max($trendCounts);
-    $i = 0;
-    foreach ($trendCounts as $date => $cnt) {
-        $x = round(10 + $i * $widthStep);
-        $y = 180 - ($maxTrend > 0 ? round($cnt / $maxTrend * 150) : 0);
-        $trendPoints[] = [$x, $y];
-        $i++;
-    }
+// ---- Trend chart data, handed off to Chart.js (public/js/dashboard.js) ----
+// REDESIGN (Monthly Reservation Trend): the old approach built raw SVG
+// polyline points server-side. That's now replaced by Chart.js on the
+// front end for a smoother curve, gradient fill, point markers, and a
+// proper tooltip - so all we need to pass over is the same
+// $trendCounts data, reshaped into two flat arrays for JSON.
+$trendLabels = [];
+$trendValues = [];
+foreach ($trendCounts as $date => $cnt) {
+    $trendLabels[] = (int) (new DateTimeImmutable($date))->format('j');
+    $trendValues[] = $cnt;
 }
-
-// Helper to convert points array to svg polyline string
-function pointsToSvg(array $pts): string {
-    return implode(' ', array_map(function($p){ return $p[0] . ',' . $p[1]; }, $pts));
-}
-
+$trendLatest = $trendValues !== [] ? (int) end($trendValues) : 0;
+$trendHasData = array_sum($trendValues) > 0;
 ?>
 
 <div class="t8-main-grid">
     <div class="t8-card t8-trend-card">
-        <div class="t8-card-header"><h2 class="t8-card-title">Monthly Reservation Trend</h2></div>
+        <div class="t8-card-header">
+            <div class="t8-trend-card-heading">
+                <h2 class="t8-card-title">Monthly Reservation Trend</h2>
+                <p class="t8-trend-card-sub">
+                    <?= $trendHasData ? 'Last 30 days' : 'Last 30 days · light on data right now' ?>
+                </p>
+            </div>
+            <span class="t8-trend-badge">
+                <span class="t8-trend-dot"></span><?= e((string) $trendLatest) ?> today
+            </span>
+        </div>
         <div class="t8-card-body">
-            <div class="t8-chart t8-chart-line">
-                <?php if (!empty($trendPoints)): ?>
-                    <svg viewBox="0 0 600 200" preserveAspectRatio="none" class="t8-sparkline">
-                        <defs>
-                            <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
-                                <stop offset="0%" stop-color="rgba(255,99,71,0.14)" />
-                                <stop offset="100%" stop-color="transparent" />
-                            </linearGradient>
-                        </defs>
-                        <polyline fill="url(#g1)" points="<?= e(pointsToSvg($trendPoints)) ?>" stroke="none" />
-                        <polyline fill="none" stroke="#d9534f" stroke-width="3" points="<?= e(pointsToSvg($trendPoints)) ?>" />
-                    </svg>
-                <?php else: ?>
-                    <div class="t8-empty">No trend data available.</div>
-                <?php endif; ?>
+            <div class="t8-chart-shell">
+                <canvas id="t8TrendChart" aria-label="Monthly reservation trend chart" role="img"></canvas>
             </div>
         </div>
     </div>
@@ -323,4 +315,13 @@ function pointsToSvg(array $pts): string {
         </div>
     </div>
 </div>
+
+<script>
+    // Handoff to public/js/dashboard.js — same $trendCounts data the old
+    // inline SVG block used, just reshaped into {labels, data} for Chart.js.
+    window.t8TrendData = <?= json_encode(
+        ['labels' => $trendLabels, 'data' => $trendValues],
+        JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+    ) ?>;
+</script>
 </section>

@@ -7,6 +7,9 @@ $page = $page ?? current_page();
 </footer>
 
 <script src="<?= e(asset('js/app.js')) ?>"></script>
+<?php if ($page === 'dashboard'): ?>
+    <script src="<?= e(asset('js/dashboard.js')) ?>"></script>
+<?php endif; ?>
 <?php if ($page === 'reservation' || $page === 'contracts'): ?>
     <script src="<?= e(asset('js/validation.js')) ?>"></script>
 <?php endif; ?>
