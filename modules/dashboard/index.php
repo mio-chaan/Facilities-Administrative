@@ -84,88 +84,220 @@ $activityIcons = [
     <div class="t8-alert t8-alert-warning"><?= e($dbError) ?></div>
 <?php endif; ?>
 
-<div class="t8-stat-grid">
-    <?php foreach ($stats as $label => $value): ?>
-        <?php $meta = $statMeta[$label] ?? ['icon' => 'fa-chart-simple', 'variant' => '']; ?>
-        <div class="t8-stat-card">
-            <div class="t8-stat-icon <?= e($meta['variant']) ?>">
-                <i class="fa-solid <?= e($meta['icon']) ?>"></i>
-            </div>
-            <div class="t8-stat-body">
-                <div class="t8-stat-value"><?= e((string) $value) ?></div>
-                <div class="t8-stat-label"><?= e($label) ?></div>
-            </div>
-        </div>
-    <?php endforeach; ?>
-</div>
+<?php
+// Build additional dashboard data from the database. Use fail-safe fallbacks
+// so a fresh clone without the schema won't break the page.
+$reservationByStatus = ['approved' => 0, 'pending' => 0, 'rejected' => 0, 'cancelled' => 0];
+$reservationTotal = 0;
+$facilityUsage = [];
+$docCategories = [];
+$trendCounts = [];
 
-<div class="t8-dashboard-grid">
-    <div class="t8-dashboard-column">
-        <div class="t8-card">
-            <div class="t8-card-header">
-                <h2 class="t8-card-title">Quick Actions</h2>
-            </div>
-            <div class="t8-quick-actions">
-                <a class="t8-btn t8-btn-accent" href="<?= e(page_url('reservation')) ?>">
-                    <i class="fa-solid fa-calendar-plus"></i> New Reservation
-                </a>
-                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('visitor')) ?>">
-                    <i class="fa-solid fa-id-card-clip"></i> Register Visitor
-                </a>
-                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">
-                    <i class="fa-solid fa-file-arrow-up"></i> Upload Document
-                </a>
-                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('contracts')) ?>">
-                    <i class="fa-solid fa-file-contract"></i> New Contract
-                </a>
-            </div>
-        </div>
+try {
+    $stmt = $pdo->query("SELECT status, COUNT(*) AS cnt FROM team8_reservations GROUP BY status");
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $s = strtolower((string) $row['status']);
+        $cnt = (int) $row['cnt'];
+        if (array_key_exists($s, $reservationByStatus)) {
+            $reservationByStatus[$s] = $cnt;
+        } else {
+            $reservationByStatus[$s] = $cnt;
+        }
+        $reservationTotal += $cnt;
+    }
 
-        <section class="t8-card t8-notifications-card" id="notifications">
-            <div class="t8-card-header">
-                <h2 class="t8-card-title">Notifications</h2>
-                <?php if ($t8UnreadNotifications > 0): ?>
-                    <span class="t8-notification-count"><?= e((string) $t8UnreadNotifications) ?> unread</span>
+    // Facility usage: attempt to group by facility_id and resolve names if possible.
+    $facStmt = $pdo->query("SELECT facility_id, COUNT(*) AS cnt FROM team8_reservations GROUP BY facility_id ORDER BY cnt DESC LIMIT 5");
+    $facRows = $facStmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($facRows !== false) {
+        $getName = $pdo->prepare("SELECT name FROM team8_facilities WHERE id = :id LIMIT 1");
+        foreach ($facRows as $r) {
+            $id = $r['facility_id'];
+            $cnt = (int) $r['cnt'];
+            $name = null;
+            if ($id !== null) {
+                try {
+                    $getName->execute(['id' => $id]);
+                    $name = $getName->fetchColumn();
+                } catch (PDOException $e) {
+                    $name = null;
+                }
+            }
+            $label = $name ?: ($id !== null ? "Facility #{$id}" : 'Unknown');
+            $facilityUsage[] = ['label' => $label, 'count' => $cnt];
+        }
+    }
+
+    // Document categories
+    $docStmt = $pdo->query("SELECT COALESCE(category, 'Other') AS category, COUNT(*) AS cnt FROM team8_documents GROUP BY category ORDER BY cnt DESC LIMIT 5");
+    foreach ($docStmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $docCategories[] = ['label' => (string) $r['category'], 'count' => (int) $r['cnt']];
+    }
+
+    // Trend: counts for last 10 days
+    $trendStmt = $pdo->query("SELECT DATE(start_time) AS d, COUNT(*) AS cnt FROM team8_reservations WHERE start_time >= DATE_SUB(CURDATE(), INTERVAL 10 DAY) GROUP BY d ORDER BY d ASC");
+    foreach ($trendStmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $trendCounts[(string) $r['d']] = (int) $r['cnt'];
+    }
+} catch (PDOException $e) {
+    // Silently ignore DB errors here; show empty/fallback UI instead.
+}
+
+// Compute percentages for reservation status (avoid division by zero)
+$statusPercents = [];
+if ($reservationTotal > 0) {
+    foreach ($reservationByStatus as $k => $v) {
+        $statusPercents[$k] = round($v / $reservationTotal * 100, 1);
+    }
+} else {
+    foreach ($reservationByStatus as $k => $v) { $statusPercents[$k] = 0; }
+}
+
+// Helper to render bar width safely
+function pctWidth(int $value, int $max): string {
+    if ($max <= 0) return '0%';
+    $w = round($value / $max * 100, 1);
+    return $w . '%';
+}
+
+// Prepare facility usage percentages (relative to top value)
+$facilityMax = 0;
+foreach ($facilityUsage as $f) { $facilityMax = max($facilityMax, (int) $f['count']); }
+
+// For document categories, compute a simple width relative to max count
+$docMax = 0;
+foreach ($docCategories as $d) { $docMax = max($docMax, (int) $d['count']); }
+
+// Build trend SVG points from $trendCounts — normalize into 600x180 viewport
+$trendPoints = [];
+if (!empty($trendCounts)) {
+    $widthStep = 600 / max(1, count($trendCounts) - 1);
+    $maxTrend = max($trendCounts);
+    $i = 0;
+    foreach ($trendCounts as $date => $cnt) {
+        $x = round(10 + $i * $widthStep);
+        $y = 180 - ($maxTrend > 0 ? round($cnt / $maxTrend * 150) : 0);
+        $trendPoints[] = [$x, $y];
+        $i++;
+    }
+}
+
+// Helper to convert points array to svg polyline string
+function pointsToSvg(array $pts): string {
+    return implode(' ', array_map(function($p){ return $p[0] . ',' . $p[1]; }, $pts));
+}
+
+?>
+
+<div class="t8-main-grid">
+    <div class="t8-card t8-trend-card">
+        <div class="t8-card-header"><h2 class="t8-card-title">Monthly Reservation Trend</h2></div>
+        <div class="t8-card-body">
+            <div class="t8-chart t8-chart-line">
+                <?php if (!empty($trendPoints)): ?>
+                    <svg viewBox="0 0 600 200" preserveAspectRatio="none" class="t8-sparkline">
+                        <defs>
+                            <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
+                                <stop offset="0%" stop-color="rgba(255,99,71,0.14)" />
+                                <stop offset="100%" stop-color="transparent" />
+                            </linearGradient>
+                        </defs>
+                        <polyline fill="url(#g1)" points="<?= e(pointsToSvg($trendPoints)) ?>" stroke="none" />
+                        <polyline fill="none" stroke="#d9534f" stroke-width="3" points="<?= e(pointsToSvg($trendPoints)) ?>" />
+                    </svg>
+                <?php else: ?>
+                    <div class="t8-empty">No trend data available.</div>
                 <?php endif; ?>
             </div>
-            <?php if ($notifications === []): ?>
-                <div class="t8-empty">You have no notifications.</div>
+        </div>
+    </div>
+
+    <div class="t8-card t8-reservation-status">
+        <div class="t8-card-header"><h2 class="t8-card-title">Reservation Status</h2></div>
+        <div class="t8-card-body t8-reservation-body">
+            <div class="t8-pie-wrap">
+                <?php
+                $s1 = $statusPercents['approved'] ?? 0;
+                $s2 = ($s1 + ($statusPercents['pending'] ?? 0));
+                $s3 = ($s2 + ($statusPercents['rejected'] ?? 0));
+                $pieStyle = "background: conic-gradient(#d9534f 0 {$s1}%, #ffc107 {$s1}% {$s2}%, #6c757d {$s2}% {$s3}%, #e9ecef {$s3}% 100%);";
+                ?>
+                <div class="t8-pie" style="<?= e($pieStyle) ?>">
+                    <div class="t8-pie-center"><?= e((string) $reservationTotal) ?><br>Total</div>
+                </div>
+            </div>
+            <ul class="t8-legend">
+                <li><span class="legend-dot legend-approved"></span> Approved (<?= e((string) $reservationByStatus['approved']) ?>)</li>
+                <li><span class="legend-dot legend-pending"></span> Pending (<?= e((string) $reservationByStatus['pending']) ?>)</li>
+                <li><span class="legend-dot legend-rejected"></span> Rejected (<?= e((string) $reservationByStatus['rejected']) ?>)</li>
+                <li><span class="legend-dot legend-cancelled"></span> Cancelled (<?= e((string) ($reservationByStatus['cancelled'] ?? 0)) ?>)</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="t8-card t8-ai-insights">
+        <div class="t8-card-header"><h2 class="t8-card-title">AI Insights</h2></div>
+        <div class="t8-card-body">
+            <ul class="t8-ai-list">
+                <li>Pending reservations: <strong><?= e((string) ($reservationByStatus['pending'] ?? 0)) ?></strong></li>
+                <li>Visitors today: <strong><?= e((string) $stats['Visitors Today']) ?></strong></li>
+                <li>Active contracts: <strong><?= e((string) $stats['Active Contracts']) ?></strong></li>
+                <li>Top facility: <strong><?= e($facilityUsage[0]['label'] ?? '—') ?></strong></li>
+                <li>Unread notifications: <strong><?= e((string) $t8UnreadNotifications) ?></strong></li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="t8-card t8-facility-util">
+        <div class="t8-card-header"><h2 class="t8-card-title">Facility Utilization</h2></div>
+        <div class="t8-card-body t8-bars">
+            <?php if (empty($facilityUsage)): ?>
+                <div class="t8-empty">No facility usage data.</div>
             <?php else: ?>
-                <div class="t8-notification-list">
-                    <?php foreach ($notifications as $notification): ?>
-                        <div class="t8-notification-item<?= $notification['status'] === 'unread' ? ' t8-notification-unread' : '' ?>">
-                            <i class="fa-regular fa-bell"></i>
-                            <div>
-                                <p><?= e((string) $notification['message']) ?></p>
-                                <time datetime="<?= e((string) $notification['created_at']) ?>"><?= e(format_date((string) $notification['created_at'], 'M d, Y g:i A')) ?></time>
+                <?php foreach ($facilityUsage as $f): ?>
+                    <?php $w = pctWidth((int)$f['count'], $facilityMax); ?>
+                    <div class="t8-bar-row"><span><?= e($f['label']) ?></span><div class="t8-bar"><div style="width:<?= e($w) ?>"></div></div><span class="t8-bar-percent"><?= e((string) $f['count']) ?></span></div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <div class="t8-card t8-doc-categories">
+        <div class="t8-card-header"><h2 class="t8-card-title">Document Categories</h2></div>
+        <div class="t8-card-body t8-bars">
+            <?php if (empty($docCategories)): ?>
+                <div class="t8-empty">No documents data.</div>
+            <?php else: ?>
+                <?php foreach ($docCategories as $d): ?>
+                    <?php $w = pctWidth((int)$d['count'], $docMax); ?>
+                    <div class="t8-bar-row"><span><?= e($d['label']) ?></span><div class="t8-bar"><div style="width:<?= e($w) ?>"></div></div><span class="t8-bar-percent"><?= e((string) $d['count']) ?></span></div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <div class="t8-card t8-activity-timeline">
+        <div class="t8-card-header"><h2 class="t8-card-title">Recent Activities Timeline</h2></div>
+        <div class="t8-card-body">
+            <div class="t8-timeline">
+                <?php if ($recentActivities === []): ?>
+                    <div class="t8-empty">No activity has been recorded yet.</div>
+                <?php else: ?>
+                    <?php foreach ($recentActivities as $activity): ?>
+                        <?php
+                        $action = (string) $activity['action'];
+                        $description = sprintf('%s %s %s', (string) $activity['full_name'], str_replace('_', ' ', $action), str_replace('_', ' ', (string) $activity['entity_type']));
+                        ?>
+                        <div class="t8-timeline-item">
+                            <div class="t8-timeline-avatar"><i class="fa-solid <?= e($activityIcons[$action] ?? 'fa-user') ?>"></i></div>
+                            <div class="t8-timeline-content">
+                                <div class="t8-timeline-desc"><?= e(ucfirst($description)) ?></div>
+                                <time class="t8-timeline-time" datetime="<?= e((string) $activity['created_at']) ?>"><?= e(format_date((string) $activity['created_at'], 'g:i A')) ?></time>
                             </div>
                         </div>
                     <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
-        </section>
-    </div>
-
-    <div class="t8-card">
-        <div class="t8-card-header">
-            <h2 class="t8-card-title">Recent Activity</h2>
-        </div>
-        <?php if ($recentActivities === []): ?>
-            <div class="t8-empty">No activity has been recorded yet.</div>
-        <?php else: ?>
-            <div class="t8-activity-list">
-                <?php foreach ($recentActivities as $activity): ?>
-                    <?php
-                    $action = (string) $activity['action'];
-                    $description = sprintf('%s %s %s', (string) $activity['full_name'], str_replace('_', ' ', $action), str_replace('_', ' ', (string) $activity['entity_type']));
-                    ?>
-                    <div class="t8-activity-item">
-                        <span class="t8-activity-icon"><i class="fa-solid <?= e($activityIcons[$action] ?? 'fa-clock-rotate-left') ?>"></i></span>
-                        <span class="t8-activity-text"><?= e(ucfirst($description)) ?></span>
-                        <time class="t8-activity-time" datetime="<?= e((string) $activity['created_at']) ?>"><?= e(format_date((string) $activity['created_at'], 'M d, g:i A')) ?></time>
-                    </div>
-                <?php endforeach; ?>
+                <?php endif; ?>
             </div>
-        <?php endif; ?>
+        </div>
     </div>
 </div>
