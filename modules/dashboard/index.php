@@ -192,21 +192,25 @@ foreach ($docCategories as $d) { $docMax = max($docMax, (int) $d['count']); }
 
 // Build trend SVG points from $trendCounts — normalize into 600x180 viewport
 $trendPoints = [];
+$trendMax = 0;
 if (!empty($trendCounts)) {
+    $trendMax = max($trendCounts);
     $widthStep = 600 / max(1, count($trendCounts) - 1);
-    $maxTrend = max($trendCounts);
     $i = 0;
     foreach ($trendCounts as $date => $cnt) {
         $x = round(10 + $i * $widthStep);
-        $y = 180 - ($maxTrend > 0 ? round($cnt / $maxTrend * 150) : 0);
-        $trendPoints[] = [$x, $y];
+        $y = 180 - ($trendMax > 0 ? round($cnt / $trendMax * 150) : 0);
+        $trendPoints[] = ['x' => $x, 'y' => $y, 'date' => $date, 'day' => (int) (new DateTimeImmutable($date))->format('j'), 'count' => $cnt];
         $i++;
     }
 }
 
-// Helper to convert points array to svg polyline string
+// Helper to convert points array to svg polyline string (supports both formats)
 function pointsToSvg(array $pts): string {
-    return implode(' ', array_map(function($p){ return $p[0] . ',' . $p[1]; }, $pts));
+    return implode(' ', array_map(function($p){
+        if (isset($p[0]) && isset($p[1])) return $p[0] . ',' . $p[1];
+        return ($p['x'] ?? 0) . ',' . ($p['y'] ?? 0);
+    }, $pts));
 }
 
 ?>
@@ -217,6 +221,13 @@ function pointsToSvg(array $pts): string {
         <div class="t8-card-body">
             <div class="t8-chart t8-chart-line">
                 <?php if (!empty($trendPoints)): ?>
+                    <?php
+                        $gridCount = 4;
+                        $gridColor = '#E5E7EB';
+                        $showDayNumbers = ((int) date('t') === 31);
+                        $pointCount = count($trendPoints);
+                        $labelStep = $pointCount > 0 ? max(1, (int) floor($pointCount / 6)) : 1;
+                    ?>
                     <svg viewBox="0 0 600 200" preserveAspectRatio="none" class="t8-sparkline">
                         <defs>
                             <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
@@ -224,6 +235,26 @@ function pointsToSvg(array $pts): string {
                                 <stop offset="100%" stop-color="transparent" />
                             </linearGradient>
                         </defs>
+                        <!-- Horizontal grid lines -->
+                        <?php for ($g = 0; $g <= $gridCount; $g++):
+                            $gy = 30 + ($g * (150 / $gridCount));
+                            $labelVal = (int) round($trendMax * (1 - ($g / $gridCount)));
+                        ?>
+                            <line x1="10" y1="<?= $gy ?>" x2="610" y2="<?= $gy ?>" stroke="<?= $gridColor ?>" stroke-width="1" stroke-dasharray="4 3" />
+                            <text x="6" y="<?= (int)($gy + 4) ?>" fill="#6b7280" font-size="11" text-anchor="start"><?= e((string) $labelVal) ?></text>
+                        <?php endfor; ?>
+
+                        <!-- Y axis label -->
+                        <text x="12" y="100" fill="#374151" font-size="12" transform="rotate(-90 12 100)" text-anchor="middle">Reservation Count</text>
+
+                        <!-- X axis day labels (only shown when current month has 31 days) -->
+                        <?php if ($showDayNumbers): ?>
+                            <?php foreach ($trendPoints as $idx => $p): if ($idx % $labelStep !== 0) continue; ?>
+                                <text x="<?= (int) $p['x'] ?>" y="195" fill="#6b7280" font-size="11" text-anchor="middle"><?= e((string) $p['day']) ?></text>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+
+                        <!-- Trend area and line -->
                         <polyline fill="url(#g1)" points="<?= e(pointsToSvg($trendPoints)) ?>" stroke="none" />
                         <polyline fill="none" stroke="#d9534f" stroke-width="3" points="<?= e(pointsToSvg($trendPoints)) ?>" />
                     </svg>
