@@ -77,12 +77,31 @@ $activityIcons = [
     '403_denied' => 'fa-shield-halved',
 ];
 ?>
-<h1>Welcome, <?= e(t8_current_user_name()) ?></h1>
-<p class="t8-help-text">Facilities &amp; Administrative Management overview.</p>
+<section class="t8-dashboard" aria-labelledby="dashboard-title">
+<div class="t8-dashboard-heading">
+    <div>
+        <h1 id="dashboard-title">Dashboard</h1>
+        <p class="t8-help-text">Facilities &amp; administrative management overview.</p>
+    </div>
+    <div class="t8-dashboard-date"><i class="fa-regular fa-calendar"></i> <?= e(date('F j, Y')) ?></div>
+</div>
 
 <?php if ($dbError !== null): ?>
     <div class="t8-alert t8-alert-warning"><?= e($dbError) ?></div>
 <?php endif; ?>
+
+<div class="t8-stat-grid" aria-label="Dashboard summary">
+    <?php foreach ($stats as $label => $value): ?>
+        <?php $meta = $statMeta[$label]; ?>
+        <article class="t8-stat-card">
+            <span class="t8-stat-icon <?= e($meta['variant']) ?>" aria-hidden="true"><i class="fa-solid <?= e($meta['icon']) ?>"></i></span>
+            <div class="t8-stat-body">
+                <div class="t8-stat-value"><?= e((string) $value) ?></div>
+                <div class="t8-stat-label"><?= e($label) ?></div>
+            </div>
+        </article>
+    <?php endforeach; ?>
+</div>
 
 <?php
 // Build additional dashboard data from the database. Use fail-safe fallbacks
@@ -301,3 +320,4 @@ function pointsToSvg(array $pts): string {
         </div>
     </div>
 </div>
+</section>
