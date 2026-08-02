@@ -74,7 +74,9 @@ document.addEventListener('DOMContentLoaded', function () {
         afterDraw: function (chart) {
             var data = chart.data.datasets[0].data;
             var nonZero = data.filter(function (v) { return v > 0; }).length;
-            if (nonZero > 1) {
+            // A single reservation is still real dashboard activity. Only show
+            // the empty-state hint when the displayed trend has no activity.
+            if (nonZero > 0) {
                 return;
             }
             var chartCtx = chart.ctx;
