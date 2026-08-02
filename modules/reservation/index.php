@@ -113,14 +113,23 @@ function t8_reservation_has_conflict(PDO $pdo, int $facilityId, string $start, s
 /** Annotates a list of reservation rows in-place with a 'has_conflict' bool. */
 function t8_reservations_annotate_conflicts(PDO $pdo, array $rows): array
 {
+    $now = time();
     foreach ($rows as &$row) {
-        $row['has_conflict'] = t8_reservation_has_conflict(
-            $pdo,
-            (int) $row['facility_id'],
-            (string) $row['start_time'],
-            (string) $row['end_time'],
-            (int) $row['id']
-        );
+        $start = isset($row['start_time']) && $row['start_time'] !== '' ? strtotime((string) $row['start_time']) : false;
+        $end = isset($row['end_time']) && $row['end_time'] !== '' ? strtotime((string) $row['end_time']) : false;
+
+        // Only annotate a conflict for reservations that are currently ongoing.
+        if ($start !== false && $end !== false && $now >= $start && $now <= $end) {
+            $row['has_conflict'] = t8_reservation_has_conflict(
+                $pdo,
+                (int) $row['facility_id'],
+                (string) $row['start_time'],
+                (string) $row['end_time'],
+                isset($row['id']) ? (int) $row['id'] : null
+            );
+        } else {
+            $row['has_conflict'] = false;
+        }
     }
     unset($row);
     return $rows;

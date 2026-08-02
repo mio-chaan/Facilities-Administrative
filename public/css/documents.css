@@ -1,0 +1,170 @@
+/* =========================================================
+   documents.css — HR Document Automation extension to
+   Document Management. Loaded conditionally by templates/header.php
+   when $page === 'documents'. Everything here builds on the shared
+   tokens/components in style.css / components.css (same .t8- prefix
+   convention) - no new design system, just page-specific layout.
+   ========================================================= */
+
+.t8-docs-dashboard { display: flex; flex-direction: column; gap: var(--t8-space-4); }
+
+/* ---- Hero / top section ---- */
+.t8-docs-hero {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--t8-space-4);
+}
+.t8-docs-hero-text { flex: 1 1 320px; min-width: 0; }
+.t8-docs-hero-text h1 { margin-bottom: 4px; }
+.t8-docs-hero-actions { display: flex; flex-direction: column; gap: var(--t8-space-3); align-items: flex-end; }
+.t8-docs-hero-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.t8-docs-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--t8-secondary);
+    border: 1px solid var(--t8-border);
+    border-radius: 999px;
+    padding: 9px 16px;
+    min-width: 240px;
+}
+.t8-docs-search i { color: var(--t8-text-muted); }
+.t8-docs-search input { border: none; background: transparent; outline: none; font-family: inherit; font-size: 0.88rem; width: 100%; }
+
+/* ---- Two-column responsive grid (Second / Third sections) ---- */
+.t8-docs-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--t8-space-4);
+    align-items: start;
+}
+@media (min-width: 900px) {
+    .t8-docs-grid-2 { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---- Quick Actions card ---- */
+.t8-docs-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--t8-space-3);
+}
+.t8-docs-quick-action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: var(--t8-space-4) var(--t8-space-2);
+    border: 1.5px solid var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    background: var(--t8-secondary);
+    color: var(--t8-ink);
+    text-align: center;
+    font-size: 0.82rem;
+    font-weight: 600;
+    transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+.t8-docs-quick-action i { font-size: 1.3rem; color: var(--t8-primary); }
+.t8-docs-quick-action:hover { border-color: var(--t8-primary); background: #fff; transform: translateY(-2px); color: var(--t8-primary); }
+
+/* ---- Recent Documents list ---- */
+#t8RecentDocsWrap {
+    max-height: 177px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 2px;
+}
+#t8RecentDocsWrap::-webkit-scrollbar {
+    width: 8px;
+}
+#t8RecentDocsWrap::-webkit-scrollbar-thumb {
+    background: rgba(44, 32, 32, 0.12);
+    border-radius: 999px;
+}
+.t8-docs-recent-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.t8-docs-recent-item {
+    display: flex;
+    align-items: center;
+    gap: var(--t8-space-3);
+    padding: var(--t8-space-3) 0;
+    border-bottom: 1px solid var(--t8-border);
+}
+.t8-docs-recent-item:last-child { border-bottom: none; }
+.t8-docs-recent-item.t8-docs-hidden { display: none; }
+.t8-docs-recent-icon {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--t8-secondary); color: var(--t8-primary);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.t8-docs-recent-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.t8-docs-recent-body a { font-weight: 600; color: var(--t8-ink); }
+.t8-docs-recent-body a:hover { color: var(--t8-primary); }
+
+/* ---- Statistics / Pending Actions cards ---- */
+.t8-docs-stat-list { display: flex; flex-direction: column; }
+.t8-docs-stat {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--t8-space-3) 0;
+    border-bottom: 1px solid var(--t8-border);
+    font-size: 0.9rem;
+}
+.t8-docs-stat:last-child { border-bottom: none; }
+.t8-docs-stat strong { font-family: var(--t8-font-data); font-size: 1.05rem; color: var(--t8-primary); }
+
+/* ---- Template picker (Generate HR Document) ---- */
+.t8-template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--t8-space-3);
+    margin-top: var(--t8-space-3);
+}
+.t8-template-option { cursor: pointer; }
+.t8-template-option input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+.t8-template-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: var(--t8-space-5) var(--t8-space-3);
+    border: 2px solid var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    background: var(--t8-secondary);
+    color: var(--t8-ink);
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.88rem;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.t8-template-box i { font-size: 1.6rem; color: var(--t8-primary); }
+.t8-template-option input:checked + .t8-template-box,
+a.t8-template-box:hover {
+    border-color: var(--t8-primary);
+    background: #fff;
+}
+
+/* ---- Read-only, session-trusted identity block on HR forms ---- */
+.t8-hr-readonly-block {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--t8-space-3);
+    background: var(--t8-secondary);
+    border: 1px dashed var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    padding: var(--t8-space-4);
+    margin-bottom: var(--t8-space-4);
+}
+.t8-hr-readonly-item { display: flex; flex-direction: column; gap: 2px; }
+.t8-hr-readonly-item span { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--t8-text-muted); }
+.t8-hr-readonly-item strong { font-size: 0.92rem; color: var(--t8-ink); }
+
+@media (max-width: 640px) {
+    .t8-docs-hero { flex-direction: column; align-items: stretch; }
+    .t8-docs-hero-actions { align-items: stretch; }
+    .t8-docs-search { min-width: 0; }
+}

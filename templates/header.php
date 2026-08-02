@@ -35,6 +35,11 @@ $page      = $page ?? current_page();
     <?php if ($page === 'reservation'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/reservation.css')) ?>">
     <?php endif; ?>
+    <?php if ($page === 'documents'): ?>
+        <!-- HR Document Automation extension (dashboard, template picker,
+             generated-document forms). See public/css/documents.css. -->
+        <link rel="stylesheet" href="<?= e(asset('css/documents.css')) ?>">
+    <?php endif; ?>
 </head>
 <body>
 <?php $flashes = t8_flash_get(); ?>

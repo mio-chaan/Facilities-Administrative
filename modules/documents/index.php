@@ -1,8 +1,24 @@
 <?php
 /**
  * modules/documents/index.php
- * Document Management - upload, version, and archive documents.
+ * Document Management — traditional file uploads/versioning/archiving
+ * (unchanged from the original module) PLUS the HR Document
+ * Automation extension: a dashboard landing page, a template picker,
+ * and generated documents (Incident Report, Notice To Explain,
+ * Explanation Letter, Memorandum/Warning Letter, Certificate).
  *
+ * Routing:
+ *   ?action=dashboard (default)         -> modules/documents/hr/dashboard.php
+ *   ?action=browse                      -> the original upload list/table (below)
+ *   ?action=create|upload_version|
+ *           archive|restore|download|
+ *           summarize|versions          -> original upload logic (unchanged)
+ *   ?action=generate, *_new, *_view,
+ *           *_status, *_review,
+ *           *_edit, hr_print            -> modules/documents/hr/router.php
+ *
+ * No new sidebar entry was added — every HR feature lives inside this
+ * one Document Management page, per the task spec.
  */
 
 declare(strict_types=1);
@@ -15,10 +31,18 @@ if (is_file($aiHelperPath)) {
     require_once $aiHelperPath;
 }
 
+// HR Document Automation helpers (identity resolution, doc numbers,
+// status badges, notifications, versioning, fetch helpers). See
+// app/includes/hr_documents.php for the full security contract.
+$hrHelperPath = __DIR__ . '/../../app/includes/hr_documents.php';
+if (is_file($hrHelperPath)) {
+    require_once $hrHelperPath;
+}
+
 $pageTitle = 'Document Management';
 $currentUserId = t8_current_user_id();
 $isAdmin = t8_has_role('admin');
-$action = $_GET['action'] ?? 'list';
+$action = $_GET['action'] ?? 'dashboard';
 $errors = [];
 
 const T8_DOC_ALLOWED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'png', 'jpg', 'jpeg'];
@@ -132,6 +156,31 @@ foreach ($categories as $category) {
     if (isset($categoryTypeTemplates[$category['name']])) {
         $documentTypeOptions[(string) $category['id']] = $categoryTypeTemplates[$category['name']];
     }
+}
+
+// ---------------------------------------------------------------
+// HR Document Automation actions - dispatch and stop. Everything
+// below this block is the ORIGINAL upload/version/archive module,
+// unchanged.
+// ---------------------------------------------------------------
+$hrActions = [
+    'generate',
+    'incident_report_new', 'incident_report_view', 'incident_report_status',
+    'nte_new', 'nte_view', 'nte_status',
+    'explanation_new', 'explanation_view', 'explanation_review',
+    'memorandum_new', 'memorandum_edit', 'memorandum_view', 'memorandum_status',
+    'certificate_new', 'certificate_view', 'certificate_status',
+    'hr_print',
+];
+
+if (in_array($action, $hrActions, true)) {
+    require __DIR__ . '/hr/router.php';
+    return;
+}
+
+if ($action === 'dashboard') {
+    require __DIR__ . '/hr/dashboard.php';
+    return;
 }
 
 switch ($action) {
@@ -383,7 +432,10 @@ if ($showVersions) {
     }
 }
 
-$showList = !$showCreateForm && !$showUploadVersionForm && !$showVersions;
+// The original module's landing list is now reached via ?action=browse
+// ("Browse All Uploaded Documents" on the new dashboard), instead of
+// being the default view - the default is now the HR dashboard above.
+$showList = !$showCreateForm && !$showUploadVersionForm && !$showVersions && $action === 'browse';
 
 if ($showList) {
     $statusFilter = ($_GET['status'] ?? 'active') === 'archived' ? 'archived' : 'active';
@@ -396,6 +448,13 @@ if ($showList) {
          WHERE $whereClause
          ORDER BY d.updated_at DESC"
     )->fetchAll(PDO::FETCH_ASSOC);
+}
+
+if (!$showCreateForm && !$showUploadVersionForm && !$showVersions && !$showList) {
+    // Neither an HR action, 'dashboard', nor any known upload action -
+    // fall back to the dashboard rather than a blank page.
+    require __DIR__ . '/hr/dashboard.php';
+    return;
 }
 
 function t8_format_filesize(int $bytes): string
@@ -716,18 +775,21 @@ function t8_render_camera_capture(): void
         </div>
     </div>
 
-<?php else: ?>
+<?php elseif ($showList): ?>
 
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">
+            <i class="fa-solid fa-arrow-left"></i> Back to Dashboard
+        </a>
         <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'create'])) ?>">
             <i class="fa-solid fa-upload"></i> Upload New Document
         </a>
         <?php if ($statusFilter === 'active'): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['status' => 'archived'])) ?>">
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'archived'])) ?>">
                 <i class="fa-solid fa-box-archive"></i> View Archived
             </a>
         <?php else: ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'browse'])) ?>">
                 <i class="fa-solid fa-list"></i> View Active
             </a>
         <?php endif; ?>
