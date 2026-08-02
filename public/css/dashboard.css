@@ -195,3 +195,83 @@
     .t8-bar-row span:first-child { width: 96px; font-size: 0.78rem; }
 }
 
+/* =========================================================
+   TREND CARD REDESIGN — Monthly Reservation Trend
+   Replaces the old inline SVG polyline block. Chart is now
+   rendered by Chart.js (loaded in templates/header.php) into
+   a <canvas id="t8TrendChart">, driven by public/js/dashboard.js.
+   Kept in this file (not a new stylesheet) since it only applies
+   to the dashboard page, same as everything else here.
+   ========================================================= */
+
+.t8-trend-card .t8-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--t8-space-3);
+}
+.t8-trend-card-heading { min-width: 0; }
+.t8-trend-card-sub {
+    margin: 2px 0 0;
+    font-size: 0.76rem;
+    color: var(--t8-text-muted);
+    font-weight: 500;
+}
+.t8-trend-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: rgba(178, 34, 34, 0.08);
+    color: var(--t8-primary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.t8-trend-badge .t8-trend-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--t8-primary);
+    box-shadow: 0 0 0 3px rgba(178, 34, 34, 0.18);
+}
+
+.t8-trend-card .t8-card-body {
+    padding: 18px 14px 6px;
+}
+.t8-chart-shell {
+    position: relative;
+    height: 220px;
+    width: 100%;
+}
+.t8-chart-shell canvas {
+    /* Chart.js sizes itself via JS (responsive:true); this just
+       prevents a flash-of-huge-canvas before first render. */
+    max-height: 220px;
+}
+
+@media (max-width: 640px) {
+    .t8-chart-shell { height: 190px; }
+    .t8-trend-card .t8-card-body { padding: 14px 6px 4px; }
+}
+
+/* Custom Chart.js tooltip element injected by dashboard.js */
+.t8-chart-tooltip {
+    position: absolute;
+    pointer-events: none;
+    z-index: 20;
+    background: var(--t8-ink);
+    color: #fff;
+    font-family: var(--t8-font-body);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 12px;
+    border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(36, 17, 17, 0.28);
+    transform: translate(-50%, -125%);
+    transition: opacity 0.12s ease;
+    white-space: nowrap;
+    opacity: 0;
+}

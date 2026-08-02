@@ -19,6 +19,18 @@ $page      = $page ?? current_page();
     <link rel="stylesheet" href="<?= e(asset('css/components.css')) ?>">
     <?php if ($page === 'dashboard'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/dashboard.css')) ?>">
+        <!-- REDESIGN: Chart.js powers the Monthly Reservation Trend card
+             (see modules/dashboard/index.php + public/js/dashboard.js).
+             Loaded here, before body content, same pattern as Font
+             Awesome above; only pulled in on the dashboard page.
+             NOTE: no integrity= hash here on purpose - a stale/incorrect
+             SRI hash makes the browser silently block the whole script
+             (the exact bug that broke this include the first time
+             around). If you want SRI, generate the hash yourself for
+             this exact file with:
+               curl -s https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js | openssl dgst -sha512 -binary | openssl base64 -A
+             and paste it back in as integrity="sha512-...". -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <?php endif; ?>
     <?php if ($page === 'reservation'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/reservation.css')) ?>">
