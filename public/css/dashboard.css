@@ -158,6 +158,21 @@
 .t8-card-title { margin: 0; font-size: 1rem; }
 .t8-main-grid .t8-card-body { padding: var(--t8-space-4) var(--t8-space-5); }
 
+@media (min-width: 1000px) {
+    .t8-facility-util,
+    .t8-doc-categories,
+    .t8-activity-timeline {
+        min-height: 252px;
+    }
+
+    .t8-facility-util .t8-card-body,
+    .t8-doc-categories .t8-card-body,
+    .t8-activity-timeline .t8-card-body {
+        max-height: 192px;
+        overflow-y: auto;
+    }
+}
+
 .t8-chart { height: 180px; display: flex; align-items: center; justify-content: center; }
 .t8-sparkline { width: 100%; height: 100%; }
 
