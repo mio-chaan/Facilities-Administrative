@@ -414,7 +414,9 @@ switch ($action) {
                 $quantity = $formValues['quantity'] !== '' ? (int) $formValues['quantity'] : null;
 
                 if (!$errors) {
-                    $status = $isAdmin ? 'approved' : 'pending';
+                    // Treat all created reservations as requests to be approved.
+                    // Administrators no longer auto-approve upon creation.
+                    $status = 'pending';
                     $stmt = $pdo->prepare(
                         'INSERT INTO team8_reservations
                             (facility_id, user_id, start_time, end_time, status, department, key_person, expected_participants, quantity, event_category, description, expected_return_date, remarks, schedule, requirements)
@@ -440,29 +442,9 @@ switch ($action) {
                     ]);
                     $newId = (int) $pdo->lastInsertId();
 
-                    if ($isAdmin) {
-                        // Administrator-created reservations are recorded as a
-                        // single approval step in the approvals table.
-                        $pdo->prepare(
-                            'INSERT INTO team8_reservation_approvals (reservation_id, approver_id, step_order, status, decided_at)
-                             VALUES (:reservation_id, :approver_id, 1, "approved", NOW())'
-                        )->execute(['reservation_id' => $newId, 'approver_id' => $currentUserId]);
-                        t8_audit_log($pdo, $currentUserId, 'reservation', $newId, 'create_auto_approved');
-
-                        // Conflict warnings are shown when an auto-approved
-                        // reservation overlaps with another approved booking.
-                        $hasConflict = t8_reservation_has_conflict(
-                            $pdo, $facilityId, $formValues['start_time'], $formValues['end_time'], $newId
-                        );
-                        if ($hasConflict) {
-                            t8_flash_set('warning', 'Reservation created and approved, but it overlaps with another approved reservation for this facility.');
-                        } else {
-                            t8_flash_set('success', 'Reservation created and approved.');
-                        }
-                    } else {
-                        t8_audit_log($pdo, $currentUserId, 'reservation', $newId, 'create');
-                        t8_flash_set('success', 'Reservation request submitted for approval.');
-                    }
+                    // Log creation and notify the user that the request is pending.
+                    t8_audit_log($pdo, $currentUserId, 'reservation', $newId, 'create');
+                    t8_flash_set('success', 'Reservation request submitted for approval.');
 
                     redirect(page_url('reservation'));
                 }
@@ -647,11 +629,12 @@ $selectedReservationConfig = t8_reservation_get_facility_type_config($selectedFa
 if (!$showForm) {
     if ($isAdmin) {
         $allReservations = $pdo->query(
-            'SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
+            "SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
-             ORDER BY r.start_time DESC'
+             WHERE r.status = 'approved'
+             ORDER BY r.start_time DESC"
         )->fetchAll(PDO::FETCH_ASSOC);
         $allReservations = t8_reservations_annotate_conflicts($pdo, $allReservations);
 
@@ -668,11 +651,12 @@ if (!$showForm) {
         $pendingReservations = t8_reservations_annotate_conflicts($pdo, $pendingReservations);
     } else {
         $allReservationsStmt = $pdo->prepare(
-            'SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
+            "SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
-             ORDER BY r.start_time DESC'
+             WHERE r.status = 'approved'
+             ORDER BY r.start_time DESC"
         );
         $allReservationsStmt->execute();
         $allReservations = $allReservationsStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -830,7 +814,7 @@ if (!$showForm) {
 
                 <button class="t8-btn t8-btn-accent" type="submit">
                     <i class="fa-solid fa-check"></i>
-                    <?= $action === 'edit' ? 'Save Changes' : ($isAdmin ? 'Create & Approve' : 'Submit Request') ?>
+                    <?= $action === 'edit' ? 'Save Changes' : ($isAdmin ? 'Continue' : 'Submit Request') ?>
                 </button>
                 <a class="t8-btn t8-btn-outline" href="<?= e(page_url('reservation')) ?>">Cancel</a>
             </form>

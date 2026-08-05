@@ -150,7 +150,8 @@ try {
     $trendStmt = $pdo->prepare(
         'SELECT DATE(start_time) AS d, COUNT(*) AS cnt
          FROM team8_reservations
-         WHERE DATE(start_time) BETWEEN :start_date AND :end_date
+         WHERE status = "approved"
+           AND DATE(start_time) BETWEEN :start_date AND :end_date
          GROUP BY d
          ORDER BY d ASC'
     );
