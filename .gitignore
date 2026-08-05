@@ -14,5 +14,6 @@ node_modules/
 
 # Logs
 *.log
-*.env
+# Local secret config
+app/config/config.local.php
 

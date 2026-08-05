@@ -13,7 +13,16 @@ define('APP_DEBUG', true);               // true = show real PHP errors (local o
 define('APP_URL', 'http://localhost:8000'); 
 define('APP_TIMEZONE', 'Asia/Manila');
 define('DB_TEAM8_PREFIX', 'team8_');
-define('OPENAI_API_KEY', $_ENV['OPENAI_API_KEY'] ?? '');
+// Load local config (contains secrets) if present
+$__local_cfg = __DIR__ . '/config.local.php';
+if (file_exists($__local_cfg)) {
+    require $__local_cfg;
+}
+
+// Ensure OPENAI_API_KEY is defined: prefer explicit constant, then getenv, then $_ENV, else empty
+if (!defined('OPENAI_API_KEY')) {
+    define('OPENAI_API_KEY', getenv('OPENAI_API_KEY') ?: ($_ENV['OPENAI_API_KEY'] ?? ''));
+}
 define('UPLOAD_MAX_SIZE_MB', 10);
 define('UPLOAD_DIR', dirname(__DIR__, 2) . '/public/uploads');
 
