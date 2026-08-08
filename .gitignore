@@ -1,0 +1,18 @@
+# Uploaded files (user content, not source)
+public/uploads/*
+!public/uploads/.gitkeep
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Dependencies
+vendor/
+node_modules/
+
+# Logs
+*.log
+*.env
+
