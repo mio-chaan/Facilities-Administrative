@@ -127,6 +127,7 @@ CREATE TABLE team8_reservations (
     -- rejection_reason        TEXT NULL,
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    archived_at             DATETIME NULL,
     deleted_at              DATETIME NULL,
     CONSTRAINT fk_team8_reservations_facility FOREIGN KEY (facility_id) REFERENCES team8_facilities(id),
     CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id)
@@ -506,6 +507,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 CREATE INDEX idx_team8_reservations_status ON team8_reservations(status);
 CREATE INDEX idx_team8_reservations_dates ON team8_reservations(start_time, end_time);
 CREATE INDEX idx_team8_reservations_deleted_at ON team8_reservations(deleted_at);
+CREATE INDEX idx_team8_reservations_archived_at ON team8_reservations(archived_at);
 CREATE INDEX idx_team8_facilities_status ON team8_facilities(status);
 CREATE INDEX idx_team8_visitors_status ON team8_visitors(status);
 CREATE INDEX idx_team8_visitors_scheduled ON team8_visitors(scheduled_date);

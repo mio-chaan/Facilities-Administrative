@@ -8,10 +8,12 @@ $rows = [
     ['id'=>1,'facility_id'=>1,'start_time'=>fmt($now-60),'end_time'=>fmt($now+60),'status'=>'approved'],
     // reservation under test (ongoing) - should show conflict
     ['id'=>2,'facility_id'=>1,'start_time'=>fmt($now-30),'end_time'=>fmt($now+30),'status'=>'approved'],
-    // future overlapping - should NOT show conflict now
-    ['id'=>3,'facility_id'=>1,'start_time'=>fmt($now+3600),'end_time'=>fmt($now+3660),'status'=>'approved'],
+    // future overlapping approved booking - should show conflict
+    ['id'=>3,'facility_id'=>1,'start_time'=>fmt($now+30),'end_time'=>fmt($now+90),'status'=>'approved'],
     // past overlapping - should NOT show conflict now
     ['id'=>4,'facility_id'=>1,'start_time'=>fmt($now-7200),'end_time'=>fmt($now-7100),'status'=>'approved'],
+    // pending bookings never display a conflict indicator
+    ['id'=>5,'facility_id'=>1,'start_time'=>fmt($now-30),'end_time'=>fmt($now+30),'status'=>'pending'],
 ];
 
 function overlaps($aStart,$aEnd,$bStart,$bEnd) {
@@ -33,7 +35,7 @@ function annotate_conflicts(array $rows) {
     foreach ($rows as &$row) {
         $start = isset($row['start_time']) && $row['start_time'] !== '' ? strtotime($row['start_time']) : false;
         $end = isset($row['end_time']) && $row['end_time'] !== '' ? strtotime($row['end_time']) : false;
-        if ($start !== false && $end !== false && $now >= $start && $now <= $end) {
+        if ($row['status'] === 'approved' && $start !== false && $end !== false && $end >= $now) {
             $row['has_conflict'] = has_conflict_in_set($rows,$row);
         } else {
             $row['has_conflict'] = false;
@@ -50,8 +52,9 @@ echo json_encode($result, JSON_PRETTY_PRINT) . "\n";
 $expected = [
     1 => true, // existing ongoing should be true (there is another ongoing approved)
     2 => true, // ongoing should be true
-    3 => false,
+    3 => true,
     4 => false,
+    5 => false,
 ];
 foreach ($result as $r) {
     $id = $r['id'];

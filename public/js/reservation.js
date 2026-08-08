@@ -1,6 +1,26 @@
 /** Facility-type-driven reservation form behaviour. */
 document.addEventListener('DOMContentLoaded', function () {
     var form = document.getElementById('t8ReservationForm');
+    document.querySelectorAll('[data-reservation-filters]').forEach(function (filters) {
+        var table = document.getElementById(filters.getAttribute('data-filter-table'));
+        if (!table) return;
+        var month = filters.querySelector('[data-filter-month]');
+        var year = filters.querySelector('[data-filter-year]');
+        var rows = Array.prototype.slice.call(table.querySelectorAll('[data-reservation-row]'));
+        var years = {};
+        rows.forEach(function (row) { var date = row.getAttribute('data-reservation-date') || ''; if (date) years[date.slice(0, 4)] = true; });
+        Object.keys(years).sort().reverse().forEach(function (value) { var option = document.createElement('option'); option.value = value; option.textContent = value; year.appendChild(option); });
+        function applyFilters() {
+            rows.forEach(function (row) {
+                var date = row.getAttribute('data-reservation-date') || '';
+                var matchesMonth = !month.value || Number(date.slice(5, 7)) === Number(month.value);
+                var matchesYear = !year.value || date.slice(0, 4) === year.value;
+                row.hidden = !(matchesMonth && matchesYear);
+            });
+        }
+        month.addEventListener('change', applyFilters);
+        year.addEventListener('change', applyFilters);
+    });
     if (!form) return;
 
     var facility = document.getElementById('facility_id');

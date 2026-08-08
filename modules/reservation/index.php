@@ -118,8 +118,12 @@ function t8_reservations_annotate_conflicts(PDO $pdo, array $rows): array
         $start = isset($row['start_time']) && $row['start_time'] !== '' ? strtotime((string) $row['start_time']) : false;
         $end = isset($row['end_time']) && $row['end_time'] !== '' ? strtotime((string) $row['end_time']) : false;
 
-        // Only annotate a conflict for reservations that are currently ongoing.
-        if ($start !== false && $end !== false && $now >= $start && $now <= $end) {
+        // Conflicts apply only to approved reservations that have not ended
+        // (both upcoming and ongoing bookings).
+        if (($row['status'] ?? '') === 'approved'
+            && $start !== false
+            && $end !== false
+            && $end >= $now) {
             $row['has_conflict'] = t8_reservation_has_conflict(
                 $pdo,
                 (int) $row['facility_id'],
@@ -390,6 +394,14 @@ function t8_reservation_schedule(array $reservation): array
     return ['primary' => 'N/A', 'secondary' => ''];
 }
 
+/** Date used by the client-side month/year reservation filters. */
+function t8_reservation_filter_date(array $reservation): string
+{
+    $date = (string) ($reservation['start_time'] ?? $reservation['schedule'] ?? '');
+    $timestamp = strtotime($date);
+    return $timestamp === false ? '' : date('Y-m-d', $timestamp);
+}
+
 switch ($action) {
     case 'create':
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -622,11 +634,22 @@ switch ($action) {
 }
 
 $showForm = in_array($action, ['create', 'edit'], true);
+$showArchive = $isAdmin && $action === 'archive';
 $selectedFacilityType = t8_reservation_detect_facility_type($activeFacilities, $formValues['facility_id']);
 $selectedReservationConfig = t8_reservation_get_facility_type_config($selectedFacilityType);
 
 // ---- Data for the list view ----
 if (!$showForm) {
+    // Completed approved bookings are retained for audit purposes but are no
+    // longer part of any active reservation list.
+    $pdo->query(
+        "UPDATE team8_reservations
+         SET archived_at = COALESCE(archived_at, NOW())
+         WHERE status = 'approved'
+           AND COALESCE(end_time, schedule) IS NOT NULL
+           AND COALESCE(end_time, schedule) < NOW()"
+    );
+
     if ($isAdmin) {
         $allReservations = $pdo->query(
             "SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
@@ -634,9 +657,20 @@ if (!$showForm) {
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
              WHERE r.status = 'approved'
-             ORDER BY r.start_time DESC"
+               AND r.archived_at IS NULL
+               AND COALESCE(r.end_time, r.schedule) >= NOW()
+             ORDER BY r.start_time ASC"
         )->fetchAll(PDO::FETCH_ASSOC);
         $allReservations = t8_reservations_annotate_conflicts($pdo, $allReservations);
+
+        $archivedReservations = $pdo->query(
+            "SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
+             FROM team8_reservations r
+             JOIN team8_facilities f ON f.id = r.facility_id
+             JOIN users u ON u.id = r.user_id
+             WHERE r.archived_at IS NOT NULL
+             ORDER BY COALESCE(r.end_time, r.schedule) DESC"
+        )->fetchAll(PDO::FETCH_ASSOC);
 
         // Lists EVERY reservation currently awaiting approval - nothing
         // filters this further, so it's always the complete pending set.
@@ -656,6 +690,8 @@ if (!$showForm) {
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
              WHERE r.status = 'approved'
+               AND r.archived_at IS NULL
+               AND COALESCE(r.end_time, r.schedule) >= NOW()
              ORDER BY r.start_time DESC"
         );
         $allReservationsStmt->execute();
@@ -829,6 +865,11 @@ if (!$showForm) {
                 <i class="fa-solid fa-calendar-plus"></i> New Reservation
             </a>
         <?php endif; ?>
+        <?php if ($isAdmin): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('reservation', ['action' => 'archive'])) ?>">
+                <i class="fa-solid fa-box-archive"></i> Archive
+            </a>
+        <?php endif; ?>
     </div>
 
     <?php if (!$hasActiveFacilities): ?>
@@ -843,7 +884,30 @@ if (!$showForm) {
         </div>
     <?php endif; ?>
 
-    <?php if ($isAdmin): ?>
+    <?php if ($showArchive): ?>
+
+        <div class="t8-card">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title">Archived Reservations</h2>
+                <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation')) ?>">Back to Reservations</a>
+            </div>
+            <div class="t8-reservation-filters" data-reservation-filters data-filter-table="t8ArchiveReservations">
+                <label>Month <select class="t8-select" data-filter-month><option value="">All months</option><?php foreach (range(1, 12) as $month): ?><option value="<?= e((string) $month) ?>"><?= e(date('F', mktime(0, 0, 0, $month, 1))) ?></option><?php endforeach; ?></select></label>
+                <label>Year <select class="t8-select" data-filter-year><option value="">All years</option></select></label>
+            </div>
+            <div class="t8-table-wrap"><table class="t8-table" id="t8ArchiveReservations"><thead><tr><th>Facility</th><th>Requested By</th><th>Department</th><th>Key Person</th><th>Reservation</th><th>Schedule</th><th>Archived</th></tr></thead><tbody>
+                <?php if ($archivedReservations === []): ?>
+                    <tr class="t8-filter-empty"><td colspan="7" class="t8-table-empty-row">No completed reservations have been archived yet.</td></tr>
+                <?php else: ?>
+                    <?php foreach ($archivedReservations as $r): ?>
+                        <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
+                        <tr data-reservation-row data-reservation-date="<?= e(t8_reservation_filter_date($r)) ?>"><td><?= e($r['facility_name']) ?></td><td><?= e($r['requester_name']) ?></td><td><?= e((string) ($r['department'] ?? '-')) ?></td><td><?= e((string) ($r['key_person'] ?? '-')) ?></td><td><?= e($summary['category']) ?></td><td><?= e($schedule['primary']) ?></td><td><?= e(format_date((string) $r['archived_at'], 'M d, Y g:i A')) ?></td></tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody></table></div>
+        </div>
+
+    <?php elseif ($isAdmin): ?>
 
         <div class="t8-card">
             <div class="t8-card-header">
@@ -859,6 +923,8 @@ if (!$showForm) {
                             <th>Facility</th>
                             <th>Type</th>
                             <th>Requested By</th>
+                            <th>Department</th>
+                            <th>Key Person</th>
                             <th>Reservation</th>
                             <th>Schedule</th>
                             <th>Conflict</th>
@@ -868,7 +934,7 @@ if (!$showForm) {
                     <tbody>
                         <?php if ($pendingReservations === []): ?>
                             <tr>
-                                <td colspan="7" class="t8-table-empty-row">
+                                <td colspan="9" class="t8-table-empty-row">
                                     No reservation requests are waiting for approval yet.
                                     Once a request is submitted, it will appear here.
                                 </td>
@@ -880,6 +946,8 @@ if (!$showForm) {
                                     <td><?= e($p['facility_name']) ?></td>
                                     <td><span class="t8-type-pill"><?= e((string) ($p['facility_type'] ?? 'Unknown')) ?></span></td>
                                     <td><?= e($p['requester_name']) ?></td>
+                                    <td><?= e((string) ($p['department'] ?? '-')) ?></td>
+                                    <td><?= e((string) ($p['key_person'] ?? '-')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td>
@@ -921,13 +989,19 @@ if (!$showForm) {
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
             </div>
+            <div class="t8-reservation-filters" data-reservation-filters data-filter-table="t8AllReservations">
+                <label>Month <select class="t8-select" data-filter-month><option value="">All months</option><?php foreach (range(1, 12) as $month): ?><option value="<?= e((string) $month) ?>"><?= e(date('F', mktime(0, 0, 0, $month, 1))) ?></option><?php endforeach; ?></select></label>
+                <label>Year <select class="t8-select" data-filter-year><option value="">All years</option></select></label>
+            </div>
             <div class="t8-table-wrap">
-                <table class="t8-table">
+                <table class="t8-table" id="t8AllReservations">
                     <thead>
                         <tr>
                             <th>Facility</th>
                             <th>Type</th>
                             <th>Requested By</th>
+                            <th>Department</th>
+                            <th>Key Person</th>
                             <th>Reservation</th>
                             <th>Schedule</th>
                             <th>Status</th>
@@ -938,7 +1012,7 @@ if (!$showForm) {
                     <tbody>
                         <?php if ($allReservations === []): ?>
                             <tr>
-                                <td colspan="8" class="t8-table-empty-row">
+                                <td colspan="10" class="t8-table-empty-row">
                                     No reservations have been made yet.
                                     Once a reservation is submitted, it will appear here.
                                 </td>
@@ -946,10 +1020,12 @@ if (!$showForm) {
                         <?php else: ?>
                             <?php foreach ($allReservations as $r): ?>
                                 <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
-                                <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
+                                <tr data-reservation-row data-reservation-date="<?= e(t8_reservation_filter_date($r)) ?>" <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
                                     <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
                                     <td><?= e($r['requester_name']) ?></td>
+                                    <td><?= e((string) ($r['department'] ?? '-')) ?></td>
+                                    <td><?= e((string) ($r['key_person'] ?? '-')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
