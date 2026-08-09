@@ -1,0 +1,45 @@
+# =========================================================
+# Root .htaccess
+# This repo is deployed by dropping the whole folder into htdocs/
+# (see README). Without server-level deny rules, the app/ and
+# database/ trees would be directly downloadable (config, DB
+# credentials, seed.sql's password hashes/emails). This file denies
+# dotfiles and every non-public source tree at the web-server level,
+# independent of any application code.
+# =========================================================
+
+# Apache 2.4+
+<IfModule mod_authz_core.c>
+    <FilesMatch "^\.">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+
+# Apache 2.2 fallback
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^\.">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
+
+RewriteEngine On
+
+# Only public/ and the front-controller/entry scripts at the root
+# should ever be reachable. Block direct requests into the source
+# trees (defense in depth - app/ and database/ also carry their own
+# deny-all .htaccess, see below).
+RewriteRule ^(app|database|modules|templates|docs)(/|$) - [F,L]
+
+# Belt-and-suspenders in case RewriteEngine isn't available/enabled.
+<IfModule mod_authz_core.c>
+    <FilesMatch "\.(sql|md)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "\.(sql|md)$">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
