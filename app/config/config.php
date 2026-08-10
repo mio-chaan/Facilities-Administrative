@@ -19,9 +19,11 @@ if (file_exists($__local_cfg)) {
     require $__local_cfg;
 }
 
-// Ensure OPENAI_API_KEY is defined: prefer explicit constant, then getenv, then $_ENV, else empty
-if (!defined('OPENAI_API_KEY')) {
-    define('OPENAI_API_KEY', getenv('OPENAI_API_KEY') ?: ($_ENV['OPENAI_API_KEY'] ?? ''));
+// AI PROVIDER: Gemini (previously OpenAI — see app/includes/ai_helper.php).
+// Ensure GEMINI_API_KEY is defined: prefer explicit constant (set in
+// config.local.php), then getenv, then $_ENV, else empty.
+if (!defined('GEMINI_API_KEY')) {
+    define('GEMINI_API_KEY', getenv('GEMINI_API_KEY') ?: ($_ENV['GEMINI_API_KEY'] ?? ''));
 }
 define('UPLOAD_MAX_SIZE_MB', 10);
 define('UPLOAD_DIR', dirname(__DIR__, 2) . '/public/uploads');

@@ -25,6 +25,15 @@
  *                              \-> cancelled
  *
  * Backing table: team8_visitors (see database/visitor_scheduling_fields.sql).
+ *
+ * CLEANUP: two dead helpers, t8_normalize_ph_contact() and
+ * t8_validate_ph_contact(), were defined here but never called — the
+ * contact number field is validated inline below with a simple
+ * 10-digit regex against a hardcoded +63 prefix. Removed rather than
+ * left unreferenced; if richer multi-format PH number support
+ * (accepting +63…, 0…, 63…, or bare 10-digit input) is wanted later,
+ * reintroduce them and wire the create-form validation to actually
+ * call them instead of the inline regex.
  */
 
 declare(strict_types=1);
@@ -104,45 +113,6 @@ function t8_normalize_datetime(string $value): string
         $value .= ':00';
     }
     return $value;
-}
-
-function t8_normalize_ph_contact(string $contact): string
-{
-    $contact = trim($contact);
-    if ($contact === '') {
-        return '';
-    }
-
-    $digits = preg_replace('/[^\d\+]/', '', $contact);
-
-    if ($digits === '+63' || $digits === '63') {
-        return '';
-    }
-    if (preg_match('/^\+63\d{10}$/', $digits)) {
-        return $digits;
-    }
-    if (preg_match('/^0(\d{10})$/', $digits, $matches)) {
-        return '+63' . $matches[1];
-    }
-    if (preg_match('/^63(\d{10})$/', $digits, $matches)) {
-        return '+63' . $matches[1];
-    }
-    if (preg_match('/^(\d{10})$/', $digits, $matches)) {
-        return '+63' . $matches[1];
-    }
-
-    return $contact;
-}
-
-function t8_validate_ph_contact(string $contact): bool
-{
-    $contact = trim($contact);
-    if ($contact === '') {
-        return true;
-    }
-
-    $normalized = t8_normalize_ph_contact($contact);
-    return preg_match('/^\+63\d{10}$/', $normalized) === 1;
 }
 
 function t8_visitor_status_badge(string $status): string

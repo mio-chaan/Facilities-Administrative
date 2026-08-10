@@ -6,7 +6,7 @@
  * an AJAX POST from the floating widget (see templates/ai_widget.php).
  * A direct GET visit just shows a short explanatory message.
  *
- * Requires GEMINI_API_KEY - see app/includes/ai_helper.php for setup.
+ * Requires OPENAI_API_KEY - see app/includes/ai_helper.php for setup.
  */
 
 declare(strict_types=1);
@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         . 'more detail.';
 
     try {
-        $reply = t8_ai_chat([
+        $reply = t8_openai_chat([
             ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => $userMessage],
         ]);

@@ -37,13 +37,12 @@ const T8_CERTIFICATE_TYPES = [
     'attendance'  => 'Certificate of Attendance',
 ];
 
-const T8_HR_TEMPLATES = [
-    'incident_report' => ['label' => 'Incident Report',    'icon' => 'fa-triangle-exclamation', 'action' => 'incident_report_new'],
-    'nte'              => ['label' => 'Notice To Explain',  'icon' => 'fa-file-circle-question',  'action' => 'nte_new'],
-    'memorandum'       => ['label' => 'Memorandum',         'icon' => 'fa-file-lines',            'action' => 'memorandum_new'],
-    'warning_letter'   => ['label' => 'Warning Letter',     'icon' => 'fa-triangle-exclamation',  'action' => 'memorandum_new'],
-    'certificate'      => ['label' => 'Certificate',        'icon' => 'fa-certificate',           'action' => 'certificate_new'],
-];
+// NOTE: a T8_HR_TEMPLATES constant (label/icon/action per HR doc type)
+// previously lived here but was never referenced anywhere — both
+// hr/generate.php and hr/dashboard.php hardcode their own template
+// tile lists instead of looping over it. Removed as dead code; if a
+// data-driven template list is wanted later, reintroduce it and wire
+// BOTH of those files to loop over it instead of hardcoding.
 
 if (!function_exists('t8_hr_current_employee')) {
     /**
@@ -348,7 +347,7 @@ if (!function_exists('t8_hr_dashboard_stats')) {
             'total_documents'     => 0,
             'generated_documents' => 0,
             'archived'            => 0,
-            'templates'           => count(T8_HR_TEMPLATES), // 5 picker options in hr/generate.php (warning_letter shares memorandum's table, but is still its own template choice)
+            'templates'           => 5, // Incident Report, NTE, Memorandum, Warning Letter, Certificate (see hr/generate.php)
             'pending_incidents'   => 0,
             'pending_nte'         => 0,
             'pending_explanations' => 0,
@@ -360,7 +359,10 @@ if (!function_exists('t8_hr_dashboard_stats')) {
 
             $generated = 0;
             $archived = (int) $pdo->query("SELECT COUNT(*) FROM team8_documents WHERE deleted_at IS NOT NULL")->fetchColumn();
-            foreach (['team8_incident_reports', 'team8_notice_to_explain', 'team8_memorandums', 'team8_certificates'] as $table) {
+            // BUG FIX: team8_explanations was missing from this list, so
+            // explanations that an admin archived via explanation_review
+            // never showed up in "Generated Documents" or "Archived" here.
+            foreach (['team8_incident_reports', 'team8_notice_to_explain', 'team8_explanations', 'team8_memorandums', 'team8_certificates'] as $table) {
                 $generated += (int) $pdo->query("SELECT COUNT(*) FROM {$table} WHERE status != 'archived'")->fetchColumn();
                 $archived  += (int) $pdo->query("SELECT COUNT(*) FROM {$table} WHERE status = 'archived'")->fetchColumn();
             }

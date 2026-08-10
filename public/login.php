@@ -3,6 +3,14 @@
  * login.php
  * Verifies email/password against the shared users table and sets
  * the session contract documented in app/includes/auth_check.php.
+ *
+ * BUG FIX: throttling previously lived in $_SESSION, which resets the
+ * instant a client drops its session cookie. It now persists in the
+ * team8_login_throttle table (see database/schema.sql), keyed by the
+ * lowercased email being attempted, so the lockout survives across
+ * sessions/browsers for that account. A GET (just showing the form)
+ * no longer needs to check lockout state, since we don't know which
+ * account is being targeted until a POST supplies an email.
  */
 
 declare(strict_types=1);
@@ -22,21 +30,71 @@ if (!empty($_SESSION['user_id'])) {
 const T8_LOGIN_MAX_ATTEMPTS  = 5;
 const T8_LOGIN_LOCKOUT_SECS  = 300; // 5 minutes
 
-$_SESSION['t8_login_attempts']    ??= 0;
-$_SESSION['t8_login_locked_until'] ??= 0;
+/** Fetch the throttle row for this identifier (lowercased email), or null. */
+function t8_login_throttle_fetch(PDO $pdo, string $identifier): ?array
+{
+    $stmt = $pdo->prepare('SELECT attempts, locked_until FROM team8_login_throttle WHERE identifier = :id LIMIT 1');
+    $stmt->execute(['id' => $identifier]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
 
-$isLockedOut = $_SESSION['t8_login_locked_until'] > time();
+/** True if the given throttle row is currently within its lockout window. */
+function t8_login_is_locked(?array $throttle): bool
+{
+    return $throttle !== null
+        && $throttle['locked_until'] !== null
+        && strtotime((string) $throttle['locked_until']) > time();
+}
+
+/**
+ * Records a failed attempt for this identifier. Returns true if this
+ * failure just triggered a new lockout.
+ */
+function t8_login_record_failure(PDO $pdo, string $identifier): bool
+{
+    $throttle = t8_login_throttle_fetch($pdo, $identifier);
+    $attempts = ($throttle['attempts'] ?? 0) + 1;
+
+    if ($attempts >= T8_LOGIN_MAX_ATTEMPTS) {
+        $lockedUntil = date('Y-m-d H:i:s', time() + T8_LOGIN_LOCKOUT_SECS);
+        $pdo->prepare(
+            'INSERT INTO team8_login_throttle (identifier, attempts, locked_until)
+             VALUES (:id, 0, :locked_until)
+             ON DUPLICATE KEY UPDATE attempts = 0, locked_until = :locked_until2'
+        )->execute(['id' => $identifier, 'locked_until' => $lockedUntil, 'locked_until2' => $lockedUntil]);
+        return true;
+    }
+
+    $pdo->prepare(
+        'INSERT INTO team8_login_throttle (identifier, attempts, locked_until)
+         VALUES (:id, :attempts, NULL)
+         ON DUPLICATE KEY UPDATE attempts = :attempts2, locked_until = NULL'
+    )->execute(['id' => $identifier, 'attempts' => $attempts, 'attempts2' => $attempts]);
+    return false;
+}
+
+/** Clears the throttle row for this identifier on a successful login. */
+function t8_login_clear_throttle(PDO $pdo, string $identifier): void
+{
+    $pdo->prepare('DELETE FROM team8_login_throttle WHERE identifier = :id')->execute(['id' => $identifier]);
+}
 
 $errors = [];
 $emailValue = '';
+$isLockedOut = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $emailValue = trim($_POST['email'] ?? '');
+    $identifier = strtolower($emailValue);
+    $throttle = $identifier !== '' ? t8_login_throttle_fetch($pdo, $identifier) : null;
+    $isLockedOut = t8_login_is_locked($throttle);
+
     if ($isLockedOut) {
-        $waitSecs = $_SESSION['t8_login_locked_until'] - time();
+        $waitSecs = strtotime((string) $throttle['locked_until']) - time();
         $errors[] = "Too many failed attempts. Try again in {$waitSecs}s.";
     } else {
-        $emailValue = trim($_POST['email'] ?? '');
-        $password   = (string) ($_POST['password'] ?? '');
+        $password = (string) ($_POST['password'] ?? '');
 
         if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
             $errors[] = 'Your session expired. Please try again.';
@@ -56,13 +114,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Deliberately vague — never reveal whether the email exists.
                 $errors[] = 'Invalid email or password.';
 
-                $_SESSION['t8_login_attempts']++;
-                if ($_SESSION['t8_login_attempts'] >= T8_LOGIN_MAX_ATTEMPTS) {
-                    $_SESSION['t8_login_locked_until'] = time() + T8_LOGIN_LOCKOUT_SECS;
-                    $_SESSION['t8_login_attempts'] = 0;
+                $justLockedOut = t8_login_record_failure($pdo, $identifier);
+                if ($justLockedOut) {
+                    $isLockedOut = true;
                     $errors = ['Too many failed attempts. Try again in ' . T8_LOGIN_LOCKOUT_SECS . 's.'];
                 }
             } else {
+                t8_login_clear_throttle($pdo, $identifier);
+
                 $roleStmt = $pdo->prepare(
                     'SELECT r.role_name
                      FROM user_roles ur
@@ -78,8 +137,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['full_name']     = $user['full_name'];
                 $_SESSION['role']          = $role ?: 'employee';
                 $_SESSION['department_id'] = $user['department_id'] !== null ? (int) $user['department_id'] : null;
-                $_SESSION['t8_login_attempts']     = 0;
-                $_SESSION['t8_login_locked_until'] = 0;
 
                 t8_audit_log($pdo, (int) $user['id'], 'user', (int) $user['id'], 'login');
 
