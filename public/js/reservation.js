@@ -1,5 +1,30 @@
 /** Facility-type-driven reservation form behaviour. */
 document.addEventListener('DOMContentLoaded', function () {
+    var cancellationModal = document.getElementById('t8CancellationRequestModal');
+    document.querySelectorAll('[data-cancel-reservation-id]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            if (!cancellationModal) return;
+            document.getElementById('t8CancellationReservationId').value = button.getAttribute('data-cancel-reservation-id');
+            document.getElementById('t8CancellationReason').value = '';
+            cancellationModal.showModal();
+        });
+    });
+    document.querySelectorAll('[data-close-cancellation-modal]').forEach(function (button) {
+        button.addEventListener('click', function () { cancellationModal.close(); });
+    });
+    if (cancellationModal) {
+        cancellationModal.querySelector('form').addEventListener('submit', function (event) {
+            var reason = document.getElementById('t8CancellationReason');
+            var error = document.getElementById('t8CancellationReasonError');
+            if (!reason.value.trim()) {
+                event.preventDefault();
+                error.hidden = false;
+                reason.focus();
+            } else {
+                error.hidden = true;
+            }
+        });
+    }
     var form = document.getElementById('t8ReservationForm');
     document.querySelectorAll('[data-reservation-filters]').forEach(function (filters) {
         var table = document.getElementById(filters.getAttribute('data-filter-table'));

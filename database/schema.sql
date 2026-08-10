@@ -128,6 +128,12 @@ CREATE TABLE team8_reservations (
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     archived_at             DATETIME NULL,
+    cancellation_reason     TEXT NULL,
+    cancellation_requested_by INT NULL,
+    cancellation_requested_at DATETIME NULL,
+    cancellation_reviewed_by INT NULL,
+    cancellation_reviewed_at DATETIME NULL,
+    cancellation_decision   VARCHAR(30) NULL,
     deleted_at              DATETIME NULL,
     CONSTRAINT fk_team8_reservations_facility FOREIGN KEY (facility_id) REFERENCES team8_facilities(id),
     CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id)
@@ -142,6 +148,21 @@ CREATE TABLE team8_reservation_equipment (
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_team8_resequip_reservation FOREIGN KEY (reservation_id) REFERENCES team8_reservations(id),
     CONSTRAINT fk_team8_resequip_equipment FOREIGN KEY (equipment_id) REFERENCES team8_equipment(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_reservation_cancellation_requests (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    reservation_id  INT NOT NULL,
+    requested_by    INT NOT NULL,
+    reason          TEXT NOT NULL,
+    status          VARCHAR(30) NOT NULL DEFAULT 'pending',
+    requested_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_by     INT NULL,
+    reviewed_at     DATETIME NULL,
+    admin_remark    TEXT NULL,
+    CONSTRAINT fk_team8_cancel_request_reservation FOREIGN KEY (reservation_id) REFERENCES team8_reservations(id),
+    CONSTRAINT fk_team8_cancel_request_requester FOREIGN KEY (requested_by) REFERENCES users(id),
+    CONSTRAINT fk_team8_cancel_request_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_reservation_approvals (

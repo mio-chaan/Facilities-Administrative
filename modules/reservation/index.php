@@ -4,6 +4,7 @@ declare(strict_types=1);
 $pageTitle = 'Facilities Reservation';
 $currentUserId = t8_current_user_id();
 $isAdmin = t8_has_role('admin');
+$isReservationStaff = t8_has_role('facilities_staff');
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
@@ -551,12 +552,85 @@ switch ($action) {
         }
         $id = (int) ($_POST['id'] ?? 0);
         $target = t8_reservation_fetch($pdo, $id);
-        if ($target && (int) $target['user_id'] === $currentUserId && $target['status'] === 'pending') {
-            $pdo->prepare("UPDATE team8_reservations SET status = 'cancelled' WHERE id = :id")->execute(['id' => $id]);
+        if (!$target || !in_array($target['status'], ['pending', 'approved', 'cancellation_pending'], true)) {
+            t8_flash_set('danger', "That reservation can't be cancelled.");
+        } elseif ($isAdmin) {
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'admin_cancelled', cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW(), admin_remark = 'Cancelled by administrator'
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'admin_cancel');
+            t8_flash_set('success', 'Reservation cancelled and moved to Archive.');
+        } elseif ((int) $target['user_id'] === $currentUserId && $target['status'] === 'pending') {
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW()
+                           WHERE id = :id")
+                ->execute(['id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancel');
             t8_flash_set('success', 'Reservation cancelled.');
+        } elseif ($isReservationStaff && (int) $target['user_id'] === $currentUserId && $target['status'] === 'approved') {
+            $reason = trim((string) ($_POST['cancellation_reason'] ?? ''));
+            if ($reason === '') {
+                t8_flash_set('danger', 'A reason for cancellation is required.');
+            } else {
+                $pdo->prepare("UPDATE team8_reservations
+                               SET status = 'cancellation_pending', cancellation_reason = :reason,
+                                   cancellation_requested_by = :user_id, cancellation_requested_at = NOW(), cancellation_decision = 'pending'
+                               WHERE id = :id")
+                    ->execute(['reason' => $reason, 'user_id' => $currentUserId, 'id' => $id]);
+                $requestStmt = $pdo->prepare(
+                    "INSERT INTO team8_reservation_cancellation_requests (reservation_id, requested_by, reason, status)
+                     VALUES (:reservation_id, :requested_by, :reason, 'pending')"
+                );
+                $requestStmt->execute(['reservation_id' => $id, 'requested_by' => $currentUserId, 'reason' => $reason]);
+                t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_request', 'approved', $reason);
+                t8_flash_set('success', 'Cancellation request sent to an administrator for review.');
+            }
         } else {
             t8_flash_set('danger', "That reservation can't be cancelled.");
+        }
+        redirect(page_url('reservation'));
+        break;
+
+    case 'review_cancellation':
+        t8_require_role(['admin']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('reservation'));
+        }
+        $id = (int) ($_POST['id'] ?? 0);
+        $decision = (string) ($_POST['decision'] ?? '');
+        $target = t8_reservation_fetch($pdo, $id);
+        if (!$target || $target['status'] !== 'cancellation_pending' || !in_array($decision, ['approved', 'rejected'], true)) {
+            t8_flash_set('danger', 'That cancellation request is no longer available for review.');
+        } elseif ($decision === 'approved') {
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'approved',
+                               cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW()
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_approved', 'cancellation_pending', (string) ($target['cancellation_reason'] ?? ''));
+            t8_flash_set('success', 'Cancellation approved. Reservation moved to Archive.');
+        } else {
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'approved', cancellation_decision = 'rejected',
+                               cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'rejected', reviewed_by = :admin_id, reviewed_at = NOW()
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_rejected', 'cancellation_pending', (string) ($target['cancellation_reason'] ?? ''));
+            t8_flash_set('success', 'Cancellation request rejected. Reservation remains active.');
         }
         redirect(page_url('reservation'));
         break;
@@ -640,11 +714,11 @@ $selectedReservationConfig = t8_reservation_get_facility_type_config($selectedFa
 
 // ---- Data for the list view ----
 if (!$showForm) {
-    // Completed approved bookings are retained for audit purposes but are no
-    // longer part of any active reservation list.
+    // Completed approved bookings are retained for audit purposes with an
+    // explicit final status and are no longer part of active reservation lists.
     $pdo->query(
         "UPDATE team8_reservations
-         SET archived_at = COALESCE(archived_at, NOW())
+          SET status = 'completed', archived_at = COALESCE(archived_at, NOW())
          WHERE status = 'approved'
            AND COALESCE(end_time, schedule) IS NOT NULL
            AND COALESCE(end_time, schedule) < NOW()"
@@ -656,7 +730,7 @@ if (!$showForm) {
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
-             WHERE r.status = 'approved'
+             WHERE r.status IN ('approved', 'cancellation_pending')
                AND r.archived_at IS NULL
                AND COALESCE(r.end_time, r.schedule) >= NOW()
              ORDER BY r.start_time ASC"
@@ -683,6 +757,15 @@ if (!$showForm) {
              ORDER BY r.start_time ASC"
         )->fetchAll(PDO::FETCH_ASSOC);
         $pendingReservations = t8_reservations_annotate_conflicts($pdo, $pendingReservations);
+
+        $cancellationRequests = $pdo->query(
+            "SELECT r.*, f.name AS facility_name, u.full_name AS requester_name
+             FROM team8_reservations r
+             JOIN team8_facilities f ON f.id = r.facility_id
+             JOIN users u ON u.id = r.user_id
+             WHERE r.status = 'cancellation_pending'
+             ORDER BY r.cancellation_requested_at ASC"
+        )->fetchAll(PDO::FETCH_ASSOC);
     } else {
         $allReservationsStmt = $pdo->prepare(
             "SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
@@ -987,6 +1070,23 @@ if (!$showForm) {
 
         <div class="t8-card">
             <div class="t8-card-header">
+                <h2 class="t8-card-title">Cancellation Requests</h2>
+                <?php if ($cancellationRequests !== []): ?><span class="t8-notification-count"><?= e((string) count($cancellationRequests)) ?> pending</span><?php endif; ?>
+            </div>
+            <div class="t8-table-wrap"><table class="t8-table"><thead><tr><th>Facility</th><th>Requested By</th><th>Reason</th><th>Requested At</th><th>Actions</th></tr></thead><tbody>
+                <?php if ($cancellationRequests === []): ?>
+                    <tr><td colspan="5" class="t8-table-empty-row">No cancellation requests are waiting for review.</td></tr>
+                <?php else: foreach ($cancellationRequests as $request): ?>
+                    <tr><td><?= e($request['facility_name']) ?></td><td><?= e($request['requester_name']) ?></td><td><?= e((string) $request['cancellation_reason']) ?></td><td><?= e(format_date((string) $request['cancellation_requested_at'], 'M d, Y g:i A')) ?></td><td style="display:flex;gap:8px;">
+                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="approved"><button class="t8-btn t8-btn-success t8-btn-sm" type="submit">Approve Cancellation</button></form>
+                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="rejected"><button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">Reject Request</button></form>
+                    </td></tr>
+                <?php endforeach; endif; ?>
+            </tbody></table></div>
+        </div>
+
+        <div class="t8-card">
+            <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
             </div>
             <div class="t8-reservation-filters" data-reservation-filters data-filter-table="t8AllReservations">
@@ -1040,15 +1140,17 @@ if (!$showForm) {
                                         <?php endif; ?>
                                     </td>
                                     <td>
-                                        <?php if ($r['status'] === 'cancelled'): ?>
-                                            <form method="post" action="<?= e(page_url('reservation', ['action' => 'delete'])) ?>"
-                                                  onsubmit="return confirm('Permanently delete this cancelled reservation? This cannot be undone.');">
+                                        <?php if ($r['status'] === 'approved'): ?>
+                                            <form method="post" action="<?= e(page_url('reservation', ['action' => 'cancel'])) ?>"
+                                                  onsubmit="return confirm('Cancel this reservation and move it to Archive?');">
                                                 <?= t8_csrf_field() ?>
                                                 <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
                                                 <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                    <i class="fa-solid fa-trash"></i> Delete
+                                                    <i class="fa-solid fa-xmark"></i> Cancel
                                                 </button>
                                             </form>
+                                        <?php elseif ($r['status'] === 'cancellation_pending'): ?>
+                                            <span class="t8-help-text">Cancellation review pending</span>
                                         <?php else: ?>
                                             <span class="t8-help-text">—</span>
                                         <?php endif; ?>
@@ -1120,6 +1222,18 @@ if (!$showForm) {
                                                     <i class="fa-solid fa-xmark"></i> Cancel
                                                 </button>
                                             </form>
+                                        <?php elseif ($isReservationStaff && $r['status'] === 'approved'): ?>
+                                            <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) ?>">
+                                                <i class="fa-solid fa-pen"></i> Edit
+                                            </a>
+                                            <button class="t8-btn t8-btn-danger t8-btn-sm" type="button" data-cancel-reservation-id="<?= e((string) $r['id']) ?>">
+                                                <i class="fa-solid fa-xmark"></i> Cancel Reservation
+                                            </button>
+                                            <?php if (($r['cancellation_decision'] ?? '') === 'rejected'): ?>
+                                                <span class="t8-help-text">Previous cancellation request was rejected.</span>
+                                            <?php endif; ?>
+                                        <?php elseif ($r['status'] === 'cancellation_pending'): ?>
+                                            <span class="t8-help-text">Cancellation request pending</span>
                                         <?php elseif ($r['status'] === 'cancelled'): ?>
                                             <form method="post" action="<?= e(page_url('reservation', ['action' => 'delete'])) ?>"
                                                   onsubmit="return confirm('Permanently delete this cancelled reservation? This cannot be undone.');">
@@ -1194,6 +1308,22 @@ if (!$showForm) {
             </div>
         </div>
 
+    <?php endif; ?>
+
+    <?php if (!$isAdmin): ?>
+        <dialog id="t8CancellationRequestModal" class="t8-cancellation-modal">
+            <form method="post" action="<?= e(page_url('reservation', ['action' => 'cancel'])) ?>">
+                <?= t8_csrf_field() ?>
+                <input type="hidden" id="t8CancellationReservationId" name="id">
+                <h2>Request Reservation Cancellation</h2>
+                <p>Are you sure you want to request cancellation of this reservation?</p>
+                <label class="t8-label" for="t8CancellationReason">Reason for Cancellation</label>
+                <textarea class="t8-input" id="t8CancellationReason" name="cancellation_reason" rows="4" required></textarea>
+                <span id="t8CancellationReasonError" class="t8-error-text" hidden>Please enter a reason for cancellation.</span>
+                <p class="t8-help-text">This request will be sent to an Administrator for approval. The reservation remains active until it is approved.</p>
+                <div style="display:flex;gap:8px;margin-top:16px;"><button class="t8-btn t8-btn-outline" type="button" data-close-cancellation-modal>Cancel</button><button class="t8-btn t8-btn-danger" type="submit">Submit Cancellation Request</button></div>
+            </form>
+        </dialog>
     <?php endif; ?>
 
 <?php endif; ?>

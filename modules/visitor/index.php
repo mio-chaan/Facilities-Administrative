@@ -38,7 +38,12 @@ $errors = [];
 // Dropdown options for Visitor Type. Add more here as needed - no
 // other code changes required.
 const T8_VISITOR_TYPES = [
+    'Delivery',
+    'Manager',
+    'Quality Inspector',
     'Supplier',
+    'Maintenance',
+    'Official Visitor',
     'Maintenance Personnel',
     'Auditor',
     'Barangay Official',
@@ -46,6 +51,22 @@ const T8_VISITOR_TYPES = [
     'Client / Guest',
     'Job Applicant',
     'Other',
+];
+
+const T8_VISITOR_TYPE_PURPOSES = [
+    'Delivery' => 'Delivery / Delivery of Supplies',
+    'Manager' => 'Management Visit',
+    'Quality Inspector' => 'Quality Inspection',
+    'Supplier' => 'Supplier / Business Transaction',
+    'Maintenance' => 'Maintenance / Repair',
+    'Official Visitor' => 'Official Business',
+    'Maintenance Personnel' => 'Maintenance / Repair',
+    'Auditor' => 'Quality Inspection',
+    'Barangay Official' => 'Official Business',
+    'Government Official' => 'Official Business',
+    'Client / Guest' => 'Management Visit',
+    'Job Applicant' => 'Job Application',
+    'Other' => '',
 ];
 
 /** Turns a row id into a display-only Visitor ID, e.g. "VIS-000123". */
@@ -161,6 +182,10 @@ switch ($action) {
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
+                $mappedPurpose = T8_VISITOR_TYPE_PURPOSES[$formValues['visitor_type']] ?? '';
+                if ($mappedPurpose !== '') {
+                    $formValues['purpose'] = $mappedPurpose;
+                }
                 if ($formValues['full_name'] === '') {
                     $errors[] = 'Visitor name is required.';
                 }
@@ -331,7 +356,7 @@ if (!$showForm) {
 
             <div class="t8-field">
                 <label class="t8-label" for="visitor_type">Visitor Type</label>
-                <select class="t8-select" id="visitor_type" name="visitor_type" required>
+                <select class="t8-select" id="visitor_type" name="visitor_type" required data-purpose-map="<?= e((string) json_encode(T8_VISITOR_TYPE_PURPOSES)) ?>">
                     <option value="">Select a type…</option>
                     <?php foreach (T8_VISITOR_TYPES as $type): ?>
                         <option value="<?= e($type) ?>" <?= $type === $formValues['visitor_type'] ? 'selected' : '' ?>><?= e($type) ?></option>
