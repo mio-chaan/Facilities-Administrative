@@ -7,6 +7,25 @@
  * A direct GET visit just shows a short explanatory message.
  *
  * Requires GEMINI_API_KEY - see app/includes/ai_helper.php for setup.
+ *
+ * QA FIX (chatbot returning "Something went wrong reaching the
+ * assistant" in the browser even though this file's own logic is
+ * correct): the widget POSTs to index.php?page=assistant, which goes
+ * through the FULL front controller (public/index.php). That
+ * controller opens an output buffer (ob_start()) and echoes the
+ * header/navbar/sidebar HTML BEFORE requiring this module. Without
+ * clearing that buffer here, this file's json_encode() response gets
+ * appended AFTER that leftover HTML in the final response body -
+ * i.e. the browser receives "<html>...<div class="t8-shell">...{json}"
+ * instead of pure JSON. fetch().then(r => r.json()) then throws a
+ * parse error client-side, which is exactly the generic
+ * "Something went wrong reaching the assistant" message in
+ * templates/ai_widget.php's .catch() handler.
+ *
+ * The fix: discard every open output buffer the moment we know this
+ * is the AJAX POST branch, before sending the JSON content-type
+ * header or echoing anything. This does NOT touch or change any of
+ * the AI logic itself - t8_ai_chat()/ai_helper.php are unaffected.
  */
 
 declare(strict_types=1);
@@ -20,6 +39,13 @@ if (is_file($aiHelperPath)) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // QA FIX: drop the header/navbar/sidebar HTML the front controller
+    // already buffered for this request - see docblock above. Must
+    // happen before header()/echo below.
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
     header('Content-Type: application/json');
 
     if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
