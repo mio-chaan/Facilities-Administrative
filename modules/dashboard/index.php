@@ -147,10 +147,21 @@ try {
         $current = $current->add(new DateInterval('P1D'));
     }
 
+    // BUG FIX: the reservation list view (modules/reservation/index.php)
+    // auto-flips a reservation's status from 'approved' to 'completed'
+    // the moment its end_time (or schedule) passes. This query used to
+    // filter on status = "approved" only, so a booking would silently
+    // disappear from the trend chart as soon as it finished — even
+    // though it genuinely happened on that day. 'completed' is just the
+    // post-end-time state of an approved booking, not a rejection or
+    // cancellation, so it belongs in the same "actually happened" bucket
+    // as 'approved'. Retention here should be driven by explicit status
+    // (exclude pending/rejected/cancelled), never by whether end_time
+    // has passed.
     $trendStmt = $pdo->prepare(
         'SELECT DATE(start_time) AS d, COUNT(*) AS cnt
          FROM team8_reservations
-         WHERE status = "approved"
+         WHERE status IN ("approved", "completed")
            AND DATE(start_time) BETWEEN :start_date AND :end_date
          GROUP BY d
          ORDER BY d ASC'
