@@ -716,13 +716,37 @@ $selectedReservationConfig = t8_reservation_get_facility_type_config($selectedFa
 if (!$showForm) {
     // Completed approved bookings are retained for audit purposes with an
     // explicit final status and are no longer part of active reservation lists.
-    $pdo->query(
-        "UPDATE team8_reservations
-          SET status = 'completed', archived_at = COALESCE(archived_at, NOW())
-         WHERE status = 'approved'
-           AND COALESCE(end_time, schedule) IS NOT NULL
-           AND COALESCE(end_time, schedule) < NOW()"
-    );
+    //
+    // DASHBOARD UPDATE: this used to be a single bulk UPDATE with no
+    // audit trail, so "how many reservations were completed this
+    // month" had no source of truth for the new Reservation Activity
+    // card on the dashboard. It now fetches the affected ids first,
+    // writes one 'completed' audit_logs entry per reservation, then
+    // performs the same bulk UPDATE. Known limitation: this only runs
+    // when someone views the Reservation module, so a reservation
+    // "completes" (for activity-counting purposes) at the next visit
+    // to this page after its end time passes, not the instant it
+    // passes — acceptable for a dashboard trend, flagged here rather
+    // than silently assumed.
+    $justCompletedIds = $pdo->query(
+        "SELECT id FROM team8_reservations
+          WHERE status = 'approved'
+            AND COALESCE(end_time, schedule) IS NOT NULL
+            AND COALESCE(end_time, schedule) < NOW()"
+    )->fetchAll(PDO::FETCH_COLUMN);
+
+    if ($justCompletedIds !== []) {
+        foreach ($justCompletedIds as $completedId) {
+            t8_audit_log($pdo, $currentUserId, 'reservation', (int) $completedId, 'completed');
+        }
+        $pdo->query(
+            "UPDATE team8_reservations
+              SET status = 'completed', archived_at = COALESCE(archived_at, NOW())
+             WHERE status = 'approved'
+               AND COALESCE(end_time, schedule) IS NOT NULL
+               AND COALESCE(end_time, schedule) < NOW()"
+        );
+    }
 
     if ($isAdmin) {
         $allReservations = $pdo->query(
@@ -879,15 +903,6 @@ if (!$showForm) {
                            value="<?= e($formValues['quantity']) ?>" placeholder="Quantity to reserve">
                 </div>
 
-                <!--
-                    Date/time click fix: native datetime-local inputs only
-                    open their picker when the calendar icon itself is
-                    clicked in some browsers. this.showPicker() (Chrome/Edge
-                    111+) opens the picker programmatically, so the onclick
-                    below makes the ENTIRE field clickable, not just the
-                    icon. Browsers without showPicker() silently no-op and
-                    fall back to normal native behavior - nothing breaks.
-                -->
                 <div class="t8-field" data-reservation-field="time_range">
                     <label class="t8-label" for="start_time">Start</label>
                     <input class="t8-input t8-datetime-input" type="datetime-local" id="start_time" name="start_time"

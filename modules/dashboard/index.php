@@ -1,7 +1,30 @@
 <?php
 /**
  * modules/dashboard/index.php
-*/
+ *
+ * DASHBOARD UPDATE — see docs of the requesting spec for full context.
+ * Summary of what changed vs. the previous version:
+ *   - Reservation Trend header: title left, Month/Year filter
+ *     upper-right; "X Today" is now plain informational text (no red
+ *     dot/badge styling).
+ *   - The same $trendMonth/$trendYear selection now also drives the
+ *     Reservation Activity card (previously all-time, current-status
+ *     based) — both cards stay in sync because both read from the
+ *     same GET params via one full-page reload on filter change.
+ *   - "Reservation Status" -> "Reservation Activity": counts EVENTS
+ *     (approve / reject / cancel / complete) that happened during the
+ *     selected month, from audit_logs — not current reservation
+ *     status. A reservation approved then later cancelled contributes
+ *     to both Approved and Cancelled, per spec. Pending/Ongoing are
+ *     no longer shown here.
+ *   - "AI Insights" -> "Quick Insights" (label only — these were
+ *     always plain dashboard metrics).
+ *   - Recent Activities: capped to the 5 latest MEANINGFUL business
+ *     events (login/logout/403 excluded), plus a meatballs menu ->
+ *     "View Activity History" modal with the fuller list, a text
+ *     search, an activity-type filter, and a "load more" button
+ *     instead of an internal scrollbar.
+ */
 
 declare(strict_types=1);
 
@@ -23,7 +46,21 @@ $statMeta = [
 
 $dbError = null;
 $recentActivities = [];
+$fullActivityHistory = [];
 $notifications = [];
+
+// Activity-log actions that represent real business events worth
+// showing on the compact dashboard timeline. Auth/access noise
+// (login, logout, 403_denied) is excluded here but still available
+// in the full Activity History modal below.
+const T8_DASHBOARD_MEANINGFUL_ACTIONS = [
+    'create', 'update', 'approve', 'reject', 'cancel', 'admin_cancel',
+    'cancellation_request', 'cancellation_approved', 'cancellation_rejected',
+    'completed', 'delete', 'archive', 'restore', 'reactivate',
+    'add_party', 'remove_party', 'add_obligation', 'delete_obligation',
+    'complete_obligation', 'reopen_obligation', 'attach_document',
+    'detach_document', 'new_version', 'check_in', 'check_out', 'schedule',
+];
 
 try {
     $stats['Pending Reservations'] = (int) $pdo
@@ -46,12 +83,29 @@ try {
 }
 
 try {
-    $recentActivities = $pdo->query(
+    // Compact list for the dashboard card itself: latest 5 meaningful
+    // events only.
+    $placeholders = implode(',', array_fill(0, count(T8_DASHBOARD_MEANINGFUL_ACTIONS), '?'));
+    $recentStmt = $pdo->prepare(
+        "SELECT a.action, a.entity_type, a.created_at, u.full_name
+         FROM audit_logs a
+         INNER JOIN users u ON u.id = a.user_id
+         WHERE a.action IN ($placeholders)
+         ORDER BY a.created_at DESC, a.id DESC
+         LIMIT 5"
+    );
+    $recentStmt->execute(T8_DASHBOARD_MEANINGFUL_ACTIONS);
+    $recentActivities = $recentStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Fuller list for the "View Activity History" modal — includes
+    // everything (login/logout stay available here, just not on the
+    // compact dashboard card).
+    $fullActivityHistory = $pdo->query(
         'SELECT a.action, a.entity_type, a.created_at, u.full_name
          FROM audit_logs a
          INNER JOIN users u ON u.id = a.user_id
          ORDER BY a.created_at DESC, a.id DESC
-         LIMIT 6'
+         LIMIT 200'
     )->fetchAll(PDO::FETCH_ASSOC);
 
     $notificationStmt = $pdo->prepare(
@@ -71,7 +125,25 @@ $activityIcons = [
     'login'      => 'fa-right-to-bracket',
     'logout'     => 'fa-right-from-bracket',
     '403_denied' => 'fa-shield-halved',
+    'create'     => 'fa-plus',
+    'update'     => 'fa-pen',
+    'approve'    => 'fa-check',
+    'reject'     => 'fa-xmark',
+    'cancel'     => 'fa-ban',
+    'admin_cancel' => 'fa-ban',
+    'completed'  => 'fa-flag-checkered',
+    'delete'     => 'fa-trash',
+    'archive'    => 'fa-box-archive',
+    'restore'    => 'fa-rotate-left',
 ];
+
+/** Human-readable label for an audit_logs (action, entity_type) pair. */
+function t8_activity_label(string $action, string $entityType): string
+{
+    $entity = str_replace('_', ' ', $entityType);
+    $verb = str_replace('_', ' ', $action);
+    return ucfirst(trim($entity . ' ' . $verb));
+}
 ?>
 <section class="t8-dashboard" aria-labelledby="dashboard-title">
 <div class="t8-dashboard-heading">
@@ -88,8 +160,11 @@ $activityIcons = [
 
 <?php
 // ---------------------------------------------------------------
-// Trend month/year selection — validated server-side so a tampered
-// query string never causes a DB error or a weird chart.
+// Trend/Activity month/year selection — validated server-side so a
+// tampered query string never causes a DB error or a weird chart.
+// This ONE selection now drives BOTH the Reservation Trend chart and
+// the Reservation Activity donut below (per spec: same filter, both
+// cards).
 // ---------------------------------------------------------------
 $trendMonth = isset($_GET['trend_month']) ? (int) $_GET['trend_month'] : (int) date('n');
 $trendYear  = isset($_GET['trend_year'])  ? (int) $_GET['trend_year']  : (int) date('Y');
@@ -112,21 +187,46 @@ while ($cur <= $trendMonthEnd) {
 // ---------------------------------------------------------------
 // Rest of dashboard data
 // ---------------------------------------------------------------
-$reservationByStatus = ['approved' => 0, 'pending' => 0, 'rejected' => 0, 'cancelled' => 0];
-$reservationTotal    = 0;
+// DASHBOARD UPDATE: Reservation Activity now counts EVENTS from
+// audit_logs for the selected month, not current reservation status.
+// Approved / Rejected / Cancelled / Completed only — Pending and
+// Ongoing removed per spec (this card is an activity/history view,
+// not a live status snapshot).
+$activityCounts = ['approved' => 0, 'rejected' => 0, 'cancelled' => 0, 'completed' => 0];
 $facilityUsage       = [];
 $docCategories       = [];
 
 try {
-    // Reservation status breakdown (all-time, for the pie chart).
-    $stmt = $pdo->query('SELECT status, COUNT(*) AS cnt FROM team8_reservations GROUP BY status');
-    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $s   = strtolower((string) $row['status']);
+    $actStmt = $pdo->prepare(
+        "SELECT action, COUNT(*) AS cnt
+         FROM audit_logs
+         WHERE entity_type = 'reservation'
+           AND action IN ('approve', 'reject', 'cancel', 'admin_cancel', 'cancellation_approved', 'completed')
+           AND created_at BETWEEN :start_dt AND :end_dt
+         GROUP BY action"
+    );
+    $actStmt->execute([
+        'start_dt' => $trendMonthStart->format('Y-m-d 00:00:00'),
+        'end_dt'   => $trendMonthEnd->format('Y-m-d 23:59:59'),
+    ]);
+    foreach ($actStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $cnt = (int) $row['cnt'];
-        if (array_key_exists($s, $reservationByStatus)) {
-            $reservationByStatus[$s] = $cnt;
+        switch ($row['action']) {
+            case 'approve':
+                $activityCounts['approved'] += $cnt;
+                break;
+            case 'reject':
+                $activityCounts['rejected'] += $cnt;
+                break;
+            case 'cancel':
+            case 'admin_cancel':
+            case 'cancellation_approved':
+                $activityCounts['cancelled'] += $cnt;
+                break;
+            case 'completed':
+                $activityCounts['completed'] += $cnt;
+                break;
         }
-        $reservationTotal += $cnt;
     }
 
     // Facility utilisation bar chart (top 5 by booking count).
@@ -163,23 +263,7 @@ try {
     // Monthly Reservation Trend — what this chart is actually answering:
     //   "On which dates do we have reservations, and how many are
     //    scheduled for each date?"
-    //
-    // Source date: COALESCE(start_time, schedule)
-    //   — start_time is set for Room/Area/Asset/Equipment reservations.
-    //   — schedule is set for Utility-type reservations that only have
-    //     a single point-in-time datetime (no end_time range).
-    //   Mirrors the same COALESCE used in t8_reservation_filter_date()
-    //   inside modules/reservation/index.php, so the chart and the
-    //   list table always agree on which date a reservation belongs to.
-    //
-    // Status filter: IN ('approved', 'completed')
-    //   — 'completed' is the status the reservation list auto-assigns
-    //     once a booking's end_time has passed. It is still a real,
-    //     confirmed booking that happened on a specific date; dropping
-    //     it from the trend just because it ended would silently erase
-    //     history from the chart.
-    //   — pending / rejected / cancelled are excluded: they were either
-    //     never confirmed or were explicitly turned down/withdrawn.
+    // (unchanged from the previous version — see prior inline notes)
     // ---------------------------------------------------------------
     $trendStmt = $pdo->prepare(
         'SELECT DATE(COALESCE(start_time, schedule)) AS d, COUNT(*) AS cnt
@@ -202,10 +286,10 @@ try {
     echo '<div class="t8-alert t8-alert-warning">Could not load some dashboard data - has database/schema.sql been imported yet?</div>';
 }
 
-// Pie chart percentages (avoid division by zero).
-$statusPercents = [];
-foreach ($reservationByStatus as $k => $v) {
-    $statusPercents[$k] = $reservationTotal > 0 ? round($v / $reservationTotal * 100, 1) : 0;
+$activityTotal = array_sum($activityCounts);
+$activityPercents = [];
+foreach ($activityCounts as $k => $v) {
+    $activityPercents[$k] = $activityTotal > 0 ? round($v / $activityTotal * 100, 1) : 0;
 }
 
 function pctWidth(int $value, int $max): string {
@@ -220,8 +304,6 @@ foreach ($docCategories as $d) { $docMax = max($docMax, (int) $d['count']); }
 
 // ---------------------------------------------------------------
 // Build flat arrays for Chart.js.
-//   labels = day-of-month integers [1, 2, 3 ... 28/29/30/31]
-//   data   = reservation count for that calendar day
 // ---------------------------------------------------------------
 $trendLabels = [];
 $trendValues = [];
@@ -234,7 +316,7 @@ $trendMonthLabel  = $trendMonthStart->format('F Y');   // e.g. "August 2026"
 $trendMonthTotal  = array_sum($trendValues);
 $trendHasData     = $trendMonthTotal > 0;
 
-// "X today" badge — only meaningful when viewing the current month.
+// "X today" text — only meaningful when viewing the current month.
 $isCurrentMonth   = ($trendYear === (int) date('Y') && $trendMonth === (int) date('n'));
 $trendTodayCount  = $isCurrentMonth ? ($trendCounts[date('Y-m-d')] ?? 0) : null;
 
@@ -244,8 +326,6 @@ $trendMonthNames = [
     5=>'May',6=>'June',7=>'July',8=>'August',
     9=>'September',10=>'October',11=>'November',12=>'December',
 ];
-// Show previous year, current year, and next two years — enough to
-// cover reservations booked well in advance.
 $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
 ?>
 
@@ -264,59 +344,38 @@ $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
                         : e($trendMonthLabel) . ' · no reservations scheduled yet' ?>
                 </p>
             </div>
-            <span class="t8-trend-badge">
-                <span class="t8-trend-dot"></span>
-                <?php if ($trendTodayCount !== null): ?>
-                    <?= e((string) $trendTodayCount) ?> today
-                <?php else: ?>
-                    <?= e((string) $trendMonthTotal) ?> this month
-                <?php endif; ?>
-            </span>
+
+            <!-- Month / Year selector — upper right of the header, same
+                 row as the title. Submitting reloads the page with
+                 ?trend_month=&trend_year=, which both this chart AND
+                 the Reservation Activity donut below read from. -->
+            <form method="get" action="<?= e(base_url('index.php')) ?>" class="t8-trend-filter">
+                <input type="hidden" name="page" value="dashboard">
+                <label class="t8-help-text" style="margin:0;" for="t8TrendMonth">Month</label>
+                <select class="t8-select" id="t8TrendMonth" name="trend_month" onchange="this.form.submit()">
+                    <?php foreach ($trendMonthNames as $num => $name): ?>
+                        <option value="<?= e((string) $num) ?>" <?= $num === $trendMonth ? 'selected' : '' ?>><?= e($name) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <select class="t8-select" id="t8TrendYear" name="trend_year" onchange="this.form.submit()">
+                    <?php foreach ($trendYearOptions as $yo): ?>
+                        <option value="<?= e((string) $yo) ?>" <?= $yo === $trendYear ? 'selected' : '' ?>><?= e((string) $yo) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <noscript><button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">View</button></noscript>
+            </form>
         </div>
 
         <div class="t8-card-body">
-            <!-- Month / Year selector -------------------------------->
-            <form method="get"
-                  action="<?= e(base_url('index.php')) ?>"
-                  class="t8-trend-month-select"
-                  style="display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap;">
-                <input type="hidden" name="page" value="dashboard">
+            <!-- "X Today" — plain informational text, not a badge/alert. -->
+            <p class="t8-trend-today">
+                <?php if ($trendTodayCount !== null): ?>
+                    <strong><?= e((string) $trendTodayCount) ?></strong> Today
+                <?php else: ?>
+                    <strong><?= e((string) $trendMonthTotal) ?></strong> this month
+                <?php endif; ?>
+            </p>
 
-                <label class="t8-help-text" style="margin:0;" for="t8TrendMonth">Month</label>
-                <select class="t8-select"
-                        id="t8TrendMonth"
-                        name="trend_month"
-                        style="width:auto; padding:6px 10px;"
-                        onchange="this.form.submit()">
-                    <?php foreach ($trendMonthNames as $num => $name): ?>
-                        <option value="<?= e((string) $num) ?>"
-                            <?= $num === $trendMonth ? 'selected' : '' ?>>
-                            <?= e($name) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-
-                <label class="t8-help-text" style="margin:0;" for="t8TrendYear">Year</label>
-                <select class="t8-select"
-                        id="t8TrendYear"
-                        name="trend_year"
-                        style="width:auto; padding:6px 10px;"
-                        onchange="this.form.submit()">
-                    <?php foreach ($trendYearOptions as $yo): ?>
-                        <option value="<?= e((string) $yo) ?>"
-                            <?= $yo === $trendYear ? 'selected' : '' ?>>
-                            <?= e((string) $yo) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-
-                <!-- fallback submit for browsers / JS-off environments -->
-                <noscript>
-                    <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">View</button>
-                </noscript>
-            </form>
-
-            <!-- Chart canvas ---------------------------------------->
             <div class="t8-chart-shell">
                 <canvas id="t8TrendChart"
                         aria-label="Reservation trend for <?= e($trendMonthLabel) ?>"
@@ -326,39 +385,44 @@ $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
     </div>
 
     <!-- ============================================================
-         RESERVATION STATUS PIE
+         RESERVATION ACTIVITY (was: Reservation Status)
          ============================================================ -->
     <div class="t8-card t8-reservation-status">
-        <div class="t8-card-header"><h2 class="t8-card-title">Reservation Status</h2></div>
+        <div class="t8-card-header">
+            <h2 class="t8-card-title">Reservation Activity</h2>
+        </div>
         <div class="t8-card-body t8-reservation-body">
             <div class="t8-pie-wrap">
                 <?php
-                $s1 = $statusPercents['approved'] ?? 0;
-                $s2 = $s1 + ($statusPercents['pending']  ?? 0);
-                $s3 = $s2 + ($statusPercents['rejected'] ?? 0);
-                $pieStyle = "background: conic-gradient(#d9534f 0 {$s1}%, #ffc107 {$s1}% {$s2}%, #6c757d {$s2}% {$s3}%, #e9ecef {$s3}% 100%);";
+                $s1 = $activityPercents['approved'] ?? 0;
+                $s2 = $s1 + ($activityPercents['rejected']  ?? 0);
+                $s3 = $s2 + ($activityPercents['cancelled'] ?? 0);
+                $pieStyle = "background: conic-gradient(#4CAF50 0 {$s1}%, #F44336 {$s1}% {$s2}%, #6c757d {$s2}% {$s3}%, #2196F3 {$s3}% 100%);";
+                if ($activityTotal === 0) {
+                    $pieStyle = "background: #e9ecef;";
+                }
                 ?>
                 <div class="t8-pie" style="<?= e($pieStyle) ?>">
-                    <div class="t8-pie-center"><?= e((string) $reservationTotal) ?><br>Total</div>
+                    <div class="t8-pie-center"><?= e((string) $activityTotal) ?><br>Total</div>
                 </div>
             </div>
             <ul class="t8-legend">
-                <li><span class="legend-dot legend-approved"></span> Approved (<?= e((string) $reservationByStatus['approved']) ?>)</li>
-                <li><span class="legend-dot legend-pending"></span>  Pending  (<?= e((string) $reservationByStatus['pending'])  ?>)</li>
-                <li><span class="legend-dot legend-rejected"></span> Rejected (<?= e((string) $reservationByStatus['rejected']) ?>)</li>
-                <li><span class="legend-dot legend-cancelled"></span>Cancelled(<?= e((string) ($reservationByStatus['cancelled'] ?? 0)) ?>)</li>
+                <li><span class="legend-dot legend-approved"></span> Approved (<?= e((string) $activityCounts['approved']) ?>)</li>
+                <li><span class="legend-dot legend-rejected"></span> Rejected (<?= e((string) $activityCounts['rejected']) ?>)</li>
+                <li><span class="legend-dot legend-cancelled"></span> Cancelled (<?= e((string) $activityCounts['cancelled']) ?>)</li>
+                <li><span class="legend-dot legend-completed"></span> Completed (<?= e((string) $activityCounts['completed']) ?>)</li>
             </ul>
         </div>
     </div>
 
     <!-- ============================================================
-         AI INSIGHTS
+         QUICK INSIGHTS (was: AI Insights)
          ============================================================ -->
     <div class="t8-card t8-ai-insights">
-        <div class="t8-card-header"><h2 class="t8-card-title">AI Insights</h2></div>
+        <div class="t8-card-header"><h2 class="t8-card-title">Quick Insights</h2></div>
         <div class="t8-card-body">
             <ul class="t8-ai-list">
-                <li>Pending reservations: <strong><?= e((string) ($reservationByStatus['pending'] ?? 0)) ?></strong></li>
+                <li>Pending reservations: <strong><?= e((string) $stats['Pending Reservations']) ?></strong></li>
                 <li>Visitors today: <strong><?= e((string) $stats['Visitors Today']) ?></strong></li>
                 <li>Active contracts: <strong><?= e((string) $stats['Active Contracts']) ?></strong></li>
                 <li>Top facility: <strong><?= e($facilityUsage[0]['label'] ?? '—') ?></strong></li>
@@ -411,30 +475,38 @@ $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
 
     <!-- ============================================================
          RECENT ACTIVITIES
+         DASHBOARD UPDATE: capped at 5 meaningful events + a meatballs
+         menu opening the full Activity History modal below.
          ============================================================ -->
     <div class="t8-card t8-activity-timeline">
-        <div class="t8-card-header"><h2 class="t8-card-title">Recent Activities Timeline</h2></div>
+        <div class="t8-card-header">
+            <h2 class="t8-card-title">Recent Activities</h2>
+            <div class="t8-card-menu-wrap">
+                <button type="button" class="t8-card-menu-btn" id="t8ActivityMenuBtn" aria-haspopup="true" aria-expanded="false" aria-label="Recent Activities options">
+                    <i class="fa-solid fa-ellipsis-vertical"></i>
+                </button>
+                <div class="t8-card-menu-dropdown" id="t8ActivityMenuDropdown">
+                    <button type="button" id="t8ViewActivityHistory">View Activity History</button>
+                </div>
+            </div>
+        </div>
         <div class="t8-card-body">
             <div class="t8-timeline">
                 <?php if ($recentActivities === []): ?>
-                    <div class="t8-empty">No activity has been recorded yet.</div>
+                    <div class="t8-empty">No recent activity yet.</div>
                 <?php else: ?>
                     <?php foreach ($recentActivities as $activity): ?>
                         <?php
                         $action = (string) $activity['action'];
-                        $description = sprintf(
-                            '%s %s %s',
-                            (string) $activity['full_name'],
-                            str_replace('_', ' ', $action),
-                            str_replace('_', ' ', (string) $activity['entity_type'])
-                        );
+                        $entity = (string) $activity['entity_type'];
+                        $description = e((string) $activity['full_name']) . ' ' . e(t8_activity_label($action, $entity));
                         ?>
                         <div class="t8-timeline-item">
                             <div class="t8-timeline-avatar">
                                 <i class="fa-solid <?= e($activityIcons[$action] ?? 'fa-user') ?>"></i>
                             </div>
                             <div class="t8-timeline-content">
-                                <div class="t8-timeline-desc"><?= e(ucfirst($description)) ?></div>
+                                <div class="t8-timeline-desc"><?= $description ?></div>
                                 <time class="t8-timeline-time"
                                       datetime="<?= e((string) $activity['created_at']) ?>">
                                     <?= e(format_date((string) $activity['created_at'], 'g:i A')) ?>
@@ -449,16 +521,73 @@ $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
 
 </div><!-- /.t8-main-grid -->
 
+<!-- ============================================================
+     Activity History modal (opened from the meatballs menu above).
+     Client-side search + activity-type filter + a "load more" reveal
+     of the pre-fetched, capped 200-row $fullActivityHistory list —
+     no extra AJAX endpoint needed for this dashboard-scale view.
+     ============================================================ -->
+<dialog id="t8ActivityHistoryModal" class="t8-activity-modal">
+    <div class="t8-activity-modal-header">
+        <h2 class="t8-card-title" style="margin:0;">Activity History</h2>
+        <button type="button" class="t8-activity-modal-close" id="t8ActivityHistoryClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="t8-activity-modal-body">
+        <div class="t8-activity-filters">
+            <input type="text" class="t8-input" id="t8ActivitySearch" placeholder="Search activity…">
+            <select class="t8-select" id="t8ActivityTypeFilter">
+                <option value="">All activity types</option>
+                <?php
+                $seenActions = [];
+                foreach ($fullActivityHistory as $row) {
+                    $seenActions[(string) $row['action']] = true;
+                }
+                ksort($seenActions);
+                foreach (array_keys($seenActions) as $actionKey):
+                ?>
+                    <option value="<?= e($actionKey) ?>"><?= e(ucfirst(str_replace('_', ' ', $actionKey))) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <div id="t8ActivityHistoryList" class="t8-timeline">
+            <?php foreach ($fullActivityHistory as $i => $row): ?>
+                <?php
+                $action = (string) $row['action'];
+                $entity = (string) $row['entity_type'];
+                $label = t8_activity_label($action, $entity);
+                $who = (string) $row['full_name'];
+                $when = format_date((string) $row['created_at'], 'M d, Y g:i A');
+                ?>
+                <div class="t8-timeline-item"
+                     data-activity-row
+                     data-activity-action="<?= e($action) ?>"
+                     data-activity-search="<?= e(strtolower($who . ' ' . $label)) ?>"
+                     <?= $i >= 20 ? 'hidden' : '' ?>>
+                    <div class="t8-timeline-avatar">
+                        <i class="fa-solid <?= e($activityIcons[$action] ?? 'fa-user') ?>"></i>
+                    </div>
+                    <div class="t8-timeline-content">
+                        <div class="t8-timeline-desc"><?= e($who) ?> <?= e($label) ?></div>
+                        <time class="t8-timeline-time"><?= e($when) ?></time>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <?php if ($fullActivityHistory === []): ?>
+            <div class="t8-activity-history-empty">No activity has been recorded yet.</div>
+        <?php endif; ?>
+
+        <?php if (count($fullActivityHistory) > 20): ?>
+            <div class="t8-load-more-wrap">
+                <button type="button" class="t8-btn t8-btn-outline t8-btn-sm" id="t8ActivityLoadMore">Load more</button>
+            </div>
+        <?php endif; ?>
+    </div>
+</dialog>
+
 <script>
     // Passed to public/js/dashboard.js for Chart.js rendering.
-    //
-    // labels: day-of-month integers for every day in the selected month
-    //         (1 … 28/29/30/31) — the X-axis always spans the full
-    //         calendar month, including days with 0 reservations.
-    //
-    // data:   reservation count per day, keyed off each booking's actual
-    //         scheduled date (COALESCE(start_time, schedule)) — not
-    //         creation date, not end_time.
     window.t8TrendData = <?= json_encode(
         ['labels' => $trendLabels, 'data' => $trendValues],
         JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT

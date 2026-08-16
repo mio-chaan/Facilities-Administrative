@@ -10,6 +10,11 @@
  * templates/sidebar.php). It only touches a new class
  * (.t8-sidebar-collapsed on .t8-shell) and does not modify or
  * interfere with the mobile toggle logic above it.
+ *
+ * DASHBOARD UPDATE: a third block adds the notification bell popover
+ * (templates/navbar.php, #t8NotifBell / #t8NotifPopover). It's here
+ * (not dashboard.js) because the navbar/bell render on every page,
+ * not just the dashboard.
  */
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -86,6 +91,138 @@ document.addEventListener("DOMContentLoaded", function () {
         collapseBtn.addEventListener("click", function () {
             var isCollapsed = shell.classList.contains("t8-sidebar-collapsed");
             setCollapsedState(!isCollapsed);
+        });
+    }
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+    var bell = document.getElementById("t8NotifBell");
+    var popover = document.getElementById("t8NotifPopover");
+    if (!bell || !popover) {
+        return; // navbar not present on this render (e.g. login page)
+    }
+
+    var wrap = bell.closest(".t8-notif-wrap");
+    var markAllBtn = document.getElementById("t8NotifMarkAll");
+    var bellDot = document.getElementById("t8NotifBellDot");
+    var csrfInput = popover.querySelector('input[name="csrf_token"]');
+    var actionUrl = popover.getAttribute("data-action-url") || "notifications_action.php";
+
+    function csrfToken() {
+        return csrfInput ? csrfInput.value : "";
+    }
+
+    function updateBellDot(unreadCount) {
+        if (!bellDot) {
+            if (unreadCount > 0) {
+                bellDot = document.createElement("span");
+                bellDot.className = "t8-navbar-bell-dot";
+                bellDot.id = "t8NotifBellDot";
+                bell.appendChild(bellDot);
+            } else {
+                return;
+            }
+        }
+        if (unreadCount > 0) {
+            bellDot.textContent = String(Math.min(unreadCount, 99));
+            bellDot.style.display = "";
+        } else {
+            bellDot.remove();
+            bellDot = null;
+        }
+    }
+
+    function closePopover() {
+        popover.classList.remove("t8-open");
+        bell.setAttribute("aria-expanded", "false");
+    }
+
+    function openPopover() {
+        popover.classList.add("t8-open");
+        bell.setAttribute("aria-expanded", "true");
+    }
+
+    bell.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (popover.classList.contains("t8-open")) {
+            closePopover();
+        } else {
+            openPopover();
+        }
+    });
+
+    document.addEventListener("click", function (e) {
+        if (wrap && !wrap.contains(e.target)) {
+            closePopover();
+        }
+    });
+
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+            closePopover();
+        }
+    });
+
+    function markRead(id, itemEl) {
+        var body = new URLSearchParams();
+        body.append("action", "mark_read");
+        body.append("id", id);
+        body.append("csrf_token", csrfToken());
+
+        fetch(actionUrl, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+            },
+            body: body.toString()
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data && data.ok) {
+                    itemEl.classList.remove("t8-notif-item-unread");
+                    updateBellDot(data.unread || 0);
+                }
+            })
+            .catch(function () { /* fail quietly — non-critical UI action */ });
+    }
+
+    popover.querySelectorAll(".t8-notif-item").forEach(function (itemEl) {
+        itemEl.addEventListener("click", function () {
+            if (itemEl.classList.contains("t8-notif-item-unread")) {
+                markRead(itemEl.getAttribute("data-notif-id"), itemEl);
+            }
+        });
+    });
+
+    if (markAllBtn) {
+        markAllBtn.addEventListener("click", function () {
+            var body = new URLSearchParams();
+            body.append("action", "mark_all");
+            body.append("csrf_token", csrfToken());
+
+            fetch(actionUrl, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: body.toString()
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data && data.ok) {
+                        popover.querySelectorAll(".t8-notif-item-unread").forEach(function (el) {
+                            el.classList.remove("t8-notif-item-unread");
+                        });
+                        updateBellDot(0);
+                    }
+                })
+                .catch(function () { /* fail quietly */ });
         });
     }
 });

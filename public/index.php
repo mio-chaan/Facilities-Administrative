@@ -30,6 +30,8 @@ $routes = require __DIR__ . '/../app/config/routes.php';
 
 $page = $_GET['page'] ?? 'dashboard';
 $t8UnreadNotifications = t8_unread_notification_count($pdo, t8_current_user_id());
+// DASHBOARD UPDATE: feeds the navbar bell popover (templates/navbar.php).
+$t8RecentNotifications = t8_recent_notifications($pdo, t8_current_user_id(), 8);
 
 $moduleFile = array_key_exists($page, $routes)
     ? dirname(__DIR__) . '/' . $routes[$page]['file']
