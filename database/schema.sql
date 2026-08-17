@@ -119,12 +119,6 @@ CREATE TABLE team8_reservations (
     remarks                 VARCHAR(500) NULL,
     schedule                DATETIME NULL,
     requirements            VARCHAR(500) NULL,
-    -- Delete-request maybe we can use it later, but for now we will just keep it commented out
-   -- previous_status         VARCHAR(30) NULL,
-    -- delete_reason           TEXT NULL,
-    -- delete_requested_by     INT NULL,
-    -- delete_requested_at     DATETIME NULL,
-    -- rejection_reason        TEXT NULL,
     created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     archived_at             DATETIME NULL,

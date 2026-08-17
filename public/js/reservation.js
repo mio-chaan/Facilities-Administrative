@@ -62,7 +62,10 @@ document.addEventListener('DOMContentLoaded', function () {
         category.value = '';
         fields.forEach(function (wrapper) {
             var input = wrapper.querySelector('input, select, textarea');
-            if (input) input.value = '';
+            if (input) {
+                input.value = '';
+                if (window.T8Validate) T8Validate.clearError(input);
+            }
         });
     }
 
@@ -90,6 +93,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (input) {
                 input.disabled = !active;
                 input.required = active && settings.required_fields.indexOf(field) !== -1;
+                if (!active && window.T8Validate) T8Validate.clearError(input);
             }
         });
     }
@@ -97,19 +101,64 @@ document.addEventListener('DOMContentLoaded', function () {
     facility.addEventListener('change', function () { applyType(true); });
     applyType(false);
 
+    /**
+     * FIX (show error messages when required fields are left empty):
+     * every required, currently-visible field is checked here and, on
+     * failure, gets an inline message right under the field (via
+     * T8Validate, loaded before this file — see templates/footer.php)
+     * in addition to the server-side re-check that always runs too.
+     */
+    function markField(fieldEl, isValid, message) {
+        if (!fieldEl) {
+            return isValid;
+        }
+        if (window.T8Validate) {
+            if (isValid) {
+                T8Validate.clearError(fieldEl);
+            } else {
+                T8Validate.showError(fieldEl, message);
+            }
+        }
+        return isValid;
+    }
+
     form.addEventListener('submit', function (event) {
         var type = selectedType();
-        var settings = config[type] || { required_fields: [] };
-        var valid = !!facility.value && !!category.value;
+        var settings = config[type] || { required_fields: [], event_categories: [] };
+        var valid = true;
+
+        if (!markField(facility, !!facility.value, 'Please select a facility.')) valid = false;
+        if (!markField(category, !!category.value, 'Please select an event category.')) valid = false;
+
+        var departmentEl = document.getElementById('department');
+        if (!markField(departmentEl, !!departmentEl.value, 'Department is required.')) valid = false;
+
+        var keyPersonEl = document.getElementById('key_person');
+        if (!markField(keyPersonEl, !!keyPersonEl.value.trim(), 'Key person / point of contact is required.')) valid = false;
+
         var inputs = { participants: 'expected_participants', quantity: 'quantity', return_date: 'return_date', remarks: 'remarks', schedule: 'schedule', requirements: 'requirements' };
         Object.keys(inputs).forEach(function (field) {
-            if (settings.required_fields.indexOf(field) !== -1 && !document.getElementById(inputs[field]).value) valid = false;
+            var el = document.getElementById(inputs[field]);
+            if (!el) return;
+            if (settings.required_fields.indexOf(field) !== -1) {
+                if (!markField(el, !!el.value.trim(), 'This field is required.')) valid = false;
+            } else if (window.T8Validate) {
+                T8Validate.clearError(el);
+            }
         });
+
         if (settings.required_fields.indexOf('time_range') !== -1) {
-            var start = document.getElementById('start_time').value;
-            var end = document.getElementById('end_time').value;
-            valid = valid && !!start && !!end && new Date(start) < new Date(end);
+            var start = document.getElementById('start_time');
+            var end = document.getElementById('end_time');
+            if (!markField(start, !!start.value, 'Start time is required.')) valid = false;
+            if (!markField(end, !!end.value, 'End time is required.')) valid = false;
+            if (start.value && end.value && !markField(end, new Date(start.value) < new Date(end.value), 'End time must be after start time.')) {
+                valid = false;
+            }
         }
-        if (!valid) event.preventDefault();
+
+        if (!valid) {
+            event.preventDefault();
+        }
     });
 });
