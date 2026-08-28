@@ -1,9 +1,17 @@
 <?php
 declare(strict_types=1);
 
+// Shared fetch/conflict/committed-quantity/has-started/display-status
+// helpers now live in app/includes/reservation_helpers.php so the new
+// AJAX endpoints (public/reservation_status_poll.php and
+// public/facility_availability.php) can reuse them without pulling in
+// this whole page-rendering file. See that file's docblock.
+require_once __DIR__ . '/../../app/includes/reservation_helpers.php';
+
 $pageTitle = 'Facilities Reservation';
 $currentUserId = t8_current_user_id();
 $isAdmin = t8_has_role('admin');
+$isReservationStaff = t8_has_role('facilities_staff');
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
@@ -78,72 +86,6 @@ const T8_FACILITY_RESERVATION_CONFIG = [
         'required_fields' => ['remarks', 'schedule', 'requirements'],
     ],
 ];
-
-/** Fetch a single reservation with its facility/requester names, or null. */
-function t8_reservation_fetch(PDO $pdo, int $id): ?array
-{
-    $stmt = $pdo->prepare(
-        'SELECT r.*, f.name AS facility_name, f.location AS facility_location, f.facility_type, u.full_name AS requester_name
-         FROM team8_reservations r
-         JOIN team8_facilities f ON f.id = r.facility_id
-         JOIN users u ON u.id = r.user_id
-         WHERE r.id = :id LIMIT 1'
-    );
-    $stmt->execute(['id' => $id]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ?: null;
-}
-
-/** True if an APPROVED reservation already occupies this facility/time range. */
-function t8_reservation_has_conflict(PDO $pdo, int $facilityId, string $start, string $end, ?int $excludeId = null): bool
-{
-    $sql = "SELECT COUNT(*) FROM team8_reservations
-            WHERE facility_id = :facility_id AND status = 'approved'
-              AND start_time < :end_time AND end_time > :start_time";
-    $params = ['facility_id' => $facilityId, 'start_time' => $start, 'end_time' => $end];
-    if ($excludeId !== null) {
-        $sql .= ' AND id != :exclude_id';
-        $params['exclude_id'] = $excludeId;
-    }
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    return (int) $stmt->fetchColumn() > 0;
-}
-
-/** Annotates a list of reservation rows in-place with a 'has_conflict' bool. */
-function t8_reservations_annotate_conflicts(PDO $pdo, array $rows): array
-{
-    foreach ($rows as &$row) {
-        $row['has_conflict'] = t8_reservation_has_conflict(
-            $pdo,
-            (int) $row['facility_id'],
-            (string) $row['start_time'],
-            (string) $row['end_time'],
-            (int) $row['id']
-        );
-    }
-    unset($row);
-    return $rows;
-}
-
-/**
- * datetime-local inputs submit "Y-m-d\TH:i" (T separator, no seconds).
- * MySQL's strict-mode DATETIME literal parsing rejects that shape, so
- * normalize to "Y-m-d H:i:s" before it ever reaches a query. Safe to
- * call on an already-normalized value too (idempotent).
- */
-function t8_normalize_datetime(string $value): string
-{
-    $value = trim($value);
-    if ($value === '') {
-        return '';
-    }
-    $value = str_replace('T', ' ', $value);
-    if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $value)) {
-        $value .= ':00';
-    }
-    return $value;
-}
 
 /** Return the config for a facility type, or an empty config if it is unknown. */
 function t8_reservation_get_facility_type_config(string $facilityType): array
@@ -221,8 +163,28 @@ function t8_reservation_form_values(array $source): array
     ];
 }
 
-/** Shared create/edit field validation. Returns an errors array. */
-function t8_reservation_validate(array $activeFacilities, array $values, string $facilityType): array
+/**
+ * Shared create/edit field validation. Returns an errors array.
+ *
+ * FIX (empty required fields): every branch below now pushes a
+ * specific, human-readable message instead of silently passing, and
+ * every field that can be required is checked here regardless of
+ * whether client-side JS also checked it - the server is always the
+ * source of truth, and $errors is always rendered as alerts above
+ * the form (see the markup below).
+ *
+ * FIX (quantity/capacity): for the 'quantity' field specifically (Equipment/
+ * Asset facility types), the request is checked against how much of
+ * the facility's capacity is still AVAILABLE - i.e. capacity minus
+ * whatever is already committed to other pending/approved, not-yet-
+ * returned reservations - not just the facility's total capacity.
+ * This same rule is enforced live in the browser via
+ * public/facility_availability.php (see public/js/reservation.js) -
+ * that JS check is convenience only, THIS server check is what
+ * actually protects the data, so it can never be bypassed by
+ * disabling JS or editing the form's max="" attribute.
+ */
+function t8_reservation_validate(PDO $pdo, array $activeFacilities, array $values, string $facilityType, ?int $excludeId = null): array
 {
     $errors = [];
     $validFacility = false;
@@ -269,6 +231,13 @@ function t8_reservation_validate(array $activeFacilities, array $values, string 
                 if ((int) $f['id'] === (int) $values['facility_id']) {
                     if ((int) $values[$valueKey] > (int) $f['capacity']) {
                         $errors[] = ($field === 'quantity' ? 'The selected quantity' : 'Participants') . ' cannot exceed the selected facility capacity (' . e((string) $f['capacity']) . ').';
+                    } elseif ($field === 'quantity') {
+                        $committed = t8_reservation_committed_quantity($pdo, (int) $f['id'], $excludeId);
+                        $available = max(0, (int) $f['capacity'] - $committed);
+                        if ((int) $values[$valueKey] > $available) {
+                            $errors[] = 'Only ' . $available . ' out of ' . (int) $f['capacity']
+                                . ' unit(s) of "' . $f['name'] . '" are currently available - the rest are already committed to other pending or approved reservations.';
+                        }
                     }
                     break;
                 }
@@ -381,6 +350,31 @@ function t8_reservation_schedule(array $reservation): array
     return ['primary' => 'N/A', 'secondary' => ''];
 }
 
+/** Date used by the client-side month/year reservation filters. */
+function t8_reservation_filter_date(array $reservation): string
+{
+    $date = (string) ($reservation['start_time'] ?? $reservation['schedule'] ?? '');
+    $timestamp = strtotime($date);
+    return $timestamp === false ? '' : date('Y-m-d', $timestamp);
+}
+
+/** Human-friendly label for a (possibly computed) display status, e.g. 'cancellation_pending' -> 'Cancellation Pending'. */
+function t8_reservation_status_label(string $status): string
+{
+    return ucwords(str_replace('_', ' ', $status));
+}
+
+/** Distinct, sorted list of a given key's non-empty values across a set of reservation rows - powers the Type/Facility/Status archive filters. */
+function t8_reservation_distinct_values(array $rows, string $key): array
+{
+    $values = array_values(array_unique(array_filter(array_map(
+        static fn (array $row): string => (string) ($row[$key] ?? ''),
+        $rows
+    ))));
+    sort($values);
+    return $values;
+}
+
 switch ($action) {
     case 'create':
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -400,12 +394,14 @@ switch ($action) {
                         $formValues[$key] = '';
                     }
                 }
-                $errors = t8_reservation_validate($activeFacilities, $formValues, $facilityType);
+                $errors = t8_reservation_validate($pdo, $activeFacilities, $formValues, $facilityType);
                 $participants = $formValues['expected_participants'] !== '' ? (int) $formValues['expected_participants'] : null;
                 $quantity = $formValues['quantity'] !== '' ? (int) $formValues['quantity'] : null;
 
                 if (!$errors) {
-                    $status = $isAdmin ? 'approved' : 'pending';
+                    // Treat all created reservations as requests to be approved.
+                    // Administrators no longer auto-approve upon creation.
+                    $status = 'pending';
                     $stmt = $pdo->prepare(
                         'INSERT INTO team8_reservations
                             (facility_id, user_id, start_time, end_time, status, department, key_person, expected_participants, quantity, event_category, description, expected_return_date, remarks, schedule, requirements)
@@ -431,29 +427,9 @@ switch ($action) {
                     ]);
                     $newId = (int) $pdo->lastInsertId();
 
-                    if ($isAdmin) {
-                        // Administrator-created reservations are recorded as a
-                        // single approval step in the approvals table.
-                        $pdo->prepare(
-                            'INSERT INTO team8_reservation_approvals (reservation_id, approver_id, step_order, status, decided_at)
-                             VALUES (:reservation_id, :approver_id, 1, "approved", NOW())'
-                        )->execute(['reservation_id' => $newId, 'approver_id' => $currentUserId]);
-                        t8_audit_log($pdo, $currentUserId, 'reservation', $newId, 'create_auto_approved');
-
-                        // Conflict warnings are shown when an auto-approved
-                        // reservation overlaps with another approved booking.
-                        $hasConflict = t8_reservation_has_conflict(
-                            $pdo, $facilityId, $formValues['start_time'], $formValues['end_time'], $newId
-                        );
-                        if ($hasConflict) {
-                            t8_flash_set('warning', 'Reservation created and approved, but it overlaps with another approved reservation for this facility.');
-                        } else {
-                            t8_flash_set('success', 'Reservation created and approved.');
-                        }
-                    } else {
-                        t8_audit_log($pdo, $currentUserId, 'reservation', $newId, 'create');
-                        t8_flash_set('success', 'Reservation request submitted for approval.');
-                    }
+                    // Log creation and notify the user that the request is pending.
+                    t8_audit_log($pdo, $currentUserId, 'reservation', $newId, 'create');
+                    t8_flash_set('success', 'Reservation request submitted for approval.');
 
                     redirect(page_url('reservation'));
                 }
@@ -500,7 +476,7 @@ switch ($action) {
                         $formValues[$key] = '';
                     }
                 }
-                $errors = t8_reservation_validate($activeFacilities, $formValues, $facilityType);
+                $errors = t8_reservation_validate($pdo, $activeFacilities, $formValues, $facilityType, $id);
                 $participants = $formValues['expected_participants'] !== '' ? (int) $formValues['expected_participants'] : null;
                 $quantity = $formValues['quantity'] !== '' ? (int) $formValues['quantity'] : null;
 
@@ -548,12 +524,101 @@ switch ($action) {
         }
         $id = (int) ($_POST['id'] ?? 0);
         $target = t8_reservation_fetch($pdo, $id);
-        if ($target && (int) $target['user_id'] === $currentUserId && $target['status'] === 'pending') {
-            $pdo->prepare("UPDATE team8_reservations SET status = 'cancelled' WHERE id = :id")->execute(['id' => $id]);
+        if (!$target || !in_array($target['status'], ['pending', 'approved', 'cancellation_pending'], true)) {
+            t8_flash_set('danger', "That reservation can't be cancelled.");
+        } elseif ($isAdmin) {
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'admin_cancelled', cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW(), admin_remark = 'Cancelled by administrator'
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'admin_cancel');
+            t8_flash_set('success', 'Reservation cancelled and moved to Archive.');
+        } elseif ((int) $target['user_id'] === $currentUserId && $target['status'] === 'pending') {
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW()
+                           WHERE id = :id")
+                ->execute(['id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancel');
             t8_flash_set('success', 'Reservation cancelled.');
+        } elseif ($isReservationStaff && $target['status'] === 'approved') {
+            // FIX (cancel button in staff "All Reservations"): Facilities
+            // Staff can now REQUEST cancellation of any approved
+            // reservation they can see in All Reservations, not just
+            // their own — the request still always goes to an
+            // Administrator for review/approval below, it is never an
+            // immediate cancel.
+            //
+            // FIX (cancel only if not Ongoing): staff may only request
+            // cancellation of an APPROVED reservation while it is still
+            // upcoming - i.e. its computed display status is NOT
+            // 'ongoing'. Once its start (or schedule) time has passed,
+            // it must go through an administrator instead.
+            if (t8_reservation_display_status($target) === 'ongoing') {
+                t8_flash_set('danger', 'This reservation is already Ongoing and can no longer be cancelled by staff. Please contact an administrator.');
+            } else {
+                $reason = trim((string) ($_POST['cancellation_reason'] ?? ''));
+                if ($reason === '') {
+                    t8_flash_set('danger', 'A reason for cancellation is required.');
+                } else {
+                    $pdo->prepare("UPDATE team8_reservations
+                                   SET status = 'cancellation_pending', cancellation_reason = :reason,
+                                       cancellation_requested_by = :user_id, cancellation_requested_at = NOW(), cancellation_decision = 'pending'
+                                   WHERE id = :id")
+                        ->execute(['reason' => $reason, 'user_id' => $currentUserId, 'id' => $id]);
+                    $requestStmt = $pdo->prepare(
+                        "INSERT INTO team8_reservation_cancellation_requests (reservation_id, requested_by, reason, status)
+                         VALUES (:reservation_id, :requested_by, :reason, 'pending')"
+                    );
+                    $requestStmt->execute(['reservation_id' => $id, 'requested_by' => $currentUserId, 'reason' => $reason]);
+                    t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_request', 'approved', $reason);
+                    t8_flash_set('success', 'Cancellation request sent to an administrator for review.');
+                }
+            }
         } else {
             t8_flash_set('danger', "That reservation can't be cancelled.");
+        }
+        redirect(page_url('reservation'));
+        break;
+
+    case 'review_cancellation':
+        t8_require_role(['admin']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('reservation'));
+        }
+        $id = (int) ($_POST['id'] ?? 0);
+        $decision = (string) ($_POST['decision'] ?? '');
+        $target = t8_reservation_fetch($pdo, $id);
+        if (!$target || $target['status'] !== 'cancellation_pending' || !in_array($decision, ['approved', 'rejected'], true)) {
+            t8_flash_set('danger', 'That cancellation request is no longer available for review.');
+        } elseif ($decision === 'approved') {
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'approved',
+                               cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW()
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_approved', 'cancellation_pending', (string) ($target['cancellation_reason'] ?? ''));
+            t8_flash_set('success', 'Cancellation approved. Reservation moved to Archive.');
+        } else {
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'approved', cancellation_decision = 'rejected',
+                               cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'rejected', reviewed_by = :admin_id, reviewed_at = NOW()
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_rejected', 'cancellation_pending', (string) ($target['cancellation_reason'] ?? ''));
+            t8_flash_set('success', 'Cancellation request rejected. Reservation remains active.');
         }
         redirect(page_url('reservation'));
         break;
@@ -621,7 +686,9 @@ switch ($action) {
             // Moving out of Pending Approvals and into All Reservations is
             // automatic - both tables below simply query by status, so a
             // flipped status is instantly reflected in both without any
-            // extra "move" step.
+            // extra "move" step. The live status poll (public/js/reservation.js)
+            // additionally reflects this on any OTHER open tab/browser
+            // within a few seconds, without a manual refresh.
             t8_flash_set('success', 'Reservation ' . $newStatus . '.');
         } else {
             t8_flash_set('danger', 'That reservation is no longer pending.');
@@ -631,20 +698,88 @@ switch ($action) {
 }
 
 $showForm = in_array($action, ['create', 'edit'], true);
+$showArchive = $isAdmin && $action === 'archive';
+// STAFF ARCHIVE: a Facilities Staff member's own Completed/Cancelled
+// reservations only - never another staff member's. Admin keeps the
+// existing 'archive' action/view unchanged.
+$showMyArchive = !$isAdmin && $action === 'my_archive';
+$formReservationId = ($action === 'edit' && isset($id)) ? (int) $id : 0;
 $selectedFacilityType = t8_reservation_detect_facility_type($activeFacilities, $formValues['facility_id']);
 $selectedReservationConfig = t8_reservation_get_facility_type_config($selectedFacilityType);
 
+$archiveFilterOptions = ['types' => [], 'facilities' => [], 'statuses' => []];
+$myArchiveFilterOptions = ['types' => [], 'facilities' => [], 'statuses' => []];
+
 // ---- Data for the list view ----
 if (!$showForm) {
+    // Completed approved bookings are retained for audit purposes with an
+    // explicit final status and are no longer part of active reservation lists.
+    //
+    // FIX (Equipment/Asset missing from lists): this used to key off
+    // COALESCE(end_time, schedule) only, which is NULL for Equipment/
+    // Asset reservations (they only ever set expected_return_date) -
+    // so those rows could never "complete" or move to the Archive.
+    // expected_return_date is now included in the COALESCE chain
+    // everywhere a completion/active-window comparison happens below.
+    //
+    // DASHBOARD UPDATE: this used to be a single bulk UPDATE with no
+    // audit trail, so "how many reservations were completed this
+    // month" had no source of truth for the new Reservation Activity
+    // card on the dashboard. It now fetches the affected ids first,
+    // writes one 'completed' audit_logs entry per reservation, then
+    // performs the same bulk UPDATE. Known limitation: this only runs
+    // when someone views the Reservation module, so a reservation
+    // "completes" (for activity-counting purposes) at the next visit
+    // to this page after its end time passes, not the instant it
+    // passes — acceptable for a dashboard trend, flagged here rather
+    // than silently assumed.
+    $justCompletedIds = $pdo->query(
+        "SELECT id FROM team8_reservations
+          WHERE status = 'approved'
+            AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
+            AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
+    )->fetchAll(PDO::FETCH_COLUMN);
+
+    if ($justCompletedIds !== []) {
+        foreach ($justCompletedIds as $completedId) {
+            t8_audit_log($pdo, $currentUserId, 'reservation', (int) $completedId, 'completed');
+        }
+        $pdo->query(
+            "UPDATE team8_reservations
+              SET status = 'completed', archived_at = COALESCE(archived_at, NOW())
+             WHERE status = 'approved'
+               AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
+               AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
+        );
+    }
+
     if ($isAdmin) {
         $allReservations = $pdo->query(
-            'SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
+            "SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
-             ORDER BY r.start_time DESC'
+             WHERE r.status IN ('approved', 'cancellation_pending')
+               AND r.archived_at IS NULL
+               AND COALESCE(r.end_time, r.schedule, r.expected_return_date) >= NOW()
+             ORDER BY COALESCE(r.start_time, r.schedule, r.created_at) ASC"
         )->fetchAll(PDO::FETCH_ASSOC);
         $allReservations = t8_reservations_annotate_conflicts($pdo, $allReservations);
+
+        $archivedReservations = $pdo->query(
+            "SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
+             FROM team8_reservations r
+             JOIN team8_facilities f ON f.id = r.facility_id
+             JOIN users u ON u.id = r.user_id
+             WHERE r.archived_at IS NOT NULL
+             ORDER BY COALESCE(r.end_time, r.schedule, r.expected_return_date) DESC"
+        )->fetchAll(PDO::FETCH_ASSOC);
+
+        $archiveFilterOptions = [
+            'types'      => t8_reservation_distinct_values($archivedReservations, 'facility_type'),
+            'facilities' => t8_reservation_distinct_values($archivedReservations, 'facility_name'),
+            'statuses'   => t8_reservation_distinct_values($archivedReservations, 'status'),
+        ];
 
         // Lists EVERY reservation currently awaiting approval - nothing
         // filters this further, so it's always the complete pending set.
@@ -657,29 +792,88 @@ if (!$showForm) {
              ORDER BY r.start_time ASC"
         )->fetchAll(PDO::FETCH_ASSOC);
         $pendingReservations = t8_reservations_annotate_conflicts($pdo, $pendingReservations);
-    } else {
-        $allReservationsStmt = $pdo->prepare(
-            'SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
+
+        $cancellationRequests = $pdo->query(
+            "SELECT r.*, f.name AS facility_name, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
-             ORDER BY r.start_time DESC'
+             WHERE r.status = 'cancellation_pending'
+             ORDER BY r.cancellation_requested_at ASC"
+        )->fetchAll(PDO::FETCH_ASSOC);
+    } elseif ($showMyArchive) {
+        // STAFF ARCHIVE: only this staff member's own Completed or
+        // Cancelled reservations - scoped by user_id, never another
+        // staff member's data.
+        $myArchiveStmt = $pdo->prepare(
+            "SELECT r.*, f.name AS facility_name, f.facility_type
+             FROM team8_reservations r
+             JOIN team8_facilities f ON f.id = r.facility_id
+             WHERE r.user_id = :user_id
+               AND r.status IN ('completed', 'cancelled')
+             ORDER BY COALESCE(r.archived_at, r.updated_at) DESC"
+        );
+        $myArchiveStmt->execute(['user_id' => $currentUserId]);
+        $myArchiveReservations = $myArchiveStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $myArchiveFilterOptions = [
+            'types'      => t8_reservation_distinct_values($myArchiveReservations, 'facility_type'),
+            'facilities' => t8_reservation_distinct_values($myArchiveReservations, 'facility_name'),
+            'statuses'   => t8_reservation_distinct_values($myArchiveReservations, 'status'),
+        ];
+    } else {
+        $allReservationsStmt = $pdo->prepare(
+            "SELECT r.*, f.name AS facility_name, f.facility_type, u.full_name AS requester_name
+             FROM team8_reservations r
+             JOIN team8_facilities f ON f.id = r.facility_id
+             JOIN users u ON u.id = r.user_id
+             WHERE r.status = 'approved'
+               AND r.archived_at IS NULL
+               AND COALESCE(r.end_time, r.schedule, r.expected_return_date) >= NOW()
+             ORDER BY COALESCE(r.start_time, r.schedule, r.created_at) DESC"
         );
         $allReservationsStmt->execute();
         $allReservations = $allReservationsStmt->fetchAll(PDO::FETCH_ASSOC);
         $allReservations = t8_reservations_annotate_conflicts($pdo, $allReservations);
 
+        // FIX (reduce clutter): Completed and Cancelled reservations no
+        // longer show up in "My Reservations" - once a reservation
+        // reaches either of those statuses it belongs exclusively in
+        // "My Archive" (see $showMyArchive above), which already lists
+        // exactly this same set. Keeping them in both places just made
+        // an already-long table harder to scan for what's still active.
         $myStmt = $pdo->prepare(
-            'SELECT r.*, f.name AS facility_name, f.facility_type
+            "SELECT r.*, f.name AS facility_name, f.facility_type
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              WHERE r.user_id = :user_id
-             ORDER BY r.start_time DESC'
+               AND r.status NOT IN ('completed', 'cancelled')
+             ORDER BY r.start_time DESC"
         );
         $myStmt->execute(['user_id' => $currentUserId]);
         $myReservations = $myStmt->fetchAll(PDO::FETCH_ASSOC);
         $myReservations = t8_reservations_annotate_conflicts($pdo, $myReservations);
     }
+}
+
+// Facility row + live-availability snapshot for the currently-selected
+// facility on the create/edit form - used to seed the Participants/
+// Quantity "max" attributes and helper text before any JS runs (the
+// JS in public/js/reservation.js then re-fetches this from
+// public/facility_availability.php whenever the Facility dropdown
+// changes, so the limit always reflects the CURRENT commitments, not
+// just what was true when the page was first rendered).
+$selectedFacilityRow = null;
+foreach ($activeFacilities as $facilityOption) {
+    if ((string) $facilityOption['id'] === $formValues['facility_id']) {
+        $selectedFacilityRow = $facilityOption;
+        break;
+    }
+}
+$selectedFacilityAvailable = null;
+if ($selectedFacilityRow !== null && in_array($selectedFacilityType, ['Equipment', 'Asset'], true)) {
+    $committedNow = t8_reservation_committed_quantity($pdo, (int) $selectedFacilityRow['id'], $formReservationId ?: null);
+    $selectedFacilityAvailable = max(0, (int) $selectedFacilityRow['capacity'] - $committedNow);
 }
 ?>
 <h1>Facilities Reservation</h1>
@@ -691,6 +885,9 @@ if (!$showForm) {
 
 <?php if ($showForm): ?>
 
+    <?php /* FIX (empty-field errors): every validation message collected
+             server-side is always rendered here, whether or not client-side
+             JS also caught it - this block never silently disappears. */ ?>
     <?php foreach ($errors as $error): ?>
         <div class="t8-alert t8-alert-danger"><?= e($error) ?></div>
     <?php endforeach; ?>
@@ -713,6 +910,8 @@ if (!$showForm) {
         <?php else: ?>
             <form id="t8ReservationForm" method="post"
                   action="<?= e(page_url('reservation', array_filter(['action' => $action, 'id' => $_GET['id'] ?? null]))) ?>"
+                  data-reservation-id="<?= e((string) $formReservationId) ?>"
+                  data-availability-url="<?= e(base_url('facility_availability.php')) ?>"
                   novalidate data-facility-config="<?= e((string) json_encode(T8_FACILITY_RESERVATION_CONFIG)) ?>">
                 <?= t8_csrf_field() ?>
 
@@ -721,7 +920,10 @@ if (!$showForm) {
                     <select class="t8-select" id="facility_id" name="facility_id" required>
                         <option value="">Select a facility…</option>
                         <?php foreach ($activeFacilities as $f): ?>
-                            <option value="<?= e((string) $f['id']) ?>" data-facility-type="<?= e((string) $f['facility_type']) ?>" <?= (string) $f['id'] === $formValues['facility_id'] ? 'selected' : '' ?>>
+                            <option value="<?= e((string) $f['id']) ?>"
+                                    data-facility-type="<?= e((string) $f['facility_type']) ?>"
+                                    data-capacity="<?= e((string) $f['capacity']) ?>"
+                                    <?= (string) $f['id'] === $formValues['facility_id'] ? 'selected' : '' ?>>
 
                              <?= e($f['name']) ?><?= $f['facility_type'] ? ' — ' . e($f['facility_type']) : '' ?> — <?= e($f['location']) ?> (cap. <?= e((string) $f['capacity']) ?>)
                             </option>
@@ -758,24 +960,27 @@ if (!$showForm) {
                 <div class="t8-field" data-reservation-field="participants">
                     <label class="t8-label" for="expected_participants">Participants</label>
                     <input class="t8-input" type="number" id="expected_participants" name="expected_participants" min="1"
+                           <?= $selectedFacilityRow !== null ? 'max="' . e((string) $selectedFacilityRow['capacity']) . '"' : '' ?>
                            value="<?= e($formValues['expected_participants']) ?>" placeholder="Optional headcount">
+                    <?php if ($selectedFacilityRow !== null): ?>
+                        <span class="t8-help-text" id="t8ParticipantsCapacityHint">Cannot exceed this facility's capacity (<?= e((string) $selectedFacilityRow['capacity']) ?>).</span>
+                    <?php endif; ?>
                 </div>
 
                 <div class="t8-field" data-reservation-field="quantity">
                     <label class="t8-label" for="quantity">Quantity</label>
                     <input class="t8-input" type="number" id="quantity" name="quantity" min="1"
+                           <?= $selectedFacilityAvailable !== null ? 'max="' . e((string) $selectedFacilityAvailable) . '"' : '' ?>
                            value="<?= e($formValues['quantity']) ?>" placeholder="Quantity to reserve">
+                    <?php if ($selectedFacilityAvailable !== null): ?>
+                        <span class="t8-help-text" id="t8QuantityAvailabilityHint">
+                            <?= e((string) $selectedFacilityAvailable) ?> of <?= e((string) $selectedFacilityRow['capacity']) ?> currently available.
+                        </span>
+                    <?php else: ?>
+                        <span class="t8-help-text" id="t8QuantityAvailabilityHint" hidden></span>
+                    <?php endif; ?>
                 </div>
 
-                <!--
-                    Date/time click fix: native datetime-local inputs only
-                    open their picker when the calendar icon itself is
-                    clicked in some browsers. this.showPicker() (Chrome/Edge
-                    111+) opens the picker programmatically, so the onclick
-                    below makes the ENTIRE field clickable, not just the
-                    icon. Browsers without showPicker() silently no-op and
-                    fall back to normal native behavior - nothing breaks.
-                -->
                 <div class="t8-field" data-reservation-field="time_range">
                     <label class="t8-label" for="start_time">Start</label>
                     <input class="t8-input t8-datetime-input" type="datetime-local" id="start_time" name="start_time"
@@ -821,7 +1026,7 @@ if (!$showForm) {
 
                 <button class="t8-btn t8-btn-accent" type="submit">
                     <i class="fa-solid fa-check"></i>
-                    <?= $action === 'edit' ? 'Save Changes' : ($isAdmin ? 'Create & Approve' : 'Submit Request') ?>
+                    <?= $action === 'edit' ? 'Save Changes' : ($isAdmin ? 'Continue' : 'Submit Request') ?>
                 </button>
                 <a class="t8-btn t8-btn-outline" href="<?= e(page_url('reservation')) ?>">Cancel</a>
             </form>
@@ -834,6 +1039,16 @@ if (!$showForm) {
         <?php if ($hasActiveFacilities): ?>
             <a class="t8-btn t8-btn-accent" href="<?= e(page_url('reservation', ['action' => 'create'])) ?>">
                 <i class="fa-solid fa-calendar-plus"></i> New Reservation
+            </a>
+        <?php endif; ?>
+        <?php if ($isAdmin): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('reservation', ['action' => 'archive'])) ?>">
+                <i class="fa-solid fa-box-archive"></i> Archive
+            </a>
+        <?php else: ?>
+            <!-- STAFF ARCHIVE: own Completed/Cancelled reservations only. -->
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('reservation', ['action' => 'my_archive'])) ?>">
+                <i class="fa-solid fa-box-archive"></i> My Archive
             </a>
         <?php endif; ?>
     </div>
@@ -850,7 +1065,110 @@ if (!$showForm) {
         </div>
     <?php endif; ?>
 
-    <?php if ($isAdmin): ?>
+    <?php if ($showArchive): ?>
+
+        <div class="t8-card">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title">Archived Reservations</h2>
+                <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation')) ?>">Back to Reservations</a>
+            </div>
+            <div class="t8-reservation-filters" data-reservation-filters data-filter-table="t8ArchiveReservations">
+                <label>Month <select class="t8-select" data-filter-month><option value="">All months</option><?php foreach (range(1, 12) as $month): ?><option value="<?= e((string) $month) ?>"><?= e(date('F', mktime(0, 0, 0, $month, 1))) ?></option><?php endforeach; ?></select></label>
+                <label>Year <select class="t8-select" data-filter-year><option value="">All years</option></select></label>
+                <label>Type <select class="t8-select" data-filter-type><option value="">All types</option><?php foreach ($archiveFilterOptions['types'] as $type): ?><option value="<?= e($type) ?>"><?= e($type) ?></option><?php endforeach; ?></select></label>
+                <label>Facility <select class="t8-select" data-filter-facility><option value="">All facilities</option><?php foreach ($archiveFilterOptions['facilities'] as $facilityName): ?><option value="<?= e($facilityName) ?>"><?= e($facilityName) ?></option><?php endforeach; ?></select></label>
+                <label>Status <select class="t8-select" data-filter-status><option value="">All statuses</option><?php foreach ($archiveFilterOptions['statuses'] as $statusOption): ?><option value="<?= e($statusOption) ?>"><?= e(t8_reservation_status_label($statusOption)) ?></option><?php endforeach; ?></select></label>
+            </div>
+            <?php /* FIX (Type + Status columns): archived rows previously had
+                     no facility-Type column and no Status column, so it was
+                     impossible to see whether an archived row was a
+                     Completed booking or a Cancelled one, and Equipment/Asset
+                     rows had no visible "Qty" context. Both are added below. */ ?>
+            <div class="t8-table-wrap"><table class="t8-table" id="t8ArchiveReservations"><thead><tr><th>Facility</th><th>Type</th><th>Requested By</th><th>Department</th><th>Key Person</th><th>Reservation</th><th>Schedule</th><th>Status</th><th>Archived</th></tr></thead><tbody>
+                <?php if ($archivedReservations === []): ?>
+                    <tr class="t8-filter-empty"><td colspan="9" class="t8-table-empty-row">No completed reservations have been archived yet.</td></tr>
+                <?php else: ?>
+                    <?php foreach ($archivedReservations as $r): ?>
+                        <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
+                        <tr data-reservation-row
+                            data-reservation-date="<?= e(t8_reservation_filter_date($r)) ?>"
+                            data-reservation-type="<?= e((string) ($r['facility_type'] ?? '')) ?>"
+                            data-reservation-facility="<?= e((string) $r['facility_name']) ?>"
+                            data-reservation-status="<?= e((string) $r['status']) ?>">
+                            <td><?= e($r['facility_name']) ?></td>
+                            <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
+                            <td><?= e($r['requester_name']) ?></td>
+                            <td><?= e((string) ($r['department'] ?? '-')) ?></td>
+                            <td><?= e((string) ($r['key_person'] ?? '-')) ?></td>
+                            <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
+                            <td><?= e($schedule['primary']) ?></td>
+                            <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(t8_reservation_status_label((string) $r['status'])) ?></span></td>
+                            <td><?= e(format_date((string) $r['archived_at'], 'M d, Y g:i A')) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody></table></div>
+        </div>
+
+    <?php elseif ($showMyArchive): ?>
+
+        <!-- STAFF ARCHIVE VIEW -->
+        <div class="t8-card">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title">My Archive</h2>
+                <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation')) ?>">Back to Reservations</a>
+            </div>
+            <p class="t8-help-text" style="padding: 0 var(--t8-space-4) var(--t8-space-3);">
+                Your own Completed and Cancelled reservations. Other staff members' reservations are never shown here.
+            </p>
+            <div class="t8-reservation-filters" data-reservation-filters data-filter-table="t8MyArchiveReservations">
+                <label>Month <select class="t8-select" data-filter-month><option value="">All months</option><?php foreach (range(1, 12) as $month): ?><option value="<?= e((string) $month) ?>"><?= e(date('F', mktime(0, 0, 0, $month, 1))) ?></option><?php endforeach; ?></select></label>
+                <label>Year <select class="t8-select" data-filter-year><option value="">All years</option></select></label>
+                <label>Type <select class="t8-select" data-filter-type><option value="">All types</option><?php foreach ($myArchiveFilterOptions['types'] as $type): ?><option value="<?= e($type) ?>"><?= e($type) ?></option><?php endforeach; ?></select></label>
+                <label>Facility <select class="t8-select" data-filter-facility><option value="">All facilities</option><?php foreach ($myArchiveFilterOptions['facilities'] as $facilityName): ?><option value="<?= e($facilityName) ?>"><?= e($facilityName) ?></option><?php endforeach; ?></select></label>
+                <label>Status <select class="t8-select" data-filter-status><option value="">All statuses</option><?php foreach ($myArchiveFilterOptions['statuses'] as $statusOption): ?><option value="<?= e($statusOption) ?>"><?= e(t8_reservation_status_label($statusOption)) ?></option><?php endforeach; ?></select></label>
+            </div>
+            <div class="t8-table-wrap"><table class="t8-table" id="t8MyArchiveReservations"><thead><tr><th>Facility</th><th>Type</th><th>Reservation</th><th>Schedule</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>
+                <?php if ($myArchiveReservations === []): ?>
+                    <tr class="t8-filter-empty"><td colspan="7" class="t8-table-empty-row">You don't have any completed or cancelled reservations yet.</td></tr>
+                <?php else: ?>
+                    <?php foreach ($myArchiveReservations as $r): ?>
+                        <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
+                        <tr data-reservation-row
+                            data-reservation-date="<?= e(t8_reservation_filter_date($r)) ?>"
+                            data-reservation-type="<?= e((string) ($r['facility_type'] ?? '')) ?>"
+                            data-reservation-facility="<?= e((string) $r['facility_name']) ?>"
+                            data-reservation-status="<?= e((string) $r['status']) ?>">
+                            <td><?= e($r['facility_name']) ?></td>
+                            <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
+                            <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
+                            <td><?= e($schedule['primary']) ?></td>
+                            <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(t8_reservation_status_label((string) $r['status'])) ?></span></td>
+                            <td><?= $r['archived_at'] ? e(format_date((string) $r['archived_at'], 'M d, Y g:i A')) : '—' ?></td>
+                            <td>
+                                <?php // Delete moved here from "My Reservations" now that Cancelled
+                                      // rows no longer appear there at all - only a Cancelled row can
+                                      // ever be deleted (Completed stays as a permanent record). ?>
+                                <?php if ($r['status'] === 'cancelled'): ?>
+                                    <form method="post" action="<?= e(page_url('reservation', ['action' => 'delete'])) ?>"
+                                          onsubmit="return confirm('Permanently delete this cancelled reservation? This cannot be undone.');">
+                                        <?= t8_csrf_field() ?>
+                                        <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
+                                        <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
+                                            <i class="fa-solid fa-trash"></i> Delete
+                                        </button>
+                                    </form>
+                                <?php else: ?>
+                                    <span class="t8-help-text">—</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody></table></div>
+        </div>
+
+    <?php elseif ($isAdmin): ?>
 
         <div class="t8-card">
             <div class="t8-card-header">
@@ -866,6 +1184,8 @@ if (!$showForm) {
                             <th>Facility</th>
                             <th>Type</th>
                             <th>Requested By</th>
+                            <th>Department</th>
+                            <th>Key Person</th>
                             <th>Reservation</th>
                             <th>Schedule</th>
                             <th>Conflict</th>
@@ -875,7 +1195,7 @@ if (!$showForm) {
                     <tbody>
                         <?php if ($pendingReservations === []): ?>
                             <tr>
-                                <td colspan="7" class="t8-table-empty-row">
+                                <td colspan="9" class="t8-table-empty-row">
                                     No reservation requests are waiting for approval yet.
                                     Once a request is submitted, it will appear here.
                                 </td>
@@ -883,10 +1203,12 @@ if (!$showForm) {
                         <?php else: ?>
                             <?php foreach ($pendingReservations as $p): ?>
                                 <?php $summary = t8_reservation_summary($p); $schedule = t8_reservation_schedule($p); ?>
-                                <tr <?= $p['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
+                                <tr data-reservation-id="<?= e((string) $p['id']) ?>" <?= $p['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($p['facility_name']) ?></td>
                                     <td><span class="t8-type-pill"><?= e((string) ($p['facility_type'] ?? 'Unknown')) ?></span></td>
                                     <td><?= e($p['requester_name']) ?></td>
+                                    <td><?= e((string) ($p['department'] ?? '-')) ?></td>
+                                    <td><?= e((string) ($p['key_person'] ?? '-')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td>
@@ -926,10 +1248,210 @@ if (!$showForm) {
 
         <div class="t8-card">
             <div class="t8-card-header">
+                <h2 class="t8-card-title">Cancellation Requests</h2>
+                <?php if ($cancellationRequests !== []): ?><span class="t8-notification-count"><?= e((string) count($cancellationRequests)) ?> pending</span><?php endif; ?>
+            </div>
+            <div class="t8-table-wrap"><table class="t8-table"><thead><tr><th>Facility</th><th>Requested By</th><th>Reason</th><th>Requested At</th><th>Actions</th></tr></thead><tbody>
+                <?php if ($cancellationRequests === []): ?>
+                    <tr><td colspan="5" class="t8-table-empty-row">No cancellation requests are waiting for review.</td></tr>
+                <?php else: foreach ($cancellationRequests as $request): ?>
+                    <tr><td><?= e($request['facility_name']) ?></td><td><?= e($request['requester_name']) ?></td><td><?= e((string) $request['cancellation_reason']) ?></td><td><?= e(format_date((string) $request['cancellation_requested_at'], 'M d, Y g:i A')) ?></td><td style="display:flex;gap:8px;">
+                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="approved"><button class="t8-btn t8-btn-success t8-btn-sm" type="submit">Approve Cancellation</button></form>
+                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="rejected"><button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">Reject Request</button></form>
+                    </td></tr>
+                <?php endforeach; endif; ?>
+            </tbody></table></div>
+        </div>
+
+        <div class="t8-card">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title">All Reservations</h2>
+            </div>
+            <div class="t8-reservation-filters" data-reservation-filters data-filter-table="t8AllReservations">
+                <label>Month <select class="t8-select" data-filter-month><option value="">All months</option><?php foreach (range(1, 12) as $month): ?><option value="<?= e((string) $month) ?>"><?= e(date('F', mktime(0, 0, 0, $month, 1))) ?></option><?php endforeach; ?></select></label>
+                <label>Year <select class="t8-select" data-filter-year><option value="">All years</option></select></label>
+            </div>
+            <div class="t8-table-wrap">
+                <table class="t8-table t8-live-status" id="t8AllReservations">
+                    <thead>
+                        <tr>
+                            <th>Facility</th>
+                            <th>Type</th>
+                            <th>Requested By</th>
+                            <th>Department</th>
+                            <th>Key Person</th>
+                            <th>Reservation</th>
+                            <th>Schedule</th>
+                            <th>Status</th>
+                            <th>Conflict</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($allReservations === []): ?>
+                            <tr>
+                                <td colspan="10" class="t8-table-empty-row">
+                                    No reservations have been made yet.
+                                    Once a reservation is submitted, it will appear here.
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($allReservations as $r): ?>
+                                <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); $displayStatus = t8_reservation_display_status($r); ?>
+                                <tr data-reservation-row data-reservation-id="<?= e((string) $r['id']) ?>" data-reservation-date="<?= e(t8_reservation_filter_date($r)) ?>" <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
+                                    <td><?= e($r['facility_name']) ?></td>
+                                    <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
+                                    <td><?= e($r['requester_name']) ?></td>
+                                    <td><?= e((string) ($r['department'] ?? '-')) ?></td>
+                                    <td><?= e((string) ($r['key_person'] ?? '-')) ?></td>
+                                    <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
+                                    <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
+                                    <td><span class="t8-badge t8-badge-<?= e($displayStatus) ?>" id="t8-res-status-<?= e((string) $r['id']) ?>" data-live-status><?= e(t8_reservation_status_label($displayStatus)) ?></span></td>
+                                    <td id="t8-res-conflict-<?= e((string) $r['id']) ?>" data-live-conflict>
+                                        <?php if ($r['has_conflict']): ?>
+                                            <span class="t8-badge" title="Time Conflict"
+                                                  style="background:#E67E22; color:#fff; font-weight:700;">
+                                                <i class="fa-solid fa-triangle-exclamation"></i> !
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="t8-help-text">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if ($r['status'] === 'approved'): ?>
+                                            <form method="post" action="<?= e(page_url('reservation', ['action' => 'cancel'])) ?>"
+                                                  onsubmit="return confirm('Cancel this reservation and move it to Archive?');">
+                                                <?= t8_csrf_field() ?>
+                                                <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
+                                                <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
+                                                    <i class="fa-solid fa-xmark"></i> Cancel
+                                                </button>
+                                            </form>
+                                        <?php elseif ($r['status'] === 'cancellation_pending'): ?>
+                                            <span class="t8-help-text">Cancellation review pending</span>
+                                        <?php else: ?>
+                                            <span class="t8-help-text">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    <?php else: ?>
+
+        <div class="t8-card">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title">My Reservations</h2>
+            </div>
+            <?php /* FORMAT CHANGE: this table now mirrors the Admin "Pending
+                     Approvals" card's columns (Facility, Type, Department,
+                     Key Person, Reservation, Schedule, Conflict, Actions) -
+                     this is a layout/format change only, staff permissions
+                     and the underlying cancel/edit workflow are unchanged.
+                     Status is kept as an extra column since, unlike Pending
+                     Approvals, a staff member's own reservations span every
+                     status. */ ?>
+            <div class="t8-table-wrap">
+                <table class="t8-table t8-live-status" id="t8MyReservations">
+                    <thead>
+                        <tr>
+                            <th>Facility</th>
+                            <th>Type</th>
+                            <th>Department</th>
+                            <th>Key Person</th>
+                            <th>Reservation</th>
+                            <th>Schedule</th>
+                            <th>Status</th>
+                            <th>Conflict</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($myReservations === []): ?>
+                            <tr>
+                                <td colspan="9" class="t8-table-empty-row">
+                                    No active reservations right now.
+                                    Create one to see it listed here — Completed and Cancelled reservations move to
+                                    <a href="<?= e(page_url('reservation', ['action' => 'my_archive'])) ?>">My Archive</a>.
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($myReservations as $r): ?>
+                                <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); $displayStatus = t8_reservation_display_status($r); ?>
+                                <tr data-reservation-id="<?= e((string) $r['id']) ?>" <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
+                                    <td><?= e($r['facility_name']) ?></td>
+                                    <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
+                                    <td><?= e((string) ($r['department'] ?? '-')) ?></td>
+                                    <td><?= e((string) ($r['key_person'] ?? '-')) ?></td>
+                                    <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
+                                    <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
+                                    <td><span class="t8-badge t8-badge-<?= e($displayStatus) ?>" id="t8-res-status-<?= e((string) $r['id']) ?>" data-live-status><?= e(t8_reservation_status_label($displayStatus)) ?></span></td>
+                                    <td id="t8-res-conflict-<?= e((string) $r['id']) ?>" data-live-conflict>
+                                        <?php if ($r['has_conflict']): ?>
+                                            <span class="t8-badge" title="Time Conflict"
+                                                  style="background:#E67E22; color:#fff; font-weight:700;">
+                                                <i class="fa-solid fa-triangle-exclamation"></i> ! Time Conflict
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="t8-help-text">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td style="display:flex; gap:8px; flex-wrap:wrap;" data-live-actions>
+                                        <?php if ($r['status'] === 'pending'): ?>
+                                            <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) ?>">
+                                                <i class="fa-solid fa-pen"></i> Edit
+                                            </a>
+                                            <form method="post" action="<?= e(page_url('reservation', ['action' => 'cancel'])) ?>"
+                                                  onsubmit="return confirm('Cancel this reservation request?');">
+                                                <?= t8_csrf_field() ?>
+                                                <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
+                                                <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
+                                                    <i class="fa-solid fa-xmark"></i> Cancel
+                                                </button>
+                                            </form>
+                                        <?php elseif ($isReservationStaff && $r['status'] === 'approved'): ?>
+                                            <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) ?>">
+                                                <i class="fa-solid fa-pen"></i> Edit
+                                            </a>
+                                            <?php /* FIX (cancel only before Ongoing): once the reservation's
+                                                     computed display status is 'ongoing', staff can no longer
+                                                     self-request a cancellation - the button is replaced
+                                                     with an explanatory note instead of being hidden
+                                                     silently. */ ?>
+                                            <?php if ($displayStatus !== 'ongoing'): ?>
+                                                <button class="t8-btn t8-btn-danger t8-btn-sm" type="button" data-cancel-reservation-id="<?= e((string) $r['id']) ?>">
+                                                    <i class="fa-solid fa-xmark"></i> Cancel Reservation
+                                                </button>
+                                            <?php else: ?>
+                                                <span class="t8-help-text" data-ongoing-note>Already Ongoing — contact an administrator to cancel.</span>
+                                            <?php endif; ?>
+                                            <?php if (($r['cancellation_decision'] ?? '') === 'rejected'): ?>
+                                                <span class="t8-help-text">Previous cancellation request was rejected.</span>
+                                            <?php endif; ?>
+                                        <?php elseif ($r['status'] === 'cancellation_pending'): ?>
+                                            <span class="t8-help-text">Cancellation request pending</span>
+                                        <?php else: ?>
+                                            <span class="t8-help-text">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="t8-card">
+            <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
             </div>
             <div class="t8-table-wrap">
-                <table class="t8-table">
+                <table class="t8-table t8-live-status" id="t8AllReservationsStaff">
                     <thead>
                         <tr>
                             <th>Facility</th>
@@ -952,167 +1474,46 @@ if (!$showForm) {
                             </tr>
                         <?php else: ?>
                             <?php foreach ($allReservations as $r): ?>
-                                <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
-                                <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
-                                    <td><?= e($r['facility_name']) ?></td>
-                                    <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
-                                    <td><?= e($r['requester_name']) ?></td>
-                                    <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
-                                    <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
-                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
-                                    <td>
-                                        <?php if ($r['has_conflict']): ?>
-                                            <span class="t8-badge" title="Time Conflict"
-                                                  style="background:#E67E22; color:#fff; font-weight:700;">
-                                                <i class="fa-solid fa-triangle-exclamation"></i> !
-                                            </span>
-                                        <?php else: ?>
-                                            <span class="t8-help-text">—</span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <?php if ($r['status'] === 'cancelled'): ?>
-                                            <form method="post" action="<?= e(page_url('reservation', ['action' => 'delete'])) ?>"
-                                                  onsubmit="return confirm('Permanently delete this cancelled reservation? This cannot be undone.');">
-                                                <?= t8_csrf_field() ?>
-                                                <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
-                                                <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                    <i class="fa-solid fa-trash"></i> Delete
-                                                </button>
-                                            </form>
-                                        <?php else: ?>
-                                            <span class="t8-help-text">—</span>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-    <?php else: ?>
-
-        <div class="t8-card">
-            <div class="t8-card-header">
-                <h2 class="t8-card-title">My Reservations</h2>
-            </div>
-            <div class="t8-table-wrap">
-                <table class="t8-table">
-                    <thead>
-                        <tr>
-                            <th>Facility</th>
-                            <th>Type</th>
-                            <th>Reservation</th>
-                            <th>Schedule</th>
-                            <th>Status</th>
-                            <th>Conflict</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if ($myReservations === []): ?>
-                            <tr>
-                                <td colspan="7" class="t8-table-empty-row">
-                                    You haven't made any reservations yet.
-                                    Create one to see it listed here.
-                                </td>
-                            </tr>
-                        <?php else: ?>
-                            <?php foreach ($myReservations as $r): ?>
-                                <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
-                                <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
-                                    <td><?= e($r['facility_name']) ?></td>
-                                    <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
-                                    <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
-                                    <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
-                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
-                                    <td>
-                                        <?php if ($r['has_conflict']): ?>
-                                            <span class="t8-badge" title="Time Conflict"
-                                                  style="background:#E67E22; color:#fff; font-weight:700;">
-                                                <i class="fa-solid fa-triangle-exclamation"></i> ! Time Conflict
-                                            </span>
-                                        <?php else: ?>
-                                            <span class="t8-help-text">—</span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td style="display:flex; gap:8px; flex-wrap:wrap;">
-                                        <?php if ($r['status'] === 'pending'): ?>
-                                            <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) ?>">
-                                                <i class="fa-solid fa-pen"></i> Edit
-                                            </a>
-                                            <form method="post" action="<?= e(page_url('reservation', ['action' => 'cancel'])) ?>"
-                                                  onsubmit="return confirm('Cancel this reservation request?');">
-                                                <?= t8_csrf_field() ?>
-                                                <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
-                                                <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                    <i class="fa-solid fa-xmark"></i> Cancel
-                                                </button>
-                                            </form>
-                                        <?php elseif ($r['status'] === 'cancelled'): ?>
-                                            <form method="post" action="<?= e(page_url('reservation', ['action' => 'delete'])) ?>"
-                                                  onsubmit="return confirm('Permanently delete this cancelled reservation? This cannot be undone.');">
-                                                <?= t8_csrf_field() ?>
-                                                <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
-                                                <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                    <i class="fa-solid fa-trash"></i> Delete
-                                                </button>
-                                            </form>
-                                        <?php else: ?>
-                                            <span class="t8-help-text">—</span>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="t8-card">
-            <div class="t8-card-header">
-                <h2 class="t8-card-title">All Reservations</h2>
-            </div>
-            <div class="t8-table-wrap">
-                <table class="t8-table">
-                    <thead>
-                        <tr>
-                            <th>Facility</th>
-                            <th>Type</th>
-                            <th>Requested By</th>
-                            <th>Reservation</th>
-                            <th>Schedule</th>
-                            <th>Status</th>
-                            <th>Conflict</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if ($allReservations === []): ?>
-                            <tr>
-                                <td colspan="7" class="t8-table-empty-row">
-                                    No reservations have been made yet.
-                                    Once a reservation is submitted, it will appear here.
-                                </td>
-                            </tr>
-                        <?php else: ?>
-                            <?php foreach ($allReservations as $r): ?>
-                                <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
-                                <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
+                                <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); $displayStatus = t8_reservation_display_status($r); ?>
+                                <?php
+                                    // FIX (cancel button in staff "All Reservations"): Facilities
+                                    // Staff can request cancellation of ANY approved reservation
+                                    // shown here (not just their own) - matching the broadened
+                                    // server-side rule in the 'cancel' action switch above. It is
+                                    // always sent as a REQUEST for an Administrator to approve or
+                                    // reject, never an immediate cancel.
+                                    $isOwnRow = (int) ($r['user_id'] ?? 0) === $currentUserId;
+                                ?>
+                                <tr data-reservation-id="<?= e((string) $r['id']) ?>" <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
                                     <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
                                     <td><?= e((string) ($r['requester_name'] ?? '—')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
-                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
-                                    <td>
+                                    <td><span class="t8-badge t8-badge-<?= e($displayStatus) ?>" id="t8-res-status-<?= e((string) $r['id']) ?>" data-live-status><?= e(t8_reservation_status_label($displayStatus)) ?></span></td>
+                                    <td id="t8-res-conflict-<?= e((string) $r['id']) ?>" data-live-conflict>
                                         <?php if ($r['has_conflict']): ?>
                                             <span class="t8-badge" title="Time Conflict"
                                                   style="background:#E67E22; color:#fff; font-weight:700;">
                                                 <i class="fa-solid fa-triangle-exclamation"></i> !
                                             </span>
+                                        <?php else: ?>
+                                            <span class="t8-help-text">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td data-live-actions>
+                                        <?php if ($isReservationStaff && $r['status'] === 'approved'): ?>
+                                            <?php if ($displayStatus !== 'ongoing'): ?>
+                                                <button class="t8-btn t8-btn-danger t8-btn-sm" type="button"
+                                                        data-cancel-reservation-id="<?= e((string) $r['id']) ?>"
+                                                        title="<?= $isOwnRow ? 'Request cancellation of your reservation' : 'Request cancellation on behalf of ' . e($r['requester_name'] ?? 'this requester') ?>">
+                                                    <i class="fa-solid fa-xmark"></i> Request Cancellation
+                                                </button>
+                                            <?php else: ?>
+                                                <span class="t8-help-text" data-ongoing-note>Already Ongoing</span>
+                                            <?php endif; ?>
+                                        <?php elseif ($r['status'] === 'cancellation_pending'): ?>
+                                            <span class="t8-help-text">Cancellation pending</span>
                                         <?php else: ?>
                                             <span class="t8-help-text">—</span>
                                         <?php endif; ?>
@@ -1125,6 +1526,22 @@ if (!$showForm) {
             </div>
         </div>
 
+    <?php endif; ?>
+
+    <?php if (!$isAdmin): ?>
+        <dialog id="t8CancellationRequestModal" class="t8-cancellation-modal">
+            <form method="post" action="<?= e(page_url('reservation', ['action' => 'cancel'])) ?>">
+                <?= t8_csrf_field() ?>
+                <input type="hidden" id="t8CancellationReservationId" name="id">
+                <h2>Request Reservation Cancellation</h2>
+                <p>Are you sure you want to request cancellation of this reservation?</p>
+                <label class="t8-label" for="t8CancellationReason">Reason for Cancellation</label>
+                <textarea class="t8-input" id="t8CancellationReason" name="cancellation_reason" rows="4" required></textarea>
+                <span id="t8CancellationReasonError" class="t8-error-text" hidden>Please enter a reason for cancellation.</span>
+                <p class="t8-help-text">This request will be sent to an Administrator for approval. The reservation remains active until it is approved.</p>
+                <div style="display:flex;gap:8px;margin-top:16px;"><button class="t8-btn t8-btn-outline" type="button" data-close-cancellation-modal>Cancel</button><button class="t8-btn t8-btn-danger" type="submit">Submit Cancellation Request</button></div>
+            </form>
+        </dialog>
     <?php endif; ?>
 
 <?php endif; ?>

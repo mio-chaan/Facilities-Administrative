@@ -22,7 +22,7 @@ const T8_ROLES = [
 ];
 
 // Shared status vocabulary (keep consistent with schema CHECK/ENUM values).
-const T8_RESERVATION_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'];
+const T8_RESERVATION_STATUSES = ['pending', 'approved', 'rejected', 'cancellation_pending', 'cancelled', 'completed'];
 const T8_VISIT_STATUSES       = ['expected', 'checked_in', 'checked_out', 'denied'];
 const T8_RECORD_STATUSES      = ['active', 'archived', 'disposed'];
 const T8_CONTRACT_STATUSES    = ['draft', 'active', 'expired', 'terminated', 'renewed'];

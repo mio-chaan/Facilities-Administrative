@@ -19,6 +19,12 @@ $page = $page ?? current_page();
 <?php if ($page === 'facilities'): ?>
     <script src="<?= e(asset('js/facilities.js')) ?>"></script>
 <?php endif; ?>
+<?php if ($page === 'visitor'): ?>
+    <script src="<?= e(asset('js/visitor.js')) ?>"></script>
+<?php endif; ?>
+<?php if ($page === 'documents'): ?>
+    <script src="<?= e(asset('js/documents.js')) ?>"></script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/ai_widget.php'; ?>
 </body>

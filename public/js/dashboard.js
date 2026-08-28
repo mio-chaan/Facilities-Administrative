@@ -1,6 +1,6 @@
 /**
  * dashboard.js
- * Renders the "Monthly Reservation Trend" card using Chart.js.
+ * Renders the "Reservation Trend" card using Chart.js.
  * Loaded conditionally by templates/footer.php when $page === 'dashboard'.
  * Requires:
  *   - Chart.js (loaded in templates/header.php on the dashboard page)
@@ -10,6 +10,13 @@
  *
  * Falls back to a plain "no data" message if Chart.js or the data
  * global didn't load, instead of throwing.
+ *
+ * DASHBOARD UPDATE: a second, independent block below adds the
+ * Recent Activities meatballs menu (#t8ActivityMenuBtn) and the
+ * Activity History modal (#t8ActivityHistoryModal) — search box,
+ * activity-type filter, and a "Load more" reveal over the
+ * server-rendered (already capped) history rows. None of this touches
+ * the Chart.js block above it.
  */
 
 document.addEventListener('DOMContentLoaded', function () {
@@ -74,8 +81,6 @@ document.addEventListener('DOMContentLoaded', function () {
         afterDraw: function (chart) {
             var data = chart.data.datasets[0].data;
             var nonZero = data.filter(function (v) { return v > 0; }).length;
-            // A single reservation is still real dashboard activity. Only show
-            // the empty-state hint when the displayed trend has no activity.
             if (nonZero > 0) {
                 return;
             }
@@ -146,7 +151,6 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                 },
                 y: {
-                    // Y-axis title intentionally removed — minimal ticks only.
                     title: { display: false },
                     beginAtZero: true,
                     suggestedMax: maxValue <= 1 ? 3 : undefined,
@@ -175,8 +179,91 @@ document.addEventListener('DOMContentLoaded', function () {
         plugins: [sparseHintPlugin]
     });
 
-    // Chart.js instances aren't auto-cleaned on SPA-style navigation in
-    // this app (full page loads per request), so no explicit destroy()
-    // is needed here — the canvas/context is thrown away on navigation.
     window.t8TrendChart = chart;
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    var menuBtn = document.getElementById('t8ActivityMenuBtn');
+    var menuDropdown = document.getElementById('t8ActivityMenuDropdown');
+    var viewHistoryBtn = document.getElementById('t8ViewActivityHistory');
+    var modal = document.getElementById('t8ActivityHistoryModal');
+    var closeBtn = document.getElementById('t8ActivityHistoryClose');
+    var searchInput = document.getElementById('t8ActivitySearch');
+    var typeFilter = document.getElementById('t8ActivityTypeFilter');
+    var loadMoreBtn = document.getElementById('t8ActivityLoadMore');
+
+    if (!menuBtn || !menuDropdown) {
+        return; // not on the dashboard page
+    }
+
+    menuBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var isOpen = menuDropdown.classList.toggle('t8-open');
+        menuBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    });
+
+    document.addEventListener('click', function (e) {
+        if (!menuDropdown.contains(e.target) && e.target !== menuBtn) {
+            menuDropdown.classList.remove('t8-open');
+            menuBtn.setAttribute('aria-expanded', 'false');
+        }
+    });
+
+    if (viewHistoryBtn && modal) {
+        viewHistoryBtn.addEventListener('click', function () {
+            menuDropdown.classList.remove('t8-open');
+            modal.showModal();
+        });
+    }
+
+    if (closeBtn && modal) {
+        closeBtn.addEventListener('click', function () {
+            modal.close();
+        });
+    }
+
+    if (!modal) {
+        return;
+    }
+
+    function applyActivityFilters() {
+        var query = (searchInput && searchInput.value ? searchInput.value : '').trim().toLowerCase();
+        var type = typeFilter ? typeFilter.value : '';
+        var rows = modal.querySelectorAll('[data-activity-row]');
+
+        rows.forEach(function (row) {
+            var matchesQuery = !query || (row.getAttribute('data-activity-search') || '').indexOf(query) !== -1;
+            var matchesType = !type || row.getAttribute('data-activity-action') === type;
+            // Filtering overrides the "load more" hidden state — a
+            // matching row is shown regardless of how many rows are
+            // currently revealed.
+            row.hidden = !(matchesQuery && matchesType);
+        });
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('input', applyActivityFilters);
+    }
+    if (typeFilter) {
+        typeFilter.addEventListener('change', applyActivityFilters);
+    }
+
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', function () {
+            var query = (searchInput && searchInput.value ? searchInput.value : '').trim();
+            var type = typeFilter ? typeFilter.value : '';
+            // Only auto-reveal more rows when no filter is active —
+            // otherwise "load more" would show rows that don't match.
+            if (query || type) {
+                return;
+            }
+            var hiddenRows = modal.querySelectorAll('[data-activity-row][hidden]');
+            for (var i = 0; i < Math.min(20, hiddenRows.length); i++) {
+                hiddenRows[i].hidden = false;
+            }
+            if (modal.querySelectorAll('[data-activity-row][hidden]').length === 0) {
+                loadMoreBtn.style.display = 'none';
+            }
+        });
+    }
 });

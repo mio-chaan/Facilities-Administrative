@@ -6,7 +6,9 @@
  * an AJAX POST from the floating widget (see templates/ai_widget.php).
  * A direct GET visit just shows a short explanatory message.
  *
- * Requires OPENAI_API_KEY - see app/includes/ai_helper.php for setup.
+ * Requires GEMINI_API_KEY - see app/includes/ai_helper.php for setup.
+ *
+
  */
 
 declare(strict_types=1);
@@ -20,6 +22,11 @@ if (is_file($aiHelperPath)) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
     header('Content-Type: application/json');
 
     if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
@@ -39,18 +46,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $systemPrompt = 'You are the AI Assistant for RAM YUM, a Facilities & Administrative Management '
-        . 'web system used by Facilities Staff and Administrators. It has modules for Facilities '
-        . 'Reservation (book rooms/facilities, admin approves), Visitor Management (check-in/out log), '
-        . 'Document Management (upload files with version history, categories, archive), Records '
-        . 'Retention (retention schedules and disposition tracking), Legal Management (admin-only case '
-        . 'tracking), Contract Management (admin-only contracts, parties, obligations), and a Dashboard. '
-        . 'Answer the user\'s question helpfully and concisely, focused on how to use the system. If '
-        . 'asked something unrelated to the system or general facilities/admin work, politely redirect '
-        . 'them back to system-related topics. Keep replies under 150 words unless the user asks for '
-        . 'more detail.';
+    . 'web system used by Facilities Staff and Administrators. '
+
+    . 'Your job is to answer ONLY what the user asks. '
+    . 'Do not add unnecessary introductions, greetings, summaries, suggestions, or extra information. '
+    . 'Do not explain features that the user did not ask about. '
+    . 'Keep the answer short and direct. '
+
+    . 'RAM YUM has these modules: Facilities Reservation (book rooms/facilities, admin approval), '
+    . 'Visitor Management (check-in/out logs), Document Management (upload files, version history, '
+    . 'categories, archive), Records Retention (retention schedules and disposition tracking), '
+    . 'Legal Management (admin-only case tracking), Contract Management (admin-only contracts, '
+    . 'parties, obligations), and Dashboard. '
+
+    . 'If the user asks a question about one specific module, answer only that question. '
+    . 'If the user asks something unrelated to RAM YUM, politely say that you can only help with '
+    . 'RAM YUM and its related facilities/administrative functions. '
+
+    . 'Use short paragraphs and bullet points only when they make the answer easier to read. '
+    . 'Keep replies under 80 words unless the user asks for more detail.';
 
     try {
-        $reply = t8_openai_chat([
+        $reply = t8_ai_chat([
             ['role' => 'system', 'content' => $systemPrompt],
             ['role' => 'user', 'content' => $userMessage],
         ]);

@@ -29,6 +29,16 @@ if ($devBypass && empty($_SESSION['user_id'])) {
 
 // Real guard — sends anyone without a session to the temporary login form.
 if (empty($_SESSION['user_id'])) {
+    $isAjax = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest'
+        || str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json');
+
+    if ($isAjax) {
+        header('Content-Type: application/json');
+        http_response_code(401);
+        echo json_encode(['error' => 'Your session expired. Please refresh the page and sign in again.']);
+        exit;
+    }
+
     header('Location: ' . APP_URL . '/login.php');
     exit;
 }

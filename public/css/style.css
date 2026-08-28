@@ -7,6 +7,14 @@
    red/cream palette. All .t8- class names that public/js/app.js or
    PHP templates depend on (#t8SidebarToggle, #t8Sidebar,
    .t8-flash-stack, .t8-alert, .t8-sidebar-open) are unchanged.
+
+   DASHBOARD UPDATE (toast fix): .t8-flash-stack used to be
+   `position: sticky`, which pushed itself into normal document flow
+   right under the navbar — on pages with little content (like right
+   after a login redirect) it visually overlapped the page heading.
+   It is now `position: fixed`, floating above the page instead of
+   occupying space in the layout. Markup, class names, and the
+   auto-dismiss timer in public/js/app.js are unchanged.
    ========================================================= */
 
 :root {
@@ -162,6 +170,11 @@ code { font-family: var(--t8-font-data); }
 
 .t8-navbar-user { display: flex; align-items: center; gap: var(--t8-space-4); flex-shrink: 0; }
 
+/* ---- Notification bell + popover (DASHBOARD UPDATE) ----
+   The bell no longer links straight to the dashboard; it toggles an
+   anchored popover (see templates/navbar.php). Kept as a positioning
+   context (position: relative) for the popover below. */
+.t8-notif-wrap { position: relative; }
 .t8-navbar-bell {
     position: relative;
     width: 38px;
@@ -174,6 +187,9 @@ code { font-family: var(--t8-font-data); }
     color: var(--t8-text);
     flex-shrink: 0;
     text-decoration: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
 }
 .t8-navbar-bell:hover { color: var(--t8-primary); }
 .t8-navbar-bell-dot {
@@ -192,6 +208,68 @@ code { font-family: var(--t8-font-data); }
     line-height: 12px;
     text-align: center;
 }
+
+.t8-notif-popover {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 340px;
+    max-width: calc(100vw - 32px);
+    max-height: 420px;
+    overflow: hidden;
+    display: none;
+    flex-direction: column;
+    background: var(--t8-surface);
+    border: 1px solid var(--t8-border);
+    border-radius: var(--t8-radius);
+    box-shadow: var(--t8-shadow-lift);
+    z-index: 60;
+}
+.t8-notif-popover.t8-open { display: flex; }
+.t8-notif-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--t8-border);
+    font-weight: 700;
+    font-size: 0.88rem;
+}
+.t8-notif-mark-all {
+    background: none;
+    border: none;
+    color: var(--t8-primary);
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+}
+.t8-notif-mark-all:hover { color: var(--t8-primary-dark); }
+.t8-notif-list { overflow-y: auto; flex: 1; }
+.t8-notif-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--t8-border);
+    padding: 10px 16px;
+    cursor: pointer;
+    font: inherit;
+}
+.t8-notif-item:last-child { border-bottom: none; }
+.t8-notif-item:hover { background: var(--t8-secondary); }
+.t8-notif-item-unread { background: rgba(178, 34, 34, 0.05); }
+.t8-notif-item-message { font-size: 0.84rem; color: var(--t8-ink); margin: 0 0 2px; }
+.t8-notif-item-unread .t8-notif-item-message { font-weight: 600; }
+.t8-notif-item-time { font-size: 0.72rem; color: var(--t8-text-muted); font-family: var(--t8-font-data); }
+.t8-notif-empty { padding: 24px 16px; text-align: center; color: var(--t8-text-muted); font-size: 0.85rem; }
+.t8-notif-popover-footer {
+    padding: 10px 16px;
+    border-top: 1px solid var(--t8-border);
+    text-align: center;
+}
+.t8-notif-popover-footer a { font-size: 0.82rem; font-weight: 600; }
 
 .t8-navbar-avatar {
     width: 38px;
@@ -317,9 +395,6 @@ code { font-family: var(--t8-font-data); }
     .t8-sidebar-collapse-btn { display: flex; }
 }
 
-/* Collapsed (desktop) state — toggled via JS adding .t8-sidebar-collapsed
-   on .t8-shell; purely additive, does not touch the mobile
-   .t8-sidebar-open class or #t8SidebarToggle behavior. */
 .t8-shell.t8-sidebar-collapsed .t8-sidebar { width: var(--t8-sidebar-width-collapsed); overflow: hidden; }
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-brand-text,
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-label,
@@ -328,8 +403,6 @@ code { font-family: var(--t8-font-data); }
 }
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-link { justify-content: center; }
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-brand { justify-content: center; }
-/* Keep the logo from compressing when the sidebar collapses by
-   removing large horizontal padding on the brand container. */
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-brand {
     padding-left: 8px;
     padding-right: 8px;
@@ -359,11 +432,34 @@ code { font-family: var(--t8-font-data); }
 }
 .t8-footer p { margin: 0; }
 
+/* ---- Flash "toast" stack (DASHBOARD UPDATE) ----
+   Fixed overlay, floats above content instead of taking up layout
+   space. Individual .t8-alert items are still auto-dismissed by the
+   existing timer in public/js/app.js — nothing there needed to
+   change. */
 .t8-flash-stack {
-    position: sticky;
-    top: var(--t8-navbar-height);
-    z-index: 15;
-    padding: var(--t8-space-3) var(--t8-space-5) 0;
+    position: fixed;
+    top: calc(var(--t8-navbar-height) + 12px);
+    right: 24px;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(360px, calc(100vw - 32px));
+    pointer-events: none;
+}
+.t8-flash-stack .t8-alert {
+    pointer-events: auto;
+    box-shadow: var(--t8-shadow-lift);
+    animation: t8ToastIn 0.22s ease;
+    margin-bottom: 0;
+}
+@keyframes t8ToastIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 640px) {
+    .t8-flash-stack { right: 12px; left: 12px; width: auto; top: calc(var(--t8-navbar-height) + 8px); }
 }
 
 /* ---- Responsive ---- */
@@ -384,7 +480,6 @@ code { font-family: var(--t8-font-data); }
     .t8-main { padding: var(--t8-space-4); }
 }
 
-/* Ensure main reflows to available space when sidebar is collapsed */
 .t8-shell.t8-sidebar-collapsed .t8-main {
     max-width: calc(100% - var(--t8-sidebar-width-collapsed));
 }

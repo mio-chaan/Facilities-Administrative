@@ -25,6 +25,15 @@
  *                              \-> cancelled
  *
  * Backing table: team8_visitors (see database/visitor_scheduling_fields.sql).
+ *
+ * CLEANUP: two dead helpers, t8_normalize_ph_contact() and
+ * t8_validate_ph_contact(), were defined here but never called — the
+ * contact number field is validated inline below with a simple
+ * 10-digit regex against a hardcoded +63 prefix. Removed rather than
+ * left unreferenced; if richer multi-format PH number support
+ * (accepting +63…, 0…, 63…, or bare 10-digit input) is wanted later,
+ * reintroduce them and wire the create-form validation to actually
+ * call them instead of the inline regex.
  */
 
 declare(strict_types=1);
@@ -38,7 +47,12 @@ $errors = [];
 // Dropdown options for Visitor Type. Add more here as needed - no
 // other code changes required.
 const T8_VISITOR_TYPES = [
+    'Delivery',
+    'Manager',
+    'Quality Inspector',
     'Supplier',
+    'Maintenance',
+    'Official Visitor',
     'Maintenance Personnel',
     'Auditor',
     'Barangay Official',
@@ -46,6 +60,22 @@ const T8_VISITOR_TYPES = [
     'Client / Guest',
     'Job Applicant',
     'Other',
+];
+
+const T8_VISITOR_TYPE_PURPOSES = [
+    'Delivery' => 'Delivery / Delivery of Supplies',
+    'Manager' => 'Management Visit',
+    'Quality Inspector' => 'Quality Inspection',
+    'Supplier' => 'Supplier / Business Transaction',
+    'Maintenance' => 'Maintenance / Repair',
+    'Official Visitor' => 'Official Business',
+    'Maintenance Personnel' => 'Maintenance / Repair',
+    'Auditor' => 'Quality Inspection',
+    'Barangay Official' => 'Official Business',
+    'Government Official' => 'Official Business',
+    'Client / Guest' => 'Management Visit',
+    'Job Applicant' => 'Job Application',
+    'Other' => '',
 ];
 
 /** Turns a row id into a display-only Visitor ID, e.g. "VIS-000123". */
@@ -85,45 +115,6 @@ function t8_normalize_datetime(string $value): string
     return $value;
 }
 
-function t8_normalize_ph_contact(string $contact): string
-{
-    $contact = trim($contact);
-    if ($contact === '') {
-        return '';
-    }
-
-    $digits = preg_replace('/[^\d\+]/', '', $contact);
-
-    if ($digits === '+63' || $digits === '63') {
-        return '';
-    }
-    if (preg_match('/^\+63\d{10}$/', $digits)) {
-        return $digits;
-    }
-    if (preg_match('/^0(\d{10})$/', $digits, $matches)) {
-        return '+63' . $matches[1];
-    }
-    if (preg_match('/^63(\d{10})$/', $digits, $matches)) {
-        return '+63' . $matches[1];
-    }
-    if (preg_match('/^(\d{10})$/', $digits, $matches)) {
-        return '+63' . $matches[1];
-    }
-
-    return $contact;
-}
-
-function t8_validate_ph_contact(string $contact): bool
-{
-    $contact = trim($contact);
-    if ($contact === '') {
-        return true;
-    }
-
-    $normalized = t8_normalize_ph_contact($contact);
-    return preg_match('/^\+63\d{10}$/', $normalized) === 1;
-}
-
 function t8_visitor_status_badge(string $status): string
 {
     $map = [
@@ -161,6 +152,10 @@ switch ($action) {
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
+                $mappedPurpose = T8_VISITOR_TYPE_PURPOSES[$formValues['visitor_type']] ?? '';
+                if ($mappedPurpose !== '') {
+                    $formValues['purpose'] = $mappedPurpose;
+                }
                 if ($formValues['full_name'] === '') {
                     $errors[] = 'Visitor name is required.';
                 }
@@ -331,7 +326,7 @@ if (!$showForm) {
 
             <div class="t8-field">
                 <label class="t8-label" for="visitor_type">Visitor Type</label>
-                <select class="t8-select" id="visitor_type" name="visitor_type" required>
+                <select class="t8-select" id="visitor_type" name="visitor_type" required data-purpose-map="<?= e((string) json_encode(T8_VISITOR_TYPE_PURPOSES)) ?>">
                     <option value="">Select a type…</option>
                     <?php foreach (T8_VISITOR_TYPES as $type): ?>
                         <option value="<?= e($type) ?>" <?= $type === $formValues['visitor_type'] ? 'selected' : '' ?>><?= e($type) ?></option>

@@ -108,7 +108,12 @@
 
         fetch('<?= e(page_url('assistant')) ?>', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
             body: body.toString()
         })
         .then(function (r) { return r.json(); })

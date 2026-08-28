@@ -1,74 +1,118 @@
 <?php
 /**
  * app/includes/ai_helper.php
- * Thin wrapper around the OpenAI Chat Completions API, plus a small
- * text-extraction helper for the Document Summarizer feature.
+ * Thin wrapper around the Google Gemini "generateContent" API, plus a
+ * small text-extraction helper for the Document Summarizer feature.
+ *
+ * MIGRATION NOTE: this file previously called OpenAI's Chat
+ * Completions endpoint via t8_openai_chat(). It has been switched to
+ * Google Gemini. The function is now named t8_ai_chat() and keeps the
+ * exact same call signature (array of ['role' => ..., 'content' =>
+ * ...] messages) so callers only need to update the function name -
+ * see modules/assistant/index.php and modules/documents/index.php
+ * (the 'summarize' action).
  *
  * SETUP REQUIRED:
- *   1. Get an API key at https://platform.openai.com/api-keys
- *   2. Add this line to app/config/config.php (near the other define()s):
- *        define('OPENAI_API_KEY', 'sk-your-key-here');
+ *   1. Get an API key at https://aistudio.google.com/apikey
+ *   2. Add this line to app/config/config.local.php (gitignored):
+ *        define('GEMINI_API_KEY', 'your-key-here');
  *   3. Make sure the PHP curl extension is enabled - open php.ini
  *      (C:\xampp\php\php.ini), find `;extension=curl`, remove the
  *      leading `;`, save, and restart Apache in the XAMPP control panel.
  *   4. Require this file once, early - e.g. alongside where
  *      db_connect.php is required in your front controller
  *      (index.php), OR it's already safely required with a
- *      file_exists guard inside modules/assistant/index.php.
+ *      file_exists guard inside modules/assistant/index.php and
+ *      modules/documents/index.php.
  */
 
 declare(strict_types=1);
 
 /**
- * Sends a chat completion request to OpenAI and returns the assistant's
- * reply text. Throws RuntimeException on any failure (network, API
- * error, missing key) with a message safe to show the user.
+ * Sends a chat request to Gemini and returns the model's reply text.
+ * Throws RuntimeException on any failure (network, API error, missing
+ * key) with a message safe to show the user.
  *
  * @param array $messages e.g. [['role'=>'system','content'=>'...'], ['role'=>'user','content'=>'...']]
+ *   'system' messages are pulled out and sent via Gemini's separate
+ *   systemInstruction field (Gemini's `contents` array only accepts
+ *   'user' and 'model' roles - 'assistant' is mapped to 'model').
  */
-function t8_openai_chat(array $messages, string $model = 'gpt-4o-mini', float $temperature = 0.4): string
+function t8_ai_chat(array $messages, string $model = 'gemini-3.5-flash', float $temperature = 0.4): string
 {
-    if (!defined('OPENAI_API_KEY') || OPENAI_API_KEY === '') {
-        throw new RuntimeException('AI features are not configured yet. Add OPENAI_API_KEY to app/config/config.php.');
+    if (!defined('GEMINI_API_KEY') || GEMINI_API_KEY === '') {
+        throw new RuntimeException('AI features are not configured yet. Add GEMINI_API_KEY to app/config/config.local.php.');
     }
     if (!function_exists('curl_init')) {
         throw new RuntimeException('The PHP curl extension is not enabled. Enable extension=curl in php.ini and restart Apache.');
     }
 
-    $payload = json_encode([
-        'model'       => $model,
-        'messages'    => $messages,
-        'temperature' => $temperature,
-    ]);
+    $systemParts = [];
+    $contents = [];
+    foreach ($messages as $message) {
+        $role = (string) ($message['role'] ?? 'user');
+        $text = (string) ($message['content'] ?? '');
 
-    $ch = curl_init('https://api.openai.com/v1/chat/completions');
+        if ($role === 'system') {
+            $systemParts[] = ['text' => $text];
+            continue;
+        }
+
+        $contents[] = [
+            'role'  => $role === 'assistant' ? 'model' : 'user',
+            'parts' => [['text' => $text]],
+        ];
+    }
+
+    $payload = [
+        'contents'         => $contents,
+        'generationConfig' => ['temperature' => $temperature],
+    ];
+    if ($systemParts !== []) {
+        $payload['systemInstruction'] = ['parts' => $systemParts];
+    }
+
+    $url = 'https://generativelanguage.googleapis.com/v1beta/models/'
+        . rawurlencode($model) . ':generateContent?key=' . urlencode(GEMINI_API_KEY);
+
+    $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST           => true,
         CURLOPT_HTTPHEADER     => [
             'Content-Type: application/json',
-            'Authorization: Bearer ' . OPENAI_API_KEY,
         ],
-        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_POSTFIELDS => json_encode($payload),
         CURLOPT_TIMEOUT    => 30,
     ]);
     $response  = curl_exec($ch);
     $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch);
-    curl_close($ch);
+    if (PHP_VERSION_ID < 80500) {
+        curl_close($ch);
+    }
 
     if ($response === false) {
-        throw new RuntimeException('Could not reach OpenAI: ' . $curlError);
+        throw new RuntimeException('Could not reach Gemini: ' . $curlError);
     }
 
     $data = json_decode($response, true);
 
     if ($httpCode !== 200) {
-        $apiMessage = $data['error']['message'] ?? 'Unknown error from OpenAI.';
-        throw new RuntimeException('OpenAI API error: ' . $apiMessage);
+        $apiMessage = $data['error']['message'] ?? 'Unknown error from Gemini.';
+        throw new RuntimeException('Gemini API error: ' . $apiMessage);
     }
 
-    return trim((string) ($data['choices'][0]['message']['content'] ?? ''));
+    $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
+
+    if (trim((string) $text) === '') {
+        // Most commonly a safety-filter block - candidates[0] exists but
+        // has no parts. Surface something useful instead of a blank reply.
+        $finishReason = $data['candidates'][0]['finishReason'] ?? 'unknown';
+        throw new RuntimeException('Gemini returned no content (finish reason: ' . $finishReason . ').');
+    }
+
+    return trim((string) $text);
 }
 
 /**
@@ -77,6 +121,9 @@ function t8_openai_chat(array $messages, string $model = 'gpt-4o-mini', float $t
  * no external library needed). Other types (pdf, doc, xls, xlsx, ppt,
  * pptx, images) are not supported without an additional library and
  * return null - the caller should show a friendly "not supported" message.
+ *
+ * Unchanged by the Gemini migration - this has nothing to do with the
+ * AI provider, only with getting text off disk.
  */
 function t8_extract_text_for_summary(string $absolutePath, string $extension): ?string
 {
