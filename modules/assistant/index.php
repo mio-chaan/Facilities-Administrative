@@ -22,7 +22,7 @@ if (is_file($aiHelperPath)) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  
+
     while (ob_get_level() > 0) {
         ob_end_clean();
     }
