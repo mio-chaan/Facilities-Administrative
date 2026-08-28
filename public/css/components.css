@@ -1,5 +1,4 @@
 
-
 /* ---- Buttons ---- */
 .t8-btn {
     display: inline-flex;
@@ -146,6 +145,17 @@
 .t8-badge-approved, .t8-badge-active, .t8-badge-checked_in, .t8-badge-compliant { background: #e2f4e4; color: #2e7d32; }
 .t8-badge-rejected, .t8-badge-denied, .t8-badge-terminated, .t8-badge-non_compliant { background: #fbe4e1; color: #c62828; }
 .t8-badge-cancelled, .t8-badge-archived, .t8-badge-closed, .t8-badge-checked_out { background: var(--t8-fog-100); color: var(--t8-text-muted); }
+/* DYNAMIC STATUS: computed-only "Ongoing" state (an Approved
+   reservation whose start time has passed but hasn't ended yet - see
+   t8_reservation_display_status() in app/includes/reservation_helpers.php).
+   Distinct blue so it reads as "in progress right now", not just a
+   plain Approved. */
+.t8-badge-ongoing { background: #dbeafe; color: #1e40af; }
+/* cancellation_pending already renders via the dynamic
+   `t8-badge-<status>` class pattern used throughout the reservation
+   views - give it its own color instead of falling back to the
+   default button background. */
+.t8-badge-cancellation_pending { background: #ffe8d6; color: #b65c1f; }
 
 /* ---- Alerts / flash messages ---- */
 .t8-alert {

@@ -167,3 +167,22 @@
 .t8-cancellation-modal::backdrop { background:rgba(0,0,0,.45); }
 .t8-cancellation-modal textarea { width:100%; resize:vertical; }
 .t8-error-text { display:block; margin-top:6px; color:#b91c1c; font-size:.82rem; }
+
+/* ---- Archive filters (Month/Year/Type/Facility/Status) ----
+   Same .t8-reservation-filters row above is reused as-is for the new
+   Type/Facility/Status selects added to the Staff/Admin Archive
+   views (see modules/reservation/index.php) - they wrap onto
+   additional lines on narrow screens via the existing flex-wrap, no
+   new class needed. This just gives each label/select a sane minimum
+   width now that there are up to five of them in a row. */
+.t8-reservation-filters label { min-width: 120px; }
+
+/* ---- Live status polling (public/js/reservation.js) ----
+   DYNAMIC STATUS: a cancel/request-cancellation trigger button gets
+   disabled in place once its reservation flips to Ongoing (or
+   otherwise stops being Approved) between polls, instead of staying
+   clickable and stale until the next manual refresh. */
+[data-cancel-reservation-id][disabled] {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
