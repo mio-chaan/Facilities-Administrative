@@ -54,13 +54,11 @@ $formatActionLabel = static function (string $value) use ($actionLabels): string
 ?>
 <h1>Audit Logs</h1>
 <p class="t8-help-text">Read-only record of system activity. Logs cannot be edited or deleted here.</p>
-<form class="t8-audit-filters" method="get" action="<?= e(base_url('index.php')) ?>">
-    <input type="hidden" name="page" value="audit">
-    <input type="hidden" name="audit_page" value="1">
-    <select class="t8-select" name="action" onchange="this.form.submit()"><option value="">All actions</option><?php foreach ($actions as $item): ?><option value="<?= e($item) ?>" <?= $item === $action ? 'selected' : '' ?>><?= e($formatActionLabel((string) $item)) ?></option><?php endforeach; ?></select>
-    <select class="t8-select" name="module" onchange="this.form.submit()"><option value="">All modules</option><?php foreach ($modules as $item): ?><option value="<?= e($item) ?>" <?= $item === $module ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $item))) ?></option><?php endforeach; ?></select>
-</form>
-<div class="t8-table-wrap"><table class="t8-table"><thead><tr><th>User</th><th>Action</th><th>Module</th><th>Record</th><th>Result / details</th><th>Date &amp; time</th></tr></thead><tbody>
+<div class="t8-audit-filters" data-filter-table="t8AuditTable">
+    <select class="t8-select" data-filter-action><option value="">All actions</option><?php foreach ($actions as $item): ?><option value="<?= e($item) ?>" <?= $item === $action ? 'selected' : '' ?>><?= e($formatActionLabel((string) $item)) ?></option><?php endforeach; ?></select>
+    <select class="t8-select" data-filter-module><option value="">All modules</option><?php foreach ($modules as $item): ?><option value="<?= e($item) ?>" <?= $item === $module ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $item))) ?></option><?php endforeach; ?></select>
+</div>
+<div class="t8-table-wrap"><table class="t8-table" id="t8AuditTable"><thead><tr><th>User</th><th>Action</th><th>Module</th><th>Record</th><th>Result / details</th><th>Date &amp; time</th></tr></thead><tbody>
 <?php if ($logs === []): ?><tr class="t8-table-empty-row"><td colspan="6">No matching audit events.</td></tr><?php else: foreach ($logs as $log): ?><tr><td><?= e($log['full_name']) ?></td><td><?= e($formatActionLabel((string) $log['action'])) ?></td><td><?= e(ucwords(str_replace('_', ' ', $log['entity_type']))) ?></td><td>#<?= e((string) $log['entity_id']) ?></td><td><?= e((string) ($log['new_value'] ?? 'Recorded')) ?></td><td><?= e(format_date($log['created_at'], 'M d, Y g:i A')) ?></td></tr><?php endforeach; endif; ?>
 </tbody></table></div>
 <?php if ($totalPages > 1): ?>

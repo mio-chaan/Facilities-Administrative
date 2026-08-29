@@ -230,3 +230,38 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 });
+
+document.addEventListener("DOMContentLoaded", function () {
+    // AJAX filtering for audit logs
+    var filters = document.querySelector('[data-filter-table="t8AuditTable"]');
+    if (!filters) return;
+    
+    var table = document.getElementById(filters.getAttribute('data-filter-table'));
+    if (!table) return;
+    
+    var actionSelect = filters.querySelector('[data-filter-action]');
+    var moduleSelect = filters.querySelector('[data-filter-module]');
+    var tableBody = table.querySelector('tbody');
+    
+    if (!tableBody) return;
+    
+    function applyAuditFilters() {
+        var params = new URLSearchParams();
+        params.append('page', 'audit');
+        params.append('ajax_filter', '1');
+        if (actionSelect && actionSelect.value) params.append('action', actionSelect.value);
+        if (moduleSelect && moduleSelect.value) params.append('module', moduleSelect.value);
+        
+        fetch('?' + params.toString())
+            .then(function (response) { return response.json(); })
+            .then(function (data) {
+                if (tableBody && data.html) {
+                    tableBody.innerHTML = data.html;
+                }
+            })
+            .catch(function (error) { console.error('Audit filter error:', error); });
+    }
+    
+    if (actionSelect) actionSelect.addEventListener('change', applyAuditFilters);
+    if (moduleSelect) moduleSelect.addEventListener('change', applyAuditFilters);
+});

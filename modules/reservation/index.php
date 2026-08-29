@@ -1367,7 +1367,7 @@ if (!$showForm) {
                 <?php endif; ?>
             </div>
             <div class="t8-table-wrap">
-                <table class="t8-table">
+                <table class="t8-table" id="t8PendingReservations">
                     <thead>
                         <tr>
                             <th>Facility</th>
@@ -1450,13 +1450,10 @@ if (!$showForm) {
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
             </div>
-            <div class="t8-reservation-filters">
-                <form method="get" action="<?= e(page_url('reservation')) ?>" style="display:contents;">
-                    <input type="hidden" name="page" value="1">
-                    <label>Facility <select class="t8-select" name="facility" onchange="this.form.submit()"><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
-                    <label>Type <select class="t8-select" name="type" onchange="this.form.submit()"><option value="">All types</option><?php foreach (array_keys(T8_FACILITY_RESERVATION_CONFIG) as $type): ?><option value="<?= e($type) ?>" <?= $reservationFilters['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></label>
-                    <label>Status <select class="t8-select" name="status" onchange="this.form.submit()"><option value="">All statuses</option><?php foreach (['approved', 'cancellation_pending'] as $status): ?><option value="<?= e($status) ?>" <?= $reservationFilters['status'] === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?></select></label>
-                </form>
+            <div class="t8-reservation-filters" data-filter-table="t8AllReservations" data-filter-type="all">
+                <label>Facility <select class="t8-select" data-filter-facility><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
+                <label>Type <select class="t8-select" data-filter-type-select><option value="">All types</option><?php foreach (array_keys(T8_FACILITY_RESERVATION_CONFIG) as $type): ?><option value="<?= e($type) ?>" <?= $reservationFilters['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></label>
+                <label>Status <select class="t8-select" data-filter-status><option value="">All statuses</option><?php foreach (['approved', 'cancellation_pending'] as $status): ?><option value="<?= e($status) ?>" <?= $reservationFilters['status'] === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?></select></label>
             </div>
             <div class="t8-table-wrap">
                 <table class="t8-table" id="t8AllReservations">
@@ -1532,16 +1529,13 @@ if (!$showForm) {
             <div class="t8-card-header">
                 <h2 class="t8-card-title">My Reservations</h2>
             </div>
-            <div class="t8-reservation-filters">
-                <form method="get" action="<?= e(page_url('reservation')) ?>" style="display:contents;">
-                    <input type="hidden" name="my_page" value="1">
-                    <label>Facility <select class="t8-select" name="facility" onchange="this.form.submit()"><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
-                    <label>Type <select class="t8-select" name="type" onchange="this.form.submit()"><option value="">All types</option><?php foreach (array_keys(T8_FACILITY_RESERVATION_CONFIG) as $type): ?><option value="<?= e($type) ?>" <?= $reservationFilters['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></label>
-                    <label>Status <select class="t8-select" name="status" onchange="this.form.submit()"><option value="">All statuses</option><?php foreach (T8_RESERVATION_STATUSES as $status): ?><option value="<?= e($status) ?>" <?= $reservationFilters['status'] === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?></select></label>
-                </form>
+            <div class="t8-reservation-filters" data-filter-table="t8MyReservations" data-filter-type="my">
+                <label>Facility <select class="t8-select" data-filter-facility><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
+                <label>Type <select class="t8-select" data-filter-type-select><option value="">All types</option><?php foreach (array_keys(T8_FACILITY_RESERVATION_CONFIG) as $type): ?><option value="<?= e($type) ?>" <?= $reservationFilters['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></label>
+                <label>Status <select class="t8-select" data-filter-status><option value="">All statuses</option><option value="approved" <?= $reservationFilters['status'] === 'approved' ? 'selected' : '' ?>>Approved</option></select></label>
             </div>
             <div class="t8-table-wrap">
-                <table class="t8-table">
+                <table class="t8-table" id="t8MyReservations">
                     <thead>
                         <tr>
                             <th>Facility</th>
@@ -1634,13 +1628,10 @@ if (!$showForm) {
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
             </div>
-            <div class="t8-reservation-filters">
-                <form method="get" action="<?= e(page_url('reservation')) ?>" style="display:contents;">
-                    <input type="hidden" name="page" value="1">
-                    <label>Facility <select class="t8-select" name="facility" onchange="this.form.submit()"><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
-                    <label>Type <select class="t8-select" name="type" onchange="this.form.submit()"><option value="">All types</option><?php foreach (array_keys(T8_FACILITY_RESERVATION_CONFIG) as $type): ?><option value="<?= e($type) ?>" <?= $reservationFilters['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></label>
-                    <label>Status <select class="t8-select" name="status" onchange="this.form.submit()"><option value="">All statuses</option><option value="approved" <?= $reservationFilters['status'] === 'approved' ? 'selected' : '' ?>>Approved</option></select></label>
-                </form>
+            <div class="t8-reservation-filters" data-filter-table="t8MyReservations" data-filter-type="my">
+                <label>Facility <select class="t8-select" data-filter-facility><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
+                <label>Type <select class="t8-select" data-filter-type-select><option value="">All types</option><?php foreach (array_keys(T8_FACILITY_RESERVATION_CONFIG) as $type): ?><option value="<?= e($type) ?>" <?= $reservationFilters['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></label>
+                <label>Status <select class="t8-select" data-filter-status><option value="">All statuses</option><option value="approved" <?= $reservationFilters['status'] === 'approved' ? 'selected' : '' ?>>Approved</option></select></label>
             </div>
             <div class="t8-table-wrap">
                 <table class="t8-table">

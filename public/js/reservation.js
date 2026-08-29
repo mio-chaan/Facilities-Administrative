@@ -26,11 +26,50 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
     var form = document.getElementById('t8ReservationForm');
+    
+    // AJAX filtering for reservation tables
+    document.querySelectorAll('[data-filter-table][data-filter-type]').forEach(function (filters) {
+        var table = document.getElementById(filters.getAttribute('data-filter-table'));
+        if (!table) return;
+        
+        var facilitySelect = filters.querySelector('[data-filter-facility]');
+        var typeSelect = filters.querySelector('[data-filter-type-select]');
+        var statusSelect = filters.querySelector('[data-filter-status]');
+        var tableBody = table.querySelector('tbody');
+        var filterType = filters.getAttribute('data-filter-type');
+        
+        if (!tableBody) return;
+        
+        function applyAjaxFilters() {
+            var params = new URLSearchParams();
+            params.append('page', 'reservation');
+            params.append('ajax_filter', '1');
+            params.append('table', filterType);
+            if (facilitySelect && facilitySelect.value) params.append('facility', facilitySelect.value);
+            if (typeSelect && typeSelect.value) params.append('type', typeSelect.value);
+            if (statusSelect && statusSelect.value) params.append('status', statusSelect.value);
+            
+            fetch('?' + params.toString())
+                .then(function (response) { return response.json(); })
+                .then(function (data) {
+                    if (tableBody && data.html) {
+                        tableBody.innerHTML = data.html;
+                    }
+                })
+                .catch(function (error) { console.error('Filter error:', error); });
+        }
+        
+        if (facilitySelect) facilitySelect.addEventListener('change', applyAjaxFilters);
+        if (typeSelect) typeSelect.addEventListener('change', applyAjaxFilters);
+        if (statusSelect) statusSelect.addEventListener('change', applyAjaxFilters);
+    });
+    
     document.querySelectorAll('[data-reservation-filters]').forEach(function (filters) {
         var table = document.getElementById(filters.getAttribute('data-filter-table'));
         if (!table) return;
         var month = filters.querySelector('[data-filter-month]');
         var year = filters.querySelector('[data-filter-year]');
+        if (!month || !year) return;
         var rows = Array.prototype.slice.call(table.querySelectorAll('[data-reservation-row]'));
         var years = {};
         rows.forEach(function (row) { var date = row.getAttribute('data-reservation-date') || ''; if (date) years[date.slice(0, 4)] = true; });
