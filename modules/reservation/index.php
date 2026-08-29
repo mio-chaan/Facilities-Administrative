@@ -1377,7 +1377,6 @@ if (!$showForm) {
                             <th>Key Person</th>
                             <th>Reservation</th>
                             <th>Schedule</th>
-                            <th>Conflict</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -1400,17 +1399,12 @@ if (!$showForm) {
                                     <td><?= e((string) ($p['key_person'] ?? '-')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
-                                    <td>
+                                    <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
                                         <?php if ($p['has_conflict']): ?>
-                                            <span class="t8-badge" title="Time Conflict"
-                                                  style="background:#E67E22; color:#fff; font-weight:700;">
-                                                <i class="fa-solid fa-triangle-exclamation"></i> ! Time Conflict
+                                            <span class="t8-conflict-indicator" title="Time Conflict">
+                                                <i class="fa-solid fa-triangle-exclamation"></i>
                                             </span>
-                                        <?php else: ?>
-                                            <span class="t8-help-text">—</span>
                                         <?php endif; ?>
-                                    </td>
-                                    <td style="display:flex; gap:8px; flex-wrap:wrap;">
                                         <form method="post" action="<?= e(page_url('reservation', ['action' => 'approve'])) ?>">
                                             <?= t8_csrf_field() ?>
                                             <input type="hidden" name="id" value="<?= e((string) $p['id']) ?>">
@@ -1476,7 +1470,6 @@ if (!$showForm) {
                             <th>Reservation</th>
                             <th>Schedule</th>
                             <th>Status</th>
-                            <th>Conflict</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -1500,17 +1493,12 @@ if (!$showForm) {
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
-                                    <td>
+                                    <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
                                         <?php if ($r['has_conflict']): ?>
-                                            <span class="t8-badge" title="Time Conflict"
-                                                  style="background:#E67E22; color:#fff; font-weight:700;">
-                                                <i class="fa-solid fa-triangle-exclamation"></i> !
+                                            <span class="t8-conflict-indicator" title="Time Conflict">
+                                                <i class="fa-solid fa-triangle-exclamation"></i>
                                             </span>
-                                        <?php else: ?>
-                                            <span class="t8-help-text">—</span>
                                         <?php endif; ?>
-                                    </td>
-                                    <td>
                                         <?php if ($r['status'] === 'approved'): ?>
                                             <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) ?>">
                                                 <i class="fa-solid fa-calendar-pen"></i> Reschedule
@@ -1561,7 +1549,6 @@ if (!$showForm) {
                             <th>Reservation</th>
                             <th>Schedule</th>
                             <th>Status</th>
-                            <th>Conflict</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -1582,17 +1569,12 @@ if (!$showForm) {
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
-                                    <td>
+                                    <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
                                         <?php if ($r['has_conflict']): ?>
-                                            <span class="t8-badge" title="Time Conflict"
-                                                  style="background:#E67E22; color:#fff; font-weight:700;">
-                                                <i class="fa-solid fa-triangle-exclamation"></i> ! Time Conflict
+                                            <span class="t8-conflict-indicator" title="Time Conflict">
+                                                <i class="fa-solid fa-triangle-exclamation"></i>
                                             </span>
-                                        <?php else: ?>
-                                            <span class="t8-help-text">—</span>
                                         <?php endif; ?>
-                                    </td>
-                                    <td style="display:flex; gap:8px; flex-wrap:wrap;">
                                         <?php if ($r['status'] === 'pending'): ?>
                                             <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) ?>">
                                                 <i class="fa-solid fa-pen"></i> Edit
@@ -1670,14 +1652,13 @@ if (!$showForm) {
                             <th>Reservation</th>
                             <th>Schedule</th>
                             <th>Status</th>
-                            <th>Conflict</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if ($allReservations === []): ?>
                             <tr>
-                                <td colspan="8" class="t8-table-empty-row">
+                                <td colspan="7" class="t8-table-empty-row">
                                     No reservations have been made yet.
                                     Once a reservation is submitted, it will appear here.
                                 </td>
@@ -1701,17 +1682,12 @@ if (!$showForm) {
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
-                                    <td>
+                                    <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
                                         <?php if ($r['has_conflict']): ?>
-                                            <span class="t8-badge" title="Time Conflict"
-                                                  style="background:#E67E22; color:#fff; font-weight:700;">
-                                                <i class="fa-solid fa-triangle-exclamation"></i> !
+                                            <span class="t8-conflict-indicator" title="Time Conflict">
+                                                <i class="fa-solid fa-triangle-exclamation"></i>
                                             </span>
-                                        <?php else: ?>
-                                            <span class="t8-help-text">—</span>
                                         <?php endif; ?>
-                                    </td>
-                                    <td>
                                         <?php if (!$isAdmin && $isOwnRow && $r['status'] === 'approved'): ?>
                                             <?php if (!t8_reservation_has_started($r)): ?>
                                                 <button class="t8-btn t8-btn-danger t8-btn-sm" type="button"

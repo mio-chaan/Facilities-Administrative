@@ -20,19 +20,48 @@ $offset = ($currentPage - 1) * $pageSize;
 $stmt = $pdo->prepare("SELECT a.*, u.full_name FROM audit_logs a JOIN users u ON u.id = a.user_id $whereSql ORDER BY a.created_at DESC, a.id DESC LIMIT $pageSize OFFSET $offset");
 $stmt->execute($params);
 $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$actions = $pdo->query('SELECT DISTINCT action FROM audit_logs ORDER BY action')->fetchAll(PDO::FETCH_COLUMN);
+$actionLabels = [
+    '403_denied' => '403 Denied',
+    'approve' => 'Approve',
+    'cancel' => 'Cancel',
+    'cancellation_approved' => 'Cancellation Approved',
+    'cancellation_rejected' => 'Cancellation Rejected',
+    'cancellation_request' => 'Cancellation Request',
+    'check_in' => 'Check In',
+    'check_out' => 'Check Out',
+    'completed' => 'Completed',
+    'create' => 'Create',
+    'delete' => 'Delete',
+    'expired' => 'Expired',
+    'login' => 'Login',
+    'logout' => 'Logout',
+    'reschedule' => 'Reschedule',
+    'schedule' => 'Schedule',
+    'toggle_maintenance' => 'Toggle Maintenance',
+    'update' => 'Update',
+];
+$rawActions = $pdo->query('SELECT DISTINCT action FROM audit_logs ORDER BY action')->fetchAll(PDO::FETCH_COLUMN);
+$actions = [];
+foreach (array_keys($actionLabels) as $allowedAction) {
+    if (in_array($allowedAction, $rawActions, true)) {
+        $actions[] = $allowedAction;
+    }
+}
 $modules = $pdo->query('SELECT DISTINCT entity_type FROM audit_logs ORDER BY entity_type')->fetchAll(PDO::FETCH_COLUMN);
+$formatActionLabel = static function (string $value) use ($actionLabels): string {
+    return $actionLabels[$value] ?? ucwords(str_replace('_', ' ', $value));
+};
 ?>
 <h1>Audit Logs</h1>
 <p class="t8-help-text">Read-only record of system activity. Logs cannot be edited or deleted here.</p>
 <form class="t8-audit-filters" method="get" action="<?= e(base_url('index.php')) ?>">
     <input type="hidden" name="page" value="audit">
-    <select class="t8-select" name="action"><option value="">All actions</option><?php foreach ($actions as $item): ?><option value="<?= e($item) ?>" <?= $item === $action ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $item))) ?></option><?php endforeach; ?></select>
-    <select class="t8-select" name="module"><option value="">All modules</option><?php foreach ($modules as $item): ?><option value="<?= e($item) ?>" <?= $item === $module ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $item))) ?></option><?php endforeach; ?></select>
-    <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">Filter</button>
+    <input type="hidden" name="audit_page" value="1">
+    <select class="t8-select" name="action" onchange="this.form.submit()"><option value="">All actions</option><?php foreach ($actions as $item): ?><option value="<?= e($item) ?>" <?= $item === $action ? 'selected' : '' ?>><?= e($formatActionLabel((string) $item)) ?></option><?php endforeach; ?></select>
+    <select class="t8-select" name="module" onchange="this.form.submit()"><option value="">All modules</option><?php foreach ($modules as $item): ?><option value="<?= e($item) ?>" <?= $item === $module ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $item))) ?></option><?php endforeach; ?></select>
 </form>
 <div class="t8-table-wrap"><table class="t8-table"><thead><tr><th>User</th><th>Action</th><th>Module</th><th>Record</th><th>Result / details</th><th>Date &amp; time</th></tr></thead><tbody>
-<?php if ($logs === []): ?><tr class="t8-table-empty-row"><td colspan="6">No matching audit events.</td></tr><?php else: foreach ($logs as $log): ?><tr><td><?= e($log['full_name']) ?></td><td><?= e(ucwords(str_replace('_', ' ', $log['action']))) ?></td><td><?= e(ucwords(str_replace('_', ' ', $log['entity_type']))) ?></td><td>#<?= e((string) $log['entity_id']) ?></td><td><?= e((string) ($log['new_value'] ?? 'Recorded')) ?></td><td><?= e(format_date($log['created_at'], 'M d, Y g:i A')) ?></td></tr><?php endforeach; endif; ?>
+<?php if ($logs === []): ?><tr class="t8-table-empty-row"><td colspan="6">No matching audit events.</td></tr><?php else: foreach ($logs as $log): ?><tr><td><?= e($log['full_name']) ?></td><td><?= e($formatActionLabel((string) $log['action'])) ?></td><td><?= e(ucwords(str_replace('_', ' ', $log['entity_type']))) ?></td><td>#<?= e((string) $log['entity_id']) ?></td><td><?= e((string) ($log['new_value'] ?? 'Recorded')) ?></td><td><?= e(format_date($log['created_at'], 'M d, Y g:i A')) ?></td></tr><?php endforeach; endif; ?>
 </tbody></table></div>
 <?php if ($totalPages > 1): ?>
     <nav class="t8-pagination" aria-label="Audit log pages">

@@ -19,9 +19,6 @@ $recentDocuments = t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 8);
             <h1>Document Management</h1>
             <p class="t8-help-text">Upload, manage, version, approve, and archive documents.</p>
         </div>
-        <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'create'])) ?>">
-            <i class="fa-solid fa-upload"></i> Upload Document
-        </a>
     </div>
 
     <div class="t8-docs-kpi-grid" aria-label="Document summary">

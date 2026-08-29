@@ -85,15 +85,5 @@ try {
                 <?php endforeach; endif; ?>
             </div>
         </div>
-
-        <div class="t8-card t8-staff-notifications-card">
-            <div class="t8-card-header"><h2 class="t8-card-title">Notifications</h2></div>
-            <div class="t8-card-body">
-            <?php if (empty($t8RecentNotifications)): ?><div class="t8-staff-empty"><i class="fa-regular fa-bell-slash"></i><span>No notifications.</span></div>
-                <?php else: foreach ($t8RecentNotifications as $notification): ?>
-                    <p style="margin:0 0 10px"><?= e((string) $notification['message']) ?></p>
-                <?php endforeach; endif; ?>
-            </div>
-        </div>
     </div>
 </section>
