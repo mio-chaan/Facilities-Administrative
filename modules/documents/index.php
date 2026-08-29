@@ -13,7 +13,7 @@
  *   ?action=create|upload_version|
  *           archive|restore|download|
  *           summarize|versions          -> original upload logic (unchanged)
- *   ?action=generate, *_new, *_view,
+ *   ?action=*_new, *_view,
  *           *_status, *_review,
  *           *_edit, hr_print            -> modules/documents/hr/router.php
  *
@@ -47,6 +47,21 @@ $errors = [];
 
 const T8_DOC_ALLOWED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'png', 'jpg', 'jpeg'];
 
+function t8_document_has_column(PDO $pdo, string $column): bool
+{
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM team8_documents LIKE :column");
+        $stmt->execute(['column' => $column]);
+        return (bool) $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+$documentHasMetadata = t8_document_has_column($pdo, 'department_id') && t8_document_has_column($pdo, 'owner_id');
+$documentHasStatus = t8_document_has_column($pdo, 'status');
+$documentHasExpiration = t8_document_has_column($pdo, 'expiration_date');
+
 function t8_documents_dir(): string
 {
     $dir = UPLOAD_DIR . '/documents';
@@ -68,16 +83,33 @@ function t8_slugify(string $text): string
 /** Fetch a document row (with category/uploader names), or null. */
 function t8_document_fetch(PDO $pdo, int $id): ?array
 {
+    $hasMetadata = t8_document_has_column($pdo, 'department_id') && t8_document_has_column($pdo, 'owner_id');
     $stmt = $pdo->prepare(
-        'SELECT d.*, c.name AS category_name, u.full_name AS uploaded_by_name
+        'SELECT d.*, c.name AS category_name, u.full_name AS uploaded_by_name' . ($hasMetadata ? ', dep.name AS department_name, owner.full_name AS owner_name' : '') . '
          FROM team8_documents d
          LEFT JOIN team8_document_categories c ON c.id = d.category_id
          JOIN users u ON u.id = d.uploaded_by
+         ' . ($hasMetadata ? 'LEFT JOIN departments dep ON dep.id = d.department_id LEFT JOIN users owner ON owner.id = d.owner_id' : '') . '
          WHERE d.id = :id LIMIT 1'
     );
     $stmt->execute(['id' => $id]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
+}
+
+function t8_document_status_badge(string $status): string
+{
+    return match ($status) {
+        'approved' => 't8-badge-approved',
+        'returned_for_revision' => 't8-badge-rejected',
+        default => 't8-badge-pending',
+    };
+}
+
+/** Admins may access all documents; staff may access only their own uploads. */
+function t8_document_is_authorized(?array $document, int $userId, bool $isAdmin): bool
+{
+    return $document !== null && ($isAdmin || (int) $document['uploaded_by'] === $userId);
 }
 
 /** All versions for a document, newest first. */
@@ -107,6 +139,20 @@ function t8_document_validate_upload(array $file): string
     if (!in_array($ext, T8_DOC_ALLOWED_EXT, true)) {
         return 'File type not allowed. Allowed: ' . implode(', ', T8_DOC_ALLOWED_EXT) . '.';
     }
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    $allowedMimes = [
+        'pdf' => ['application/pdf'], 'txt' => ['text/plain'],
+        'png' => ['image/png'], 'jpg' => ['image/jpeg'], 'jpeg' => ['image/jpeg'],
+        'doc' => ['application/msword', 'application/octet-stream'],
+        'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
+        'xls' => ['application/vnd.ms-excel', 'application/octet-stream'],
+        'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip'],
+        'ppt' => ['application/vnd.ms-powerpoint', 'application/octet-stream'],
+        'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/zip'],
+    ];
+    if ($mime === false || !in_array($mime, $allowedMimes[$ext] ?? [], true)) {
+        return 'The file contents do not match the selected file type.';
+    }
     return '';
 }
 
@@ -132,6 +178,8 @@ function t8_document_store_upload(array $file, string $title, int $versionNo): a
 }
 
 $categories = $pdo->query('SELECT id, name FROM team8_document_categories ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+$departments = $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+$owners = $isAdmin ? $pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC) : [];
 $categoryTypeTemplates = [
     'Administrative'   => ['Meeting Minutes', 'Forms', 'General Correspondence'],
     'Contracts'        => ['Supplier Contract', 'Lease Agreement', 'Service Agreement'],
@@ -149,6 +197,8 @@ $categoryTypeTemplates = [
     ],
     'Facilities'       => ['Maintenance Request', 'Equipment Inspection', 'Floor Plan'],
     'Human Resources'  => ['Employment Contract', 'Performance Review', 'Training Record'],
+    'HR'               => ['Employment Contract', 'Performance Review', 'Training Record'],
+    'Legal'            => ['Legal Opinion', 'Case File', 'Demand Letter', 'Policy'],
     'Others'           => ['General Document', 'Reference Material', 'Ad Hoc Record'],
 ];
 $documentTypeOptions = [];
@@ -164,7 +214,6 @@ foreach ($categories as $category) {
 // unchanged.
 // ---------------------------------------------------------------
 $hrActions = [
-    'generate',
     'incident_report_new', 'incident_report_view', 'incident_report_status',
     'nte_new', 'nte_view', 'nte_status',
     'explanation_new', 'explanation_view', 'explanation_review',
@@ -189,6 +238,9 @@ switch ($action) {
             $title = trim((string) ($_POST['title'] ?? ''));
             $categoryId = (string) ($_POST['category_id'] ?? '') !== '' ? (int) $_POST['category_id'] : null;
             $documentType = trim((string) ($_POST['document_type'] ?? ''));
+            $departmentId = $isAdmin && (string) ($_POST['department_id'] ?? '') !== '' ? (int) $_POST['department_id'] : ($_SESSION['department_id'] ?? null);
+            $ownerId = $isAdmin && (string) ($_POST['owner_id'] ?? '') !== '' ? (int) $_POST['owner_id'] : $currentUserId;
+            $expirationDate = trim((string) ($_POST['expiration_date'] ?? ''));
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
@@ -204,6 +256,9 @@ switch ($action) {
                 } elseif (!isset($documentTypeOptions[(string) $categoryId]) || !in_array($documentType, $documentTypeOptions[(string) $categoryId], true)) {
                     $errors[] = 'The selected document type does not match the chosen category.';
                 }
+                if ($expirationDate !== '' && strtotime($expirationDate) === false) {
+                    $errors[] = 'Expiration date must be a valid date.';
+                }
                 $uploadError = t8_document_validate_upload($_FILES['file'] ?? []);
                 if ($uploadError !== '') {
                     $errors[] = $uploadError;
@@ -212,19 +267,39 @@ switch ($action) {
                 if (!$errors) {
                     $stored = t8_document_store_upload($_FILES['file'], $title, 1);
 
+                    $insertColumns = ['category_id', 'document_type', 'uploaded_by', 'title', 'file_path', 'current_version'];
+                    $insertValues = [':category_id', ':document_type', ':uploaded_by', ':title', ':file_path', '1'];
+                    $insertParams = [
+                        'category_id'   => $categoryId,
+                        'document_type' => $documentType !== '' ? $documentType : null,
+                        'uploaded_by'   => $currentUserId,
+                        'title'         => $title,
+                        'file_path'     => $stored['file_path'],
+                    ];
+                    if ($documentHasMetadata) {
+                        $insertColumns = array_merge($insertColumns, ['department_id', 'owner_id']);
+                        $insertValues = array_merge($insertValues, [':department_id', ':owner_id']);
+                        $insertParams['department_id'] = $departmentId ?: null;
+                        $insertParams['owner_id'] = $ownerId ?: null;
+                    }
+                    if ($documentHasStatus) {
+                        $insertColumns[] = 'status';
+                        $insertValues[] = ':status';
+                        $insertParams['status'] = $isAdmin ? 'approved' : 'pending';
+                    }
+                    if ($documentHasExpiration) {
+                        $insertColumns[] = 'expiration_date';
+                        $insertValues[] = ':expiration_date';
+                        $insertParams['expiration_date'] = $expirationDate !== '' ? $expirationDate : null;
+                    }
+
                     $pdo->beginTransaction();
                     try {
                         $stmt = $pdo->prepare(
-                            'INSERT INTO team8_documents (category_id, document_type, uploaded_by, title, file_path, current_version)
-                             VALUES (:category_id, :document_type, :uploaded_by, :title, :file_path, 1)'
+                            'INSERT INTO team8_documents (' . implode(', ', $insertColumns) . ')
+                             VALUES (' . implode(', ', $insertValues) . ')'
                         );
-                        $stmt->execute([
-                            'category_id'   => $categoryId,
-                            'document_type' => $documentType !== '' ? $documentType : null,
-                            'uploaded_by'   => $currentUserId,
-                            'title'         => $title,
-                            'file_path'     => $stored['file_path'],
-                        ]);
+                        $stmt->execute($insertParams);
                         $documentId = (int) $pdo->lastInsertId();
 
                         $pdo->prepare(
@@ -255,9 +330,13 @@ switch ($action) {
     case 'upload_version':
         $documentId = (int) ($_GET['id'] ?? 0);
         $document = $documentId ? t8_document_fetch($pdo, $documentId) : null;
-        if (!$document) {
+        if (!t8_document_is_authorized($document, $currentUserId, $isAdmin)) {
             t8_flash_set('danger', 'Document not found.');
             redirect(page_url('documents'));
+        }
+        if (!$isAdmin && $document['status'] !== 'returned_for_revision') {
+            t8_flash_set('danger', 'You may replace a document only after it has been returned for revision.');
+            redirect(page_url('documents', ['action' => 'versions', 'id' => $documentId]));
         }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -288,9 +367,10 @@ switch ($action) {
                         'file_size'   => $stored['file_size'],
                         'checksum'    => $stored['checksum'],
                     ]);
-                    $pdo->prepare(
-                        'UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, updated_at = NOW() WHERE id = :id'
-                    )->execute([
+                    $versionUpdateSql = $documentHasStatus
+                        ? "UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, status = 'pending', updated_at = NOW() WHERE id = :id"
+                        : 'UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, updated_at = NOW() WHERE id = :id';
+                    $pdo->prepare($versionUpdateSql)->execute([
                         'file_path'  => $stored['file_path'],
                         'version_no' => $nextVersion,
                         'id'         => $documentId,
@@ -304,8 +384,29 @@ switch ($action) {
         }
         break;
 
+    case 'set_status':
+        t8_require_role(['admin']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('documents', ['action' => 'browse']));
+        }
+        $id = (int) ($_POST['id'] ?? 0);
+        $status = (string) ($_POST['status'] ?? '');
+        if (!$documentHasStatus || !in_array($status, ['approved', 'returned_for_revision'], true) || !t8_document_fetch($pdo, $id)) {
+            t8_flash_set('danger', 'The document review request is invalid.');
+        } else {
+            $pdo->prepare('UPDATE team8_documents SET status = :status WHERE id = :id')->execute(['status' => $status, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'document', $id, $status);
+            t8_flash_set('success', $status === 'approved' ? 'Document approved.' : 'Document returned for revision.');
+        }
+        redirect(page_url('documents', ['action' => 'browse']));
+        break;
+
     case 'archive':
     case 'restore':
+        if (!$isAdmin) {
+            t8_require_role(['admin']);
+        }
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             http_response_code(405);
             redirect(page_url('documents'));
@@ -332,13 +433,24 @@ switch ($action) {
     case 'download':
         $versionId = (int) ($_GET['version_id'] ?? 0);
         $stmt = $pdo->prepare(
-            'SELECT v.*, d.title FROM team8_document_versions v
+            'SELECT v.*, d.title, d.uploaded_by FROM team8_document_versions v
              JOIN team8_documents d ON d.id = v.document_id
              WHERE v.id = :id LIMIT 1'
         );
         $stmt->execute(['id' => $versionId]);
         $version = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$version) {
+        $legalAccess = false;
+        if ($version && !$isAdmin && t8_has_role('legal_officer')) {
+            $legalStmt = $pdo->prepare(
+                'SELECT lc.id FROM team8_legal_documents ld
+                 JOIN team8_legal_cases lc ON lc.id = ld.case_id
+                 WHERE ld.document_id = :document_id AND lc.assigned_to = :user_id AND lc.deleted_at IS NULL LIMIT 1'
+            );
+            $legalStmt->execute(['document_id' => $version['document_id'], 'user_id' => $currentUserId]);
+            $legalCaseId = $legalStmt->fetchColumn();
+            $legalAccess = $legalCaseId !== false;
+        }
+        if (!$version || (!$isAdmin && (int) $version['uploaded_by'] !== $currentUserId && !$legalAccess)) {
             http_response_code(404);
             echo 'File not found.';
             exit;
@@ -351,6 +463,10 @@ switch ($action) {
         }
         $ext = pathinfo($filePath, PATHINFO_EXTENSION);
         $downloadName = t8_slugify($version['title']) . '_v' . $version['version_no'] . '.' . $ext;
+        t8_audit_log($pdo, $currentUserId, 'document', (int) $version['document_id'], 'download');
+        if ($legalAccess) {
+            t8_audit_log($pdo, $currentUserId, 'legal_case', (int) $legalCaseId, 'document_download');
+        }
         header('Content-Description: File Transfer');
         header('Content-Type: application/octet-stream');
         header('Content-Disposition: attachment; filename="' . $downloadName . '"');
@@ -369,13 +485,13 @@ switch ($action) {
         }
         $summaryVersionId = (int) ($_POST['version_id'] ?? 0);
         $stmt = $pdo->prepare(
-            'SELECT v.*, d.title FROM team8_document_versions v
+            'SELECT v.*, d.title, d.uploaded_by FROM team8_document_versions v
              JOIN team8_documents d ON d.id = v.document_id
              WHERE v.id = :id LIMIT 1'
         );
         $stmt->execute(['id' => $summaryVersionId]);
         $summaryVersion = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$summaryVersion) {
+        if (!$summaryVersion || (!$isAdmin && (int) $summaryVersion['uploaded_by'] !== $currentUserId)) {
             t8_flash_set('danger', 'Version not found.');
             redirect(page_url('documents'));
         }
@@ -387,7 +503,10 @@ switch ($action) {
             : null;
 
         if ($extractedText === null || trim($extractedText) === '') {
-            t8_flash_set('danger', 'This file type (.' . strtoupper($summaryExt) . ') isn\'t supported for AI summarization yet. Currently supported: .txt, .docx.');
+            $summaryMessage = strtolower($summaryExt) === 'docx' && !class_exists('ZipArchive')
+                ? 'DOCX summarization requires the PHP ZipArchive extension. Enable extension=zip in php.ini and restart Apache, or upload a .txt file.'
+                : 'This file type (.' . strtoupper($summaryExt) . ') isn\'t supported for AI summarization yet. Currently supported: .txt and .docx.';
+            t8_flash_set('danger', $summaryMessage);
             redirect(page_url('documents', ['action' => 'versions', 'id' => $summaryDocumentId]));
         }
 
@@ -395,7 +514,7 @@ switch ($action) {
         $extractedText = mb_substr($extractedText, 0, 12000);
 
         try {
-            $aiSummary = t8_openai_chat([
+            $aiSummary = t8_ai_chat([
                 ['role' => 'system', 'content' => 'You summarize documents for a facilities & administrative management system. Produce a concise summary (3-6 sentences), followed by up to 5 key bullet points if relevant.'],
                 ['role' => 'user', 'content' => "Summarize this document titled \"{$summaryVersion['title']}\":\n\n" . $extractedText],
             ]);
@@ -417,11 +536,12 @@ $showVersions = $action === 'versions';
 if ($showVersions) {
     $documentId = (int) ($_GET['id'] ?? 0);
     $document = $documentId ? t8_document_fetch($pdo, $documentId) : null;
-    if (!$document) {
+    if (!t8_document_is_authorized($document, $currentUserId, $isAdmin)) {
         t8_flash_set('danger', 'Document not found.');
         redirect(page_url('documents'));
     }
     $versions = t8_document_all_versions($pdo, $documentId);
+    t8_audit_log($pdo, $currentUserId, 'document', $documentId, 'view');
 
     // One-time AI summary, if the person just clicked "AI Summarize".
     $aiSummaryText = null;
@@ -438,16 +558,38 @@ if ($showVersions) {
 $showList = !$showCreateForm && !$showUploadVersionForm && !$showVersions && $action === 'browse';
 
 if ($showList) {
+    $hasMetadata = t8_document_has_column($pdo, 'department_id') && t8_document_has_column($pdo, 'owner_id');
     $statusFilter = ($_GET['status'] ?? 'active') === 'archived' ? 'archived' : 'active';
     $whereClause = $statusFilter === 'archived' ? 'd.deleted_at IS NOT NULL' : 'd.deleted_at IS NULL';
-    $documents = $pdo->query(
-        "SELECT d.*, c.name AS category_name, u.full_name AS uploaded_by_name
+    $scopeSql = $isAdmin ? '' : ' AND d.uploaded_by = :user_id';
+    $search = trim((string) ($_GET['q'] ?? ''));
+    $categoryFilter = (int) ($_GET['category_id'] ?? 0);
+    $reviewFilter = (string) ($_GET['review_status'] ?? '');
+    $filterSql = '';
+    $filterParams = $isAdmin ? [] : ['user_id' => $currentUserId];
+    if ($search !== '') {
+        $filterSql .= ' AND (d.title LIKE :search OR d.document_type LIKE :search OR u.full_name LIKE :search)';
+        $filterParams['search'] = '%' . $search . '%';
+    }
+    if ($categoryFilter > 0) {
+        $filterSql .= ' AND d.category_id = :category_id';
+        $filterParams['category_id'] = $categoryFilter;
+    }
+    if (in_array($reviewFilter, ['pending', 'approved', 'returned_for_revision'], true)) {
+        $filterSql .= ' AND d.status = :review_status';
+        $filterParams['review_status'] = $reviewFilter;
+    }
+    $documentsStmt = $pdo->prepare(
+        "SELECT d.*, c.name AS category_name, u.full_name AS uploaded_by_name" . ($hasMetadata ? ", dep.name AS department_name, owner.full_name AS owner_name" : '') . "
          FROM team8_documents d
          LEFT JOIN team8_document_categories c ON c.id = d.category_id
          JOIN users u ON u.id = d.uploaded_by
-         WHERE $whereClause
+         " . ($hasMetadata ? 'LEFT JOIN departments dep ON dep.id = d.department_id LEFT JOIN users owner ON owner.id = d.owner_id' : '') . "
+         WHERE $whereClause$scopeSql$filterSql
          ORDER BY d.updated_at DESC"
-    )->fetchAll(PDO::FETCH_ASSOC);
+    );
+    $documentsStmt->execute($filterParams);
+    $documents = $documentsStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 if (!$showCreateForm && !$showUploadVersionForm && !$showVersions && !$showList) {
@@ -631,6 +773,33 @@ function t8_render_camera_capture(): void
                 </select>
             </div>
 
+            <?php if ($isAdmin): ?>
+                <div class="t8-field">
+                    <label class="t8-label" for="department_id">Department</label>
+                    <select class="t8-select" id="department_id" name="department_id">
+                        <option value="">Not assigned</option>
+                        <?php foreach ($departments as $department): ?>
+                            <option value="<?= e((string) $department['id']) ?>"><?= e($department['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="t8-field">
+                    <label class="t8-label" for="owner_id">Owner</label>
+                    <select class="t8-select" id="owner_id" name="owner_id">
+                        <option value="">Not assigned</option>
+                        <?php foreach ($owners as $owner): ?>
+                            <option value="<?= e((string) $owner['id']) ?>"><?= e($owner['full_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            <?php endif; ?>
+
+            <div class="t8-field">
+                <label class="t8-label" for="expiration_date">Expiration Date</label>
+                <input class="t8-input" type="date" id="expiration_date" name="expiration_date"
+                       value="<?= e((string) ($_POST['expiration_date'] ?? '')) ?>">
+            </div>
+
             <div class="t8-field">
                 <label class="t8-label" for="file">File</label>
                 <input class="t8-input" type="file" id="file" name="file" required>
@@ -731,9 +900,11 @@ function t8_render_camera_capture(): void
     <div class="t8-card">
         <div class="t8-card-header">
             <h2 class="t8-card-title"><?= e($document['title']) ?> — Version History</h2>
-            <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'upload_version', 'id' => $document['id']])) ?>">
-                <i class="fa-solid fa-upload"></i> Upload New Version
-            </a>
+            <?php if ($isAdmin || $document['status'] === 'returned_for_revision'): ?>
+                <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'upload_version', 'id' => $document['id']])) ?>">
+                    <i class="fa-solid fa-upload"></i> Upload New Version
+                </a>
+            <?php endif; ?>
         </div>
         <div class="t8-table-wrap">
             <table class="t8-table">
@@ -795,9 +966,21 @@ function t8_render_camera_capture(): void
         <?php endif; ?>
     </div>
 
+    <form method="get" class="t8-card" style="margin-bottom:var(--t8-space-4); padding:var(--t8-space-4);">
+        <input type="hidden" name="page" value="documents">
+        <input type="hidden" name="action" value="browse">
+        <?php if (!$isAdmin): ?><p class="t8-help-text" style="margin-top:0;">My Documents: <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'pending'])) ?>">Pending</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'approved'])) ?>">Approved</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'returned_for_revision'])) ?>">Returned for Revision</a></p><?php endif; ?>
+        <div class="t8-documents-filters">
+            <label>Search<input class="t8-input" type="search" name="q" value="<?= e($search) ?>" placeholder="Title, type, uploader"></label>
+            <label>Category<select class="t8-select" name="category_id"><option value="">All categories</option><?php foreach ($categories as $cat): ?><option value="<?= e((string) $cat['id']) ?>" <?= $categoryFilter === (int) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Review status<select class="t8-select" name="review_status"><option value="">All statuses</option><option value="pending" <?= $reviewFilter === 'pending' ? 'selected' : '' ?>>Pending</option><option value="approved" <?= $reviewFilter === 'approved' ? 'selected' : '' ?>>Approved</option><option value="returned_for_revision" <?= $reviewFilter === 'returned_for_revision' ? 'selected' : '' ?>>Returned for Revision</option></select></label>
+            <button class="t8-btn t8-btn-outline" type="submit">Filter</button>
+        </div>
+    </form>
+
     <div class="t8-card">
         <div class="t8-card-header">
-            <h2 class="t8-card-title"><?= $statusFilter === 'archived' ? 'Archived Documents' : 'Active Documents' ?></h2>
+            <h2 class="t8-card-title"><?= $statusFilter === 'archived' ? 'Archived Documents' : ($isAdmin ? 'All Documents' : 'My Documents') ?></h2>
         </div>
         <?php if ($documents === []): ?>
             <div class="t8-empty">
@@ -809,9 +992,13 @@ function t8_render_camera_capture(): void
                     <thead>
                         <tr>
                             <th>Title</th>
+                            <th>Department</th>
+                            <th>Owner</th>
                             <th>Category</th>
                             <th>Document Type</th>
                             <th>Current Version</th>
+                            <th>Status</th>
+                            <th>Expiration</th>
                             <th>Last Updated</th>
                             <th>Uploaded By</th>
                             <th>Actions</th>
@@ -821,16 +1008,24 @@ function t8_render_camera_capture(): void
                         <?php foreach ($documents as $doc): ?>
                             <tr>
                                 <td><?= e($doc['title']) ?></td>
+                                <td><?= e($doc['department_name'] ?? '—') ?></td>
+                                <td><?= e($doc['owner_name'] ?? '—') ?></td>
                                 <td><?= e($doc['category_name'] ?? '—') ?></td>
                                 <td><?= e($doc['document_type'] ?? '—') ?></td>
                                 <td>v<?= e((string) $doc['current_version']) ?></td>
+                                <td><span class="t8-badge <?= e(t8_document_status_badge((string) $doc['status'])) ?>"><?= e(ucwords(str_replace('_', ' ', (string) $doc['status']))) ?></span></td>
+                                <td><?= $doc['expiration_date'] ? e(format_date($doc['expiration_date'], 'M d, Y')) : '—' ?><?php if ($doc['expiration_date'] && strtotime((string) $doc['expiration_date']) <= strtotime('+30 days')): ?> <span class="t8-badge t8-badge-rejected"><?= strtotime((string) $doc['expiration_date']) < strtotime('today') ? 'Expired' : 'Expiring soon' ?></span><?php endif; ?></td>
                                 <td><?= e(format_date($doc['updated_at'], 'M d, Y g:i A')) ?></td>
                                 <td><?= e($doc['uploaded_by_name']) ?></td>
                                 <td style="display:flex; gap:8px; flex-wrap:wrap;">
                                     <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $doc['id']])) ?>">
-                                        <i class="fa-solid fa-clock-rotate-left"></i> Versions
+                                        <i class="fa-solid fa-eye"></i> View / Versions
                                     </a>
-                                    <?php if ($statusFilter === 'active'): ?>
+                                    <?php if ($isAdmin && $statusFilter === 'active' && $doc['status'] === 'pending'): ?>
+                                        <form method="post" action="<?= e(page_url('documents', ['action' => 'set_status'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $doc['id']) ?>"><input type="hidden" name="status" value="approved"><button class="t8-btn t8-btn-success t8-btn-sm" type="submit">Approve</button></form>
+                                        <form method="post" action="<?= e(page_url('documents', ['action' => 'set_status'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $doc['id']) ?>"><input type="hidden" name="status" value="returned_for_revision"><button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">Return</button></form>
+                                    <?php endif; ?>
+                                    <?php if ($isAdmin && $statusFilter === 'active'): ?>
                                         <form method="post" action="<?= e(page_url('documents', ['action' => 'archive'])) ?>"
                                               onsubmit="return confirm('Archive this document?');">
                                             <?= t8_csrf_field() ?>
@@ -839,7 +1034,7 @@ function t8_render_camera_capture(): void
                                                 <i class="fa-solid fa-box-archive"></i> Archive
                                             </button>
                                         </form>
-                                    <?php else: ?>
+                                    <?php elseif ($isAdmin): ?>
                                         <form method="post" action="<?= e(page_url('documents', ['action' => 'restore'])) ?>">
                                             <?= t8_csrf_field() ?>
                                             <input type="hidden" name="id" value="<?= e((string) $doc['id']) ?>">

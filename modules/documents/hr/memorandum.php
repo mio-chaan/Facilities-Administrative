@@ -87,7 +87,7 @@ if ($action === 'memorandum_new' || $action === 'memorandum_edit') {
     }
     ?>
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4);">
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', $existing ? ['action' => 'memorandum_view', 'id' => $editId] : ['action' => 'generate'])) ?>">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', $existing ? ['action' => 'memorandum_view', 'id' => $editId] : [])) ?>">
             <i class="fa-solid fa-arrow-left"></i> Back
         </a>
     </div>

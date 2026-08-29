@@ -97,7 +97,7 @@ if ($action === 'incident_report_new') {
     }
     ?>
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4);">
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'generate'])) ?>">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">
             <i class="fa-solid fa-arrow-left"></i> Back to Templates
         </a>
     </div>

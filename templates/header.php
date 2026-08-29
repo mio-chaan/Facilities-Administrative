@@ -35,10 +35,19 @@ $page      = $page ?? current_page();
     <?php if ($page === 'reservation'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/reservation.css')) ?>">
     <?php endif; ?>
+    <?php if ($page === 'visitor'): ?>
+        <link rel="stylesheet" href="<?= e(asset('css/visitor.css')) ?>">
+    <?php endif; ?>
+    <?php if ($page === 'facilities'): ?>
+        <link rel="stylesheet" href="<?= e(asset('css/facilities.css')) ?>">
+    <?php endif; ?>
     <?php if ($page === 'documents'): ?>
         <!-- HR Document Automation extension (dashboard, template picker,
              generated-document forms). See public/css/documents.css. -->
         <link rel="stylesheet" href="<?= e(asset('css/documents.css')) ?>">
+    <?php endif; ?>
+    <?php if ($page === 'retention'): ?>
+        <link rel="stylesheet" href="<?= e(asset('css/retention.css')) ?>">
     <?php endif; ?>
 </head>
 <body>

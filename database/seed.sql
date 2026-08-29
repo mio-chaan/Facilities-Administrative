@@ -44,7 +44,9 @@ INSERT INTO team8_document_categories (id, name) VALUES
     (5, 'Inventory'),
     (6, 'Facilities'),
     (7, 'Human Resources'),
-    (8, 'Others')
+    (8, 'Others'),
+    (9, 'Legal'),
+    (10, 'HR')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 INSERT INTO team8_retention_schedules (id, record_type, retention_years) VALUES

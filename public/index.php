@@ -15,6 +15,10 @@ declare(strict_types=1);
 
 ob_start();
 
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: SAMEORIGIN');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+
 
 
 require_once __DIR__ . '/../app/config/config.php';
@@ -25,6 +29,10 @@ require_once __DIR__ . '/../app/includes/helpers.php';
 require_once __DIR__ . '/../app/includes/permissions.php';
 require_once __DIR__ . '/../app/includes/audit.php';
 require_once __DIR__ . '/../app/includes/notifications.php';
+
+// Generic operational alerts contain no record details and are delivered only
+// to administrators. User-specific notifications remain owner-scoped.
+t8_refresh_operational_notifications($pdo);
 
 $routes = require __DIR__ . '/../app/config/routes.php';
 
@@ -58,7 +66,7 @@ $pageTitle = ucfirst($page);
 require dirname(__DIR__) . '/templates/header.php';
 require dirname(__DIR__) . '/templates/navbar.php';
 ?>
-<div class="t8-shell t8-sidebar-collapsed">
+<div class="t8-shell">
     <?php require dirname(__DIR__) . '/templates/sidebar.php'; ?>
     <main class="t8-main">
         <?php

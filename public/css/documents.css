@@ -6,7 +6,11 @@
    convention) - no new design system, just page-specific layout.
    ========================================================= */
 
-.t8-docs-dashboard { display: flex; flex-direction: column; gap: var(--t8-space-4); }
+.t8-docs-dashboard { display: flex; flex-direction: column; gap: 20px; }
+
+.t8-documents-filters { display:flex; flex-wrap:wrap; align-items:end; gap:var(--t8-space-3); }
+.t8-documents-filters label { display:flex; flex-direction:column; gap:4px; font-size:.82rem; font-weight:700; color:var(--t8-text-muted); }
+.t8-documents-filters .t8-input, .t8-documents-filters .t8-select { min-width:180px; }
 
 /* ---- Hero / top section ---- */
 .t8-docs-hero {
@@ -20,6 +24,29 @@
 .t8-docs-hero-text h1 { margin-bottom: 4px; }
 .t8-docs-hero-actions { display: flex; flex-direction: column; gap: var(--t8-space-3); align-items: flex-end; }
 .t8-docs-hero-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.t8-docs-hero .t8-help-text { margin: 0; }
+.t8-docs-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.t8-docs-kpi {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    min-width: 0;
+    min-height: 92px;
+    padding: 16px;
+    background: var(--t8-surface);
+    border: 1px solid var(--t8-border);
+    border-radius: 12px;
+    box-shadow: var(--t8-shadow-card);
+}
+.t8-docs-kpi-icon { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border-radius: 12px; background: #f8e7e7; color: var(--t8-primary); }
+.t8-docs-kpi-orange .t8-docs-kpi-icon { background: #fff0dc; color: #e77b16; }
+.t8-docs-kpi-gray .t8-docs-kpi-icon { background: #eef0f3; color: #66717c; }
+.t8-docs-kpi-purple .t8-docs-kpi-icon { background: #f0e6fb; color: #8a43c4; }
+.t8-docs-kpi span, .t8-docs-kpi small { display: block; color: var(--t8-text-muted); font-size: .68rem; }
+.t8-docs-kpi strong { display: block; margin: 2px 0; color: var(--t8-ink); font-size: 1.4rem; line-height: 1.1; }
+.t8-docs-kpi div:last-child { min-width: 0; }
+.t8-docs-kpi span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .t8-docs-search {
     display: flex;
@@ -41,8 +68,15 @@
     gap: var(--t8-space-4);
     align-items: start;
 }
+.t8-docs-primary-grid { grid-template-columns: minmax(0, .9fr) minmax(0, 1.4fr); }
+.t8-docs-secondary-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 @media (min-width: 900px) {
     .t8-docs-grid-2 { grid-template-columns: 1fr 1fr; }
+}
+
+@media (min-width: 640px) and (max-width: 899px) {
+    .t8-documents-filters .t8-input,
+    .t8-documents-filters .t8-select { flex: 1 1 180px; min-width: 0; }
 }
 
 /* ---- Quick Actions card ---- */
@@ -72,9 +106,7 @@
 
 /* ---- Recent Documents list ---- */
 #t8RecentDocsWrap {
-    max-height: 177px;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: visible;
     padding-right: 2px;
 }
 #t8RecentDocsWrap::-webkit-scrollbar {
@@ -102,6 +134,11 @@
 .t8-docs-recent-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .t8-docs-recent-body a { font-weight: 600; color: var(--t8-ink); }
 .t8-docs-recent-body a:hover { color: var(--t8-primary); }
+.t8-docs-recent-item .t8-badge { margin-left: auto; }
+.t8-docs-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 24px 12px; text-align: center; color: var(--t8-text-muted); }
+.t8-docs-empty i { margin-bottom: 4px; color: var(--t8-primary-light); font-size: 2rem; }
+.t8-docs-empty strong { color: var(--t8-ink); font-size: .95rem; }
+.t8-docs-empty .t8-btn { margin-top: 8px; }
 
 /* ---- Statistics / Pending Actions cards ---- */
 .t8-docs-stat-list { display: flex; flex-direction: column; }
@@ -115,38 +152,10 @@
 }
 .t8-docs-stat:last-child { border-bottom: none; }
 .t8-docs-stat strong { font-family: var(--t8-font-data); font-size: 1.05rem; color: var(--t8-primary); }
-
-/* ---- Template picker (Generate HR Document) ---- */
-.t8-template-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: var(--t8-space-3);
-    margin-top: var(--t8-space-3);
-}
-.t8-template-option { cursor: pointer; }
-.t8-template-option input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
-.t8-template-box {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: var(--t8-space-5) var(--t8-space-3);
-    border: 2px solid var(--t8-border);
-    border-radius: var(--t8-radius-sm);
-    background: var(--t8-secondary);
-    color: var(--t8-ink);
-    text-align: center;
-    font-weight: 600;
-    font-size: 0.88rem;
-    transition: border-color 0.15s ease, background 0.15s ease;
-}
-.t8-template-box i { font-size: 1.6rem; color: var(--t8-primary); }
-.t8-template-option input:checked + .t8-template-box,
-a.t8-template-box:hover {
-    border-color: var(--t8-primary);
-    background: #fff;
-}
+.t8-docs-stat { color: var(--t8-text); text-decoration: none; }
+.t8-docs-stat:hover { color: var(--t8-primary); background: var(--t8-secondary); }
+.t8-docs-stat span { display: flex; align-items: center; gap: 8px; }
+.t8-docs-stat span i { width: 18px; color: var(--t8-primary-light); text-align: center; }
 
 /* ---- Read-only, session-trusted identity block on HR forms ---- */
 .t8-hr-readonly-block {
@@ -165,6 +174,21 @@ a.t8-template-box:hover {
 
 @media (max-width: 640px) {
     .t8-docs-hero { flex-direction: column; align-items: stretch; }
+    .t8-docs-hero-text { flex: 0 1 auto; }
     .t8-docs-hero-actions { align-items: stretch; }
     .t8-docs-search { min-width: 0; }
+    .t8-documents-filters { align-items: stretch; }
+    .t8-documents-filters label,
+    .t8-documents-filters .t8-input,
+    .t8-documents-filters .t8-select { width: 100%; min-width: 0; }
+    .t8-docs-kpi-grid { grid-template-columns: 1fr; }
+    .t8-docs-hero .t8-btn { width: 100%; justify-content: center; }
+    .t8-docs-primary-grid,
+    .t8-docs-secondary-grid { grid-template-columns: 1fr; }
+    .t8-docs-recent-item { align-items: flex-start; }
+    .t8-docs-recent-item .t8-badge { margin-left: 0; }
+}
+
+@media (min-width: 641px) and (max-width: 999px) {
+    .t8-docs-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

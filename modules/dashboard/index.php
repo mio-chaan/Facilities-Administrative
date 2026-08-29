@@ -28,12 +28,20 @@
 
 declare(strict_types=1);
 
+if (!t8_has_role('admin')) {
+    require __DIR__ . '/staff.php';
+    return;
+}
+
 $pageTitle = 'Dashboard';
 
 $stats = [
+    'Total Facilities'      => 0,
     'Pending Reservations' => 0,
     'Visitors Today'       => 0,
     'Active Contracts'     => 0,
+    'Documents'            => 0,
+    'Compliance Tasks'     => 0,
     'Open Legal Cases'     => 0,
 ];
 
@@ -44,10 +52,21 @@ $statMeta = [
     'Open Legal Cases'     => ['icon' => 'fa-scale-balanced', 'variant' => 't8-stat-icon-warning'],
 ];
 
+$statLinks = [
+    'Total Facilities'      => page_url('facilities'),
+    'Pending Reservations' => page_url('reservation'),
+    'Visitors Today'        => page_url('visitor'),
+    'Active Contracts'      => page_url('contracts'),
+    'Documents'             => page_url('documents'),
+    'Compliance Tasks'      => page_url('retention'),
+    'Open Legal Cases'      => page_url('legal'),
+];
+
 $dbError = null;
 $recentActivities = [];
 $fullActivityHistory = [];
 $notifications = [];
+$expiringContracts = 0;
 
 // Activity-log actions that represent real business events worth
 // showing on the compact dashboard timeline. Auth/access noise
@@ -67,12 +86,28 @@ try {
         ->query("SELECT COUNT(*) FROM team8_reservations WHERE status = 'pending'")
         ->fetchColumn();
 
+    $stats['Total Facilities'] = (int) $pdo
+        ->query("SELECT COUNT(*) FROM team8_facilities WHERE status = 'active'")
+        ->fetchColumn();
+
     $stats['Visitors Today'] = (int) $pdo
         ->query("SELECT COUNT(*) FROM team8_visitors WHERE DATE(check_in_time) = CURDATE()")
         ->fetchColumn();
 
     $stats['Active Contracts'] = (int) $pdo
         ->query("SELECT COUNT(*) FROM team8_contracts WHERE status = 'active'")
+        ->fetchColumn();
+
+    $expiringContracts = (int) $pdo
+        ->query("SELECT COUNT(*) FROM team8_contracts WHERE deleted_at IS NULL AND end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)")
+        ->fetchColumn();
+
+    $stats['Documents'] = (int) $pdo
+        ->query('SELECT COUNT(*) FROM team8_documents WHERE deleted_at IS NULL')
+        ->fetchColumn();
+
+    $stats['Compliance Tasks'] = (int) $pdo
+        ->query("SELECT COUNT(*) FROM team8_compliance_checks WHERE result IN ('needs_review', 'non_compliant')")
         ->fetchColumn();
 
     $stats['Open Legal Cases'] = (int) $pdo
@@ -151,12 +186,44 @@ function t8_activity_label(string $action, string $entityType): string
         <h1 id="dashboard-title">Dashboard</h1>
         <p class="t8-help-text">Facilities &amp; administrative management overview.</p>
     </div>
-    <div class="t8-dashboard-date"><i class="fa-regular fa-calendar"></i> <?= e(date('F j, Y')) ?></div>
 </div>
 
 <?php if ($dbError !== null): ?>
     <div class="t8-alert t8-alert-warning"><?= e($dbError) ?></div>
 <?php endif; ?>
+
+<div class="t8-dashboard-summary-grid" style="margin-bottom:var(--t8-space-4)">
+    <?php foreach ($stats as $label => $value): ?>
+        <?php $meta = $statMeta[$label] ?? ['icon' => 'fa-chart-simple', 'variant' => '']; ?>
+        <?php $cardLink = $statLinks[$label] ?? null; ?>
+        <?php if ($cardLink !== null): ?>
+            <a class="t8-card t8-dashboard-stat-card t8-dashboard-stat-card-link" href="<?= e($cardLink) ?>" aria-label="Open <?= e($label) ?>">
+                <div class="t8-dashboard-stat-icon <?= e($meta['variant']) ?>" aria-hidden="true">
+                    <i class="fa-solid <?= e($meta['icon']) ?>"></i>
+                </div>
+                <div class="t8-dashboard-stat-body">
+                    <p class="t8-help-text"><?= e($label) ?></p>
+                    <div class="t8-dashboard-stat-value"><?= e((string) $value) ?></div>
+                </div>
+            </a>
+        <?php else: ?>
+            <div class="t8-card t8-dashboard-stat-card">
+                <div class="t8-dashboard-stat-icon <?= e($meta['variant']) ?>" aria-hidden="true">
+                    <i class="fa-solid <?= e($meta['icon']) ?>"></i>
+                </div>
+                <div class="t8-dashboard-stat-body">
+                    <p class="t8-help-text"><?= e($label) ?></p>
+                    <div class="t8-dashboard-stat-value"><?= e((string) $value) ?></div>
+                </div>
+            </div>
+        <?php endif; ?>
+    <?php endforeach; ?>
+    <div class="t8-card"><div class="t8-card-header"><h2 class="t8-card-title">Pending Actions</h2></div><div class="t8-card-body">
+        <p style="margin:0 0 8px"><strong><?= e((string) $stats['Pending Reservations']) ?></strong> reservation(s) awaiting approval</p>
+        <p style="margin:0 0 8px"><strong><?= e((string) $stats['Compliance Tasks']) ?></strong> compliance item(s) need review</p>
+        <p style="margin:0"><a href="<?= e(page_url('reservation')) ?>">Review reservations</a> · <a href="<?= e(page_url('audit')) ?>">View audit log</a></p>
+    </div></div>
+</div>
 
 <?php
 // ---------------------------------------------------------------
@@ -419,15 +486,22 @@ $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
          QUICK INSIGHTS (was: AI Insights)
          ============================================================ -->
     <div class="t8-card t8-ai-insights">
-        <div class="t8-card-header"><h2 class="t8-card-title">Quick Insights</h2></div>
+        <div class="t8-card-header">
+            <h2 class="t8-card-title">Quick Insights</h2>
+            <button class="t8-btn t8-btn-outline t8-btn-sm" id="t8GenerateReservationInsight" type="button">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> Analyze
+            </button>
+        </div>
         <div class="t8-card-body">
             <ul class="t8-ai-list">
                 <li>Pending reservations: <strong><?= e((string) $stats['Pending Reservations']) ?></strong></li>
                 <li>Visitors today: <strong><?= e((string) $stats['Visitors Today']) ?></strong></li>
                 <li>Active contracts: <strong><?= e((string) $stats['Active Contracts']) ?></strong></li>
+                <li>Contracts expiring within 30 days: <strong><?= e((string) $expiringContracts) ?></strong></li>
                 <li>Top facility: <strong><?= e($facilityUsage[0]['label'] ?? '—') ?></strong></li>
                 <li>Unread notifications: <strong><?= e((string) $t8UnreadNotifications) ?></strong></li>
             </ul>
+            <p id="t8ReservationInsight" class="t8-help-text" role="status" aria-live="polite" hidden></p>
         </div>
     </div>
 

@@ -3,6 +3,62 @@
 
 declare(strict_types=1);
 
+if (!function_exists('t8_notification_targets_supported')) {
+    function t8_notification_targets_supported(PDO $pdo): bool
+    {
+        try { return (bool) $pdo->query("SHOW COLUMNS FROM notifications LIKE 'target_url'")->fetch(PDO::FETCH_ASSOC); }
+        catch (PDOException $e) { return false; }
+    }
+}
+
+if (!function_exists('t8_notify_user')) {
+    /** Creates a brief, non-sensitive notification owned by exactly one user. */
+    function t8_notify_user(PDO $pdo, int $userId, string $message, ?string $targetUrl = null): void
+    {
+        try {
+            if (t8_notification_targets_supported($pdo)) {
+                $pdo->prepare('INSERT INTO notifications (user_id, message, target_url, status) VALUES (:user_id, :message, :target_url, "unread")')
+                    ->execute(['user_id' => $userId, 'message' => $message, 'target_url' => $targetUrl]);
+            } else {
+                $pdo->prepare('INSERT INTO notifications (user_id, message, status) VALUES (:user_id, :message, "unread")')
+                    ->execute(['user_id' => $userId, 'message' => $message]);
+            }
+        } catch (PDOException $e) { /* notifications never break a workflow */ }
+    }
+}
+
+if (!function_exists('t8_admin_notification_once_today')) {
+    /** Creates one generic operational alert per administrator each day. */
+    function t8_admin_notification_once_today(PDO $pdo, string $message, string $targetUrl): void
+    {
+        try {
+            $admins = $pdo->query("SELECT ur.user_id FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.role_name = 'admin'")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($admins as $adminId) {
+                $check = $pdo->prepare('SELECT id FROM notifications WHERE user_id = :user_id AND message = :message AND DATE(created_at) = CURDATE() LIMIT 1');
+                $check->execute(['user_id' => $adminId, 'message' => $message]);
+                if (!$check->fetchColumn()) { t8_notify_user($pdo, (int) $adminId, $message, $targetUrl); }
+            }
+        } catch (PDOException $e) { /* optional alert generation */ }
+    }
+}
+
+if (!function_exists('t8_refresh_operational_notifications')) {
+    function t8_refresh_operational_notifications(PDO $pdo): void
+    {
+        $alerts = [
+            ["SELECT COUNT(*) FROM team8_reservations WHERE status = 'pending'", 'Reservation approvals require review.', 'index.php?page=reservation'],
+            ["SELECT COUNT(*) FROM team8_documents WHERE status = 'pending'", 'Document submissions require review.', 'index.php?page=documents&action=browse&review_status=pending'],
+            ["SELECT COUNT(*) FROM team8_contracts WHERE status IN ('expiring_soon', 'pending_renewal')", 'Contract renewal attention is required.', 'index.php?page=contracts'],
+            ["SELECT COUNT(*) FROM team8_records WHERE disposition_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) AND status = 'active'", 'Retention records are approaching disposition.', 'index.php?page=retention'],
+            ["SELECT COUNT(*) FROM team8_visitors WHERE status = 'scheduled' AND DATE(scheduled_date) = CURDATE()", 'Visitor activity is scheduled today.', 'index.php?page=visitor'],
+        ];
+        foreach ($alerts as [$sql, $message, $targetUrl]) {
+            try { if ((int) $pdo->query($sql)->fetchColumn() > 0) { t8_admin_notification_once_today($pdo, $message, $targetUrl); } }
+            catch (PDOException $e) { /* migration/table may not yet exist */ }
+        }
+    }
+}
+
 if (!function_exists('t8_unread_notification_count')) {
     function t8_unread_notification_count(PDO $pdo, ?int $userId): int
     {
@@ -38,7 +94,7 @@ if (!function_exists('t8_recent_notifications')) {
 
         try {
             $stmt = $pdo->prepare(
-                "SELECT id, message, status, created_at
+                "SELECT id, message, " . (t8_notification_targets_supported($pdo) ? 'target_url,' : 'NULL AS target_url,') . " status, created_at
                  FROM notifications
                  WHERE user_id = :user_id
                  ORDER BY created_at DESC, id DESC
@@ -64,7 +120,7 @@ if (!function_exists('t8_all_notifications')) {
 
         try {
             $stmt = $pdo->prepare(
-                "SELECT id, message, status, created_at
+                "SELECT id, message, " . (t8_notification_targets_supported($pdo) ? 'target_url,' : 'NULL AS target_url,') . " status, created_at
                  FROM notifications
                  WHERE user_id = :user_id
                  ORDER BY created_at DESC, id DESC

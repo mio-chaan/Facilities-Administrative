@@ -7,6 +7,8 @@ $page = $page ?? current_page();
 </footer>
 
 <script src="<?= e(asset('js/app.js')) ?>"></script>
+<script src="<?= e(asset('js/global-search.js')) ?>"></script>
+<script src="<?= e(asset('js/context-bar.js')) ?>"></script>
 <?php if ($page === 'dashboard'): ?>
     <script src="<?= e(asset('js/dashboard.js')) ?>"></script>
 <?php endif; ?>

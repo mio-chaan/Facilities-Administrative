@@ -25,6 +25,21 @@ function t8_has_role($allowedRoles): bool
 }
 
 /**
+ * The application policy distinguishes ADMIN from operational roles. The
+ * former generic STAFF role is now LEGAL_OFFICER; operational roles receive
+ * only their explicitly coded permissions and never organisation-wide access.
+ */
+function t8_is_admin(): bool
+{
+    return t8_has_role('admin');
+}
+
+function t8_is_staff(): bool
+{
+    return t8_current_role() !== null && !t8_is_admin();
+}
+
+/**
  * Stops the request with a 403 if the current user's role isn't allowed.
  * Call at the top of a module's index.php:
  *   t8_require_role(['admin', 'facilities_staff']);

@@ -1,7 +1,8 @@
 <?php
 /**
  * modules/legal/index.php
- * Legal Management - Administrator only.
+ * Legal Management - administrators manage cases; assigned Legal Officers
+ * have read-only access only to their own cases.
  *
  * Backing tables:
  *   team8_legal_cases     (id, assigned_to, contract_id, title, status,
@@ -20,14 +21,27 @@
 
 declare(strict_types=1);
 
-t8_require_role(['admin']);
+t8_require_role(['admin', 'legal_officer']);
 
 $pageTitle = 'Legal Management';
 $currentUserId = t8_current_user_id();
+$isAdmin = t8_has_role('admin');
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
-const T8_LEGAL_STATUSES = ['open', 'in_progress', 'closed', 'dismissed'];
+const T8_LEGAL_STATUSES = ['open', 'under_review', 'resolved', 'closed'];
+
+/** Allow the module to remain readable until its additive migration is run. */
+function t8_legal_has_case_metadata(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW COLUMNS FROM team8_legal_cases LIKE 'department_id'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+$legalHasCaseMetadata = t8_legal_has_case_metadata($pdo);
 
 /** Fetch one legal case with assignee name, or null. */
 function t8_legal_case_fetch(PDO $pdo, int $id): ?array
@@ -36,18 +50,22 @@ function t8_legal_case_fetch(PDO $pdo, int $id): ?array
         'SELECT lc.*, u.full_name AS assigned_to_name
          FROM team8_legal_cases lc
          JOIN users u ON u.id = lc.assigned_to
-         WHERE lc.id = :id LIMIT 1'
+         WHERE lc.id = :id' . (t8_has_role('admin') ? '' : ' AND lc.assigned_to = :assigned_to') . ' LIMIT 1'
     );
-    $stmt->execute(['id' => $id]);
+    $params = ['id' => $id];
+    if (!t8_has_role('admin')) { $params['assigned_to'] = t8_current_user_id(); }
+    $stmt->execute($params);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
 }
 
 $assignees = $pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC);
+$departments = $legalHasCaseMetadata ? $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) : [];
 
 switch ($action) {
     case 'create':
     case 'edit':
+        t8_require_role(['admin']);
         $caseId = $action === 'edit' ? (int) ($_GET['id'] ?? 0) : 0;
         $existing = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
         if ($action === 'edit' && !$existing) {
@@ -58,17 +76,23 @@ switch ($action) {
         $formValues = $existing !== null
             ? [
                 'title'       => $existing['title'],
+                'subject'     => (string) ($existing['subject'] ?? ''),
+                'department_id' => (string) ($existing['department_id'] ?? ''),
                 'status'      => $existing['status'],
                 'filed_date'  => $existing['filed_date'],
+                'deadline'    => (string) ($existing['deadline'] ?? ''),
                 'assigned_to' => (string) $existing['assigned_to'],
             ]
-            : ['title' => '', 'status' => 'open', 'filed_date' => date('Y-m-d'), 'assigned_to' => (string) $currentUserId];
+            : ['title' => '', 'subject' => '', 'department_id' => '', 'status' => 'open', 'filed_date' => date('Y-m-d'), 'deadline' => '', 'assigned_to' => (string) $currentUserId];
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $formValues = [
                 'title'       => trim((string) ($_POST['title'] ?? '')),
+                'subject'     => trim((string) ($_POST['subject'] ?? '')),
+                'department_id' => (string) ($_POST['department_id'] ?? ''),
                 'status'      => (string) ($_POST['status'] ?? 'open'),
                 'filed_date'  => trim((string) ($_POST['filed_date'] ?? '')),
+                'deadline'    => trim((string) ($_POST['deadline'] ?? '')),
                 'assigned_to' => (string) ($_POST['assigned_to'] ?? ''),
             ];
 
@@ -84,35 +108,44 @@ switch ($action) {
                 if ($formValues['filed_date'] === '' || strtotime($formValues['filed_date']) === false) {
                     $errors[] = 'Filed date must be a valid date.';
                 }
+                if ($formValues['deadline'] !== '' && strtotime($formValues['deadline']) === false) { $errors[] = 'Deadline must be a valid date.'; }
                 if (!$formValues['assigned_to']) {
                     $errors[] = 'Please assign this case to someone.';
                 }
 
                 if (!$errors) {
                     if ($action === 'create') {
-                        $stmt = $pdo->prepare(
-                            'INSERT INTO team8_legal_cases (assigned_to, title, status, filed_date)
-                             VALUES (:assigned_to, :title, :status, :filed_date)'
-                        );
-                        $stmt->execute([
+                        $sql = $legalHasCaseMetadata
+                            ? 'INSERT INTO team8_legal_cases (assigned_to, title, subject, department_id, status, filed_date, deadline) VALUES (:assigned_to, :title, :subject, :department_id, :status, :filed_date, :deadline)'
+                            : 'INSERT INTO team8_legal_cases (assigned_to, title, status, filed_date) VALUES (:assigned_to, :title, :status, :filed_date)';
+                        $params = [
                             'assigned_to' => (int) $formValues['assigned_to'],
                             'title'       => $formValues['title'],
                             'status'      => $formValues['status'],
                             'filed_date'  => $formValues['filed_date'],
-                        ]);
+                        ];
+                        if ($legalHasCaseMetadata) {
+                            $params += ['subject' => $formValues['subject'] !== '' ? $formValues['subject'] : null, 'department_id' => $formValues['department_id'] !== '' ? (int) $formValues['department_id'] : null, 'deadline' => $formValues['deadline'] !== '' ? $formValues['deadline'] : null];
+                        }
+                        $pdo->prepare($sql)->execute($params);
                         $newId = (int) $pdo->lastInsertId();
                         t8_audit_log($pdo, $currentUserId, 'legal_case', $newId, 'create');
                         t8_flash_set('success', 'Legal case created.');
                     } else {
-                        $pdo->prepare(
-                            'UPDATE team8_legal_cases SET assigned_to = :assigned_to, title = :title, status = :status, filed_date = :filed_date WHERE id = :id'
-                        )->execute([
+                        $sql = $legalHasCaseMetadata
+                            ? 'UPDATE team8_legal_cases SET assigned_to = :assigned_to, title = :title, subject = :subject, department_id = :department_id, status = :status, filed_date = :filed_date, deadline = :deadline WHERE id = :id'
+                            : 'UPDATE team8_legal_cases SET assigned_to = :assigned_to, title = :title, status = :status, filed_date = :filed_date WHERE id = :id';
+                        $params = [
                             'assigned_to' => (int) $formValues['assigned_to'],
                             'title'       => $formValues['title'],
                             'status'      => $formValues['status'],
                             'filed_date'  => $formValues['filed_date'],
                             'id'          => $caseId,
-                        ]);
+                        ];
+                        if ($legalHasCaseMetadata) {
+                            $params += ['subject' => $formValues['subject'] !== '' ? $formValues['subject'] : null, 'department_id' => $formValues['department_id'] !== '' ? (int) $formValues['department_id'] : null, 'deadline' => $formValues['deadline'] !== '' ? $formValues['deadline'] : null];
+                        }
+                        $pdo->prepare($sql)->execute($params);
                         t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'update');
                         t8_flash_set('success', 'Legal case updated.');
                     }
@@ -124,6 +157,7 @@ switch ($action) {
 
     case 'archive':
     case 'restore':
+        t8_require_role(['admin']);
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             http_response_code(405);
             redirect(page_url('legal'));
@@ -153,8 +187,10 @@ switch ($action) {
             t8_flash_set('danger', 'Legal case not found.');
             redirect(page_url('legal'));
         }
+        t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'view_documents');
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['form'] ?? '') === 'attach') {
+            t8_require_role(['admin']);
             $documentId = (int) ($_POST['document_id'] ?? 0);
             $description = trim((string) ($_POST['description'] ?? ''));
 
@@ -177,9 +213,10 @@ switch ($action) {
         }
 
         $attachedDocs = $pdo->prepare(
-            'SELECT ld.*, d.title AS document_title
+            'SELECT ld.*, d.title AS document_title, v.id AS version_id
              FROM team8_legal_documents ld
              JOIN team8_documents d ON d.id = ld.document_id
+             JOIN team8_document_versions v ON v.document_id = d.id AND v.version_no = d.current_version
              WHERE ld.case_id = :case_id
              ORDER BY ld.created_at DESC'
         );
@@ -192,6 +229,7 @@ switch ($action) {
         break;
 
     case 'detach_document':
+        t8_require_role(['admin']);
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             http_response_code(405);
             redirect(page_url('legal'));
@@ -223,10 +261,12 @@ if ($showList) {
         $where .= ' AND lc.status = :status';
         $params['status'] = $statusFilter;
     }
+    if (!$isAdmin) { $where .= ' AND lc.assigned_to = :assigned_to'; $params['assigned_to'] = $currentUserId; }
     $stmt = $pdo->prepare(
-        "SELECT lc.*, u.full_name AS assigned_to_name
+        "SELECT lc.*, u.full_name AS assigned_to_name" . ($legalHasCaseMetadata ? ', dep.name AS department_name' : '') . "
          FROM team8_legal_cases lc
          JOIN users u ON u.id = lc.assigned_to
+         " . ($legalHasCaseMetadata ? 'LEFT JOIN departments dep ON dep.id = lc.department_id' : '') . "
          WHERE $where
          ORDER BY lc.filed_date DESC"
     );
@@ -238,15 +278,15 @@ function t8_legal_status_badge(string $status): string
 {
     $map = [
         'open'        => 't8-badge-pending',
-        'in_progress' => 't8-badge-pending',
-        'closed'      => 't8-badge-approved',
-        'dismissed'   => 't8-badge-rejected',
+        'under_review' => 't8-badge-pending',
+        'resolved'     => 't8-badge-approved',
+        'closed'       => 't8-badge-archived',
     ];
     return $map[$status] ?? 't8-badge-pending';
 }
 ?>
 <h1>Legal Management</h1>
-<p class="t8-help-text">Track legal cases and their supporting documents. Administrator only.</p>
+<p class="t8-help-text"><?= $isAdmin ? 'Track legal cases and their supporting documents.' : 'View legal cases assigned to you.' ?></p>
 
 <?php foreach ($errors as $error): ?>
     <div class="t8-alert t8-alert-danger"><?= e($error) ?></div>
@@ -269,6 +309,16 @@ function t8_legal_status_badge(string $status): string
                        value="<?= e($formValues['title']) ?>" required>
             </div>
 
+            <?php if ($legalHasCaseMetadata): ?><div class="t8-field">
+                <label class="t8-label" for="subject">Subject</label>
+                <input class="t8-input" type="text" id="subject" name="subject" value="<?= e($formValues['subject']) ?>">
+            </div>
+
+            <div class="t8-field">
+                <label class="t8-label" for="department_id">Department</label>
+                <select class="t8-select" id="department_id" name="department_id"><option value="">Not assigned</option><?php foreach ($departments as $department): ?><option value="<?= e((string) $department['id']) ?>" <?= (string) $department['id'] === $formValues['department_id'] ? 'selected' : '' ?>><?= e($department['name']) ?></option><?php endforeach; ?></select>
+            </div><?php endif; ?>
+
             <div class="t8-field">
                 <label class="t8-label" for="status">Status</label>
                 <select class="t8-select" id="status" name="status" required>
@@ -285,6 +335,11 @@ function t8_legal_status_badge(string $status): string
                 <input class="t8-input" type="date" id="filed_date" name="filed_date"
                        value="<?= e($formValues['filed_date']) ?>" required>
             </div>
+
+            <?php if ($legalHasCaseMetadata): ?><div class="t8-field">
+                <label class="t8-label" for="deadline">Deadline</label>
+                <input class="t8-input" type="date" id="deadline" name="deadline" value="<?= e($formValues['deadline']) ?>">
+            </div><?php endif; ?>
 
             <div class="t8-field">
                 <label class="t8-label" for="assigned_to">Assigned To</label>
@@ -318,9 +373,9 @@ function t8_legal_status_badge(string $status): string
             <h2 class="t8-card-title"><?= e($case['title']) ?> — Attached Documents</h2>
         </div>
 
-        <?php if ($availableDocs === []): ?>
+        <?php if ($isAdmin && $availableDocs === []): ?>
             <div class="t8-empty">No documents exist yet. Upload one in Document Management first.</div>
-        <?php else: ?>
+        <?php elseif ($isAdmin): ?>
             <form method="post" action="<?= e(page_url('legal', ['action' => 'documents', 'id' => $caseId])) ?>"
                   style="padding: 0 var(--t8-space-4) var(--t8-space-4);" novalidate>
                 <?= t8_csrf_field() ?>
@@ -364,11 +419,12 @@ function t8_legal_status_badge(string $status): string
                                 <td><?= e((string) ($ad['description'] ?? '—')) ?></td>
                                 <td><?= e(format_date($ad['created_at'], 'M d, Y g:i A')) ?></td>
                                 <td style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <a class="t8-btn t8-btn-outline t8-btn-sm"
+                                    <?php if ($isAdmin): ?><a class="t8-btn t8-btn-outline t8-btn-sm"
                                        href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $ad['document_id']])) ?>">
                                         <i class="fa-solid fa-eye"></i> View
-                                    </a>
-                                    <form method="post" action="<?= e(page_url('legal', ['action' => 'detach_document'])) ?>"
+                                    </a><?php endif; ?>
+                                    <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $ad['version_id']])) ?>"><i class="fa-solid fa-download"></i> Download</a>
+                                    <?php if ($isAdmin): ?><form method="post" action="<?= e(page_url('legal', ['action' => 'detach_document'])) ?>"
                                           onsubmit="return confirm('Remove this document from the case?');">
                                         <?= t8_csrf_field() ?>
                                         <input type="hidden" name="link_id" value="<?= e((string) $ad['id']) ?>">
@@ -376,7 +432,7 @@ function t8_legal_status_badge(string $status): string
                                         <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
                                             <i class="fa-solid fa-xmark"></i> Remove
                                         </button>
-                                    </form>
+                                    </form><?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -389,9 +445,9 @@ function t8_legal_status_badge(string $status): string
 <?php else: ?>
 
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
-        <a class="t8-btn t8-btn-accent" href="<?= e(page_url('legal', ['action' => 'create'])) ?>">
+        <?php if ($isAdmin): ?><a class="t8-btn t8-btn-accent" href="<?= e(page_url('legal', ['action' => 'create'])) ?>">
             <i class="fa-solid fa-plus"></i> New Legal Case
-        </a>
+        </a><?php endif; ?>
         <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['archived' => $archivedFilter ? '0' : '1'])) ?>">
             <i class="fa-solid fa-box-archive"></i> <?= $archivedFilter ? 'View Active' : 'View Archived' ?>
         </a>
@@ -409,8 +465,11 @@ function t8_legal_status_badge(string $status): string
                     <thead>
                         <tr>
                             <th>Title</th>
+                            <?php if ($legalHasCaseMetadata): ?><th>Subject</th>
+                            <th>Department</th><?php endif; ?>
                             <th>Status</th>
                             <th>Filed Date</th>
+                            <?php if ($legalHasCaseMetadata): ?><th>Deadline</th><?php endif; ?>
                             <th>Assigned To</th>
                             <th>Actions</th>
                         </tr>
@@ -419,18 +478,21 @@ function t8_legal_status_badge(string $status): string
                         <?php foreach ($cases as $c): ?>
                             <tr>
                                 <td><?= e($c['title']) ?></td>
+                                <?php if ($legalHasCaseMetadata): ?><td><?= e((string) ($c['subject'] ?? '—')) ?></td>
+                                <td><?= e((string) ($c['department_name'] ?? '—')) ?></td><?php endif; ?>
                                 <td>
                                     <span class="t8-badge <?= t8_legal_status_badge($c['status']) ?>">
                                         <?= e(ucwords(str_replace('_', ' ', $c['status']))) ?>
                                     </span>
                                 </td>
                                 <td><?= e(format_date($c['filed_date'], 'M d, Y')) ?></td>
+                                <?php if ($legalHasCaseMetadata): ?><td><?= $c['deadline'] ? e(format_date($c['deadline'], 'M d, Y')) : '—' ?></td><?php endif; ?>
                                 <td><?= e($c['assigned_to_name']) ?></td>
                                 <td style="display:flex; gap:8px; flex-wrap:wrap;">
                                     <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $c['id']])) ?>">
                                         <i class="fa-solid fa-paperclip"></i> Documents
                                     </a>
-                                    <?php if (!$archivedFilter): ?>
+                                    <?php if ($isAdmin && !$archivedFilter): ?>
                                         <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('legal', ['action' => 'edit', 'id' => $c['id']])) ?>">
                                             <i class="fa-solid fa-pen"></i> Edit
                                         </a>
@@ -442,7 +504,7 @@ function t8_legal_status_badge(string $status): string
                                                 <i class="fa-solid fa-box-archive"></i> Archive
                                             </button>
                                         </form>
-                                    <?php else: ?>
+                                    <?php elseif ($isAdmin): ?>
                                         <form method="post" action="<?= e(page_url('legal', ['action' => 'restore'])) ?>">
                                             <?= t8_csrf_field() ?>
                                             <input type="hidden" name="id" value="<?= e((string) $c['id']) ?>">

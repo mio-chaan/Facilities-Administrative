@@ -1,0 +1,57 @@
+/* Records Retention dashboard styling. Business logic remains in the module. */
+.t8-retention-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--t8-space-4);
+    margin-bottom: 20px;
+}
+.t8-retention-heading h1 { margin-bottom: 2px; }
+.t8-retention-heading .t8-help-text { margin: 0; }
+.t8-retention-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+.t8-retention-kpi { display: flex; align-items: center; gap: 13px; min-width: 0; min-height: 92px; padding: 16px; background: var(--t8-surface); border: 1px solid var(--t8-border); border-radius: 12px; box-shadow: var(--t8-shadow-card); }
+.t8-retention-kpi-icon { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border-radius: 12px; background: #f8e7e7; color: var(--t8-primary); }
+.t8-retention-kpi-green .t8-retention-kpi-icon { background: #e5f5e8; color: #3a9b50; }
+.t8-retention-kpi-orange .t8-retention-kpi-icon { background: #fff0dc; color: #e77b16; }
+.t8-retention-kpi-gray .t8-retention-kpi-icon { background: #eef0f3; color: #66717c; }
+.t8-retention-kpi span, .t8-retention-kpi small { display: block; color: var(--t8-text-muted); font-size: .68rem; }
+.t8-retention-kpi strong { display: block; margin: 2px 0; color: var(--t8-ink); font-size: 1.4rem; line-height: 1.1; }
+.t8-retention-kpi div:last-child { min-width: 0; }
+.t8-retention-kpi span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t8-retention-summary-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr); gap: 16px; margin-bottom: 20px; }
+.t8-retention-summary-grid .t8-card { margin: 0 !important; }
+.t8-retention-summary-grid .t8-card-title i { margin-right: 6px; color: var(--t8-primary); }
+.t8-retention-summary-grid .t8-card-link { white-space: nowrap; }
+.t8-retention-ending-card .t8-table-wrap { border: 0; }
+.t8-retention-ending-card .t8-table { min-width: 0; }
+.t8-retention-deadline { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--t8-border); font-size: .82rem; }
+.t8-retention-deadline:last-child { border-bottom: 0; }
+.t8-retention-deadline strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t8-retention-deadline > span:last-child { color: var(--t8-text-muted); white-space: nowrap; }
+.t8-retention-severity { width: 8px; height: 8px; border-radius: 50%; background: #f2c94c; }
+.t8-retention-severity.is-critical { background: var(--t8-danger); }
+.t8-retention-severity.is-warning { background: #f2994a; }
+.t8-retention-empty { display: flex; align-items: center; gap: 10px; padding: 22px 0; color: var(--t8-text-muted); font-size: .82rem; }
+.t8-retention-empty i { color: var(--t8-success); font-size: 1.25rem; }
+.t8-compliance-score { display: flex; align-items: baseline; gap: 8px; margin: 8px 0 12px; }
+.t8-compliance-score strong { color: var(--t8-ink); font-size: 2rem; line-height: 1; }
+.t8-compliance-score span { color: var(--t8-text-muted); font-size: .78rem; }
+.t8-compliance-bar { height: 8px; overflow: hidden; border-radius: 99px; background: #edf0f2; }
+.t8-compliance-bar span { display: block; height: 100%; border-radius: inherit; background: var(--t8-success); }
+.t8-compliance-meta { display: flex; justify-content: space-between; gap: 10px; margin-top: 14px; color: var(--t8-text-muted); font-size: .72rem; }
+.t8-compliance-meta i { color: var(--t8-success); }
+.t8-compliance-meta span:last-child i { color: #f2994a; }
+#retention-records .t8-card-header { margin-bottom: 0; }
+
+@media (max-width: 999px) {
+    .t8-retention-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .t8-retention-summary-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+    .t8-retention-heading { flex-direction: column; }
+    .t8-retention-heading .t8-btn { width: 100%; justify-content: center; }
+    .t8-retention-kpi-grid { grid-template-columns: 1fr; }
+    .t8-retention-deadline { grid-template-columns: 8px minmax(0, 1fr); }
+    .t8-retention-deadline > span:last-child { grid-column: 2; }
+    .t8-compliance-meta { flex-direction: column; }
+}

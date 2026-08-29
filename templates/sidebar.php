@@ -10,6 +10,8 @@ declare(strict_types=1);
 
 $t8Routes = require __DIR__ . '/../app/config/routes.php';
 $active   = current_page();
+$t8CurrentRole = function_exists('t8_current_role') ? t8_current_role() : null;
+$t8LegalOfficerHiddenPages = ['retention', 'legal', 'contracts'];
 
 $t8NavIcons = [
     'dashboard'   => 'fa-gauge-high',
@@ -20,6 +22,7 @@ $t8NavIcons = [
     'retention'   => 'fa-box-archive',
     'legal'       => 'fa-scale-balanced',
     'contracts'   => 'fa-file-contract',
+    'audit'       => 'fa-clipboard-list',
 ];
 ?>
 <aside class="t8-sidebar" id="t8Sidebar">
@@ -39,8 +42,13 @@ $t8NavIcons = [
         <?php if (!empty($route['hidden'])): ?>
             <?php continue; ?>
         <?php endif; ?>
+        <?php if ($t8CurrentRole === 'legal_officer' && in_array($key, $t8LegalOfficerHiddenPages, true)): ?>
+            <?php continue; ?>
+        <?php endif; ?>
             <a href="<?= e(page_url($key)) ?>"
-               class="t8-sidebar-link<?= $active === $key ? ' t8-sidebar-link-active' : '' ?>">
+                    class="t8-sidebar-link<?= $active === $key ? ' t8-sidebar-link-active' : '' ?>"
+                    title="<?= e($route['label']) ?>"
+                    aria-label="<?= e($route['label']) ?>">
                 <i class="fa-solid <?= e($t8NavIcons[$key] ?? 'fa-circle-dot') ?>"></i>
                 <span class="t8-sidebar-label"><?= e($route['label']) ?></span>
             </a>

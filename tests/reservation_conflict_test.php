@@ -8,7 +8,12 @@ $pdo->exec("CREATE TABLE team8_reservations (
  user_id INTEGER,
  start_time TEXT,
  end_time TEXT,
- status TEXT
+ schedule TEXT,
+ expected_return_date TEXT,
+ status TEXT,
+ archived_at TEXT,
+ created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+ cancellation_requested_at TEXT
 );
 CREATE TABLE team8_facilities (
  id INTEGER PRIMARY KEY,
@@ -16,9 +21,11 @@ CREATE TABLE team8_facilities (
  facility_type TEXT,
  location TEXT,
  capacity INTEGER,
+ maintenance_status TEXT DEFAULT 'operational',
  status TEXT
 );
 CREATE TABLE users (id INTEGER PRIMARY KEY, full_name TEXT);");
+$pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'));
 
 $pdo->exec("INSERT INTO team8_facilities (id,name,facility_type,location,capacity,status) VALUES (1,'Ram-Yum','Area','Main',100,'active')");
 $pdo->exec("INSERT INTO users (id,full_name) VALUES (1,'Dev Tester')");

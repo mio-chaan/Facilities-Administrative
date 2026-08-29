@@ -32,7 +32,7 @@ $notifications = t8_all_notifications($pdo, $currentUserId, 200);
                 <div class="t8-notification-item">
                     <i class="fa-solid fa-bell"></i>
                     <div>
-                        <p><?= e((string) $n['message']) ?></p>
+                        <?php if (!empty($n['target_url'])): ?><p><a href="<?= e((string) $n['target_url']) ?>"><?= e((string) $n['message']) ?></a></p><?php else: ?><p><?= e((string) $n['message']) ?></p><?php endif; ?>
                         <time><?= e(format_date((string) $n['created_at'], 'M d, Y g:i A')) ?></time>
                     </div>
                 </div>

@@ -10,10 +10,6 @@
 declare(strict_types=1);
 
 switch ($action) {
-    case 'generate':
-        require __DIR__ . '/generate.php';
-        break;
-
     case 'incident_report_new':
     case 'incident_report_view':
     case 'incident_report_status':

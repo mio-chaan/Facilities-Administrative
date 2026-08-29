@@ -194,6 +194,10 @@ document.addEventListener("DOMContentLoaded", function () {
             if (itemEl.classList.contains("t8-notif-item-unread")) {
                 markRead(itemEl.getAttribute("data-notif-id"), itemEl);
             }
+            var targetUrl = itemEl.getAttribute("data-target-url");
+            if (targetUrl) {
+                window.location.assign(targetUrl);
+            }
         });
     });
 
