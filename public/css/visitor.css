@@ -63,6 +63,70 @@
 .t8-visitor-pending-card p:last-child { margin-bottom: 0; }
 .t8-visitor-pending-links { display: flex; flex-wrap: wrap; gap: 7px; }
 
+.t8-card#scheduled-visits {
+    overflow: visible;
+    position: relative;
+}
+.t8-card#scheduled-visits .t8-table-wrap {
+    overflow: visible;
+    overflow-x: auto;
+}
+.t8-card#scheduled-visits .t8-table,
+.t8-card#scheduled-visits .t8-table td,
+.t8-card#scheduled-visits .t8-table th {
+    overflow: visible;
+}
+.t8-card#scheduled-visits .t8-table td {
+    position: relative;
+}
+.t8-visitor-inline-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.t8-visitor-menu {
+    position: relative;
+    z-index: 1;
+}
+.t8-visitor-menu summary {
+    list-style: none;
+    cursor: pointer;
+}
+.t8-visitor-menu summary::-webkit-details-marker {
+    display: none;
+}
+.t8-visitor-menu-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 40;
+    min-width: 220px;
+    max-width: min(280px, calc(100vw - 32px));
+    padding: 12px;
+    border: 1px solid var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    background: #fff;
+    box-shadow: var(--t8-shadow-lift);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.t8-visitor-menu-panel form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.t8-visitor-menu-panel .t8-help-text {
+    margin: 0;
+}
+.t8-visitor-menu-panel .t8-input {
+    width: 100%;
+}
+.t8-visitor-menu-cancel {
+    width: 100%;
+    justify-content: center;
+}
 .t8-onsite-summary-card .t8-card-header {
     display: flex;
     align-items: center;

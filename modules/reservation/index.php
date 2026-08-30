@@ -1202,7 +1202,7 @@ if (!$showForm) {
                 <div class="t8-field" data-reservation-field="participants">
                     <label class="t8-label" for="expected_participants">Participants</label>
                     <input class="t8-input" type="number" id="expected_participants" name="expected_participants" min="1"
-                           value="<?= e($formValues['expected_participants']) ?>" placeholder="Optional headcount">
+                           value="<?= e($formValues['expected_participants']) ?>" placeholder="Headcount">
                 </div>
 
                 <div class="t8-field" data-reservation-field="quantity">
@@ -1489,7 +1489,7 @@ if (!$showForm) {
                                     <td><?= e((string) ($r['key_person'] ?? '-')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
-                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
+                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e($r['status'] === 'cancellation_pending' ? 'Pending' : ucfirst($r['status'])) ?></span></td>
                                     <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
                                         <?php if ($r['has_conflict']): ?>
                                             <span class="t8-conflict-indicator" title="Time Conflict">
@@ -1562,7 +1562,7 @@ if (!$showForm) {
                                     <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
-                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
+                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e($r['status'] === 'cancellation_pending' ? 'Pending' : ucfirst($r['status'])) ?></span></td>
                                     <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
                                         <?php if ($r['has_conflict']): ?>
                                             <span class="t8-conflict-indicator" title="Time Conflict">
@@ -1672,7 +1672,7 @@ if (!$showForm) {
                                     <td><?= e((string) ($r['requester_name'] ?? '—')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
-                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e(ucfirst($r['status'])) ?></span></td>
+                                    <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e($r['status'] === 'cancellation_pending' ? 'Pending' : ucfirst($r['status'])) ?></span></td>
                                     <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
                                         <?php if ($r['has_conflict']): ?>
                                             <span class="t8-conflict-indicator" title="Time Conflict">

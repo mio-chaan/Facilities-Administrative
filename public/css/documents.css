@@ -62,16 +62,25 @@
 .t8-docs-search input { border: none; background: transparent; outline: none; font-family: inherit; font-size: 0.88rem; width: 100%; }
 
 /* ---- Two-column responsive grid (Second / Third sections) ---- */
+.t8-docs-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
+    gap: var(--t8-space-4);
+    align-items: start;
+}
+.t8-docs-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--t8-space-4);
+}
 .t8-docs-grid-2 {
     display: grid;
     grid-template-columns: 1fr;
     gap: var(--t8-space-4);
     align-items: start;
 }
-.t8-docs-primary-grid { grid-template-columns: minmax(0, .9fr) minmax(0, 1.4fr); }
-.t8-docs-secondary-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-@media (min-width: 900px) {
-    .t8-docs-grid-2 { grid-template-columns: 1fr 1fr; }
+@media (max-width: 899px) {
+    .t8-docs-layout { grid-template-columns: 1fr; }
 }
 
 @media (min-width: 640px) and (max-width: 899px) {

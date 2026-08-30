@@ -613,32 +613,44 @@ if (!$showForm) {
                                 <td><?= e((string) ($v['visitor_type'] ?? '—')) ?></td>
                                 <td><?= e($v['purpose']) ?></td>
                                 <td><?= e(format_date($v['scheduled_date'], 'M d, Y g:i A')) ?></td>
-                                <td style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <form method="post" action="<?= e(page_url('visitor', ['action' => 'reschedule'])) ?>">
-                                        <?= t8_csrf_field() ?>
-                                        <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
-                                        <input class="t8-input" type="datetime-local" name="scheduled_date"
-                                               min="<?= e(date('Y-m-d\TH:i')) ?>"
-                                               value="<?= e(str_replace(' ', 'T', substr((string) $v['scheduled_date'], 0, 16))) ?>" required>
-                                        <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">
-                                            <i class="fa-solid fa-calendar-pen"></i> Change Schedule
-                                        </button>
-                                    </form>
-                                    <form method="post" action="<?= e(page_url('visitor', ['action' => 'checkin'])) ?>">
-                                        <?= t8_csrf_field() ?>
-                                        <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
-                                        <button class="t8-btn t8-btn-success t8-btn-sm" type="submit">
-                                            <i class="fa-solid fa-right-to-bracket"></i> Check In
-                                        </button>
-                                    </form>
-                                    <form method="post" action="<?= e(page_url('visitor', ['action' => 'cancel'])) ?>"
-                                          onsubmit="return confirm('Cancel this scheduled visit?');">
-                                        <?= t8_csrf_field() ?>
-                                        <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
-                                        <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                            <i class="fa-solid fa-xmark"></i> Cancel
-                                        </button>
-                                    </form>
+                                <td>
+                                    <div class="t8-visitor-inline-actions">
+                                        <form method="post" action="<?= e(page_url('visitor', ['action' => 'checkin'])) ?>">
+                                            <?= t8_csrf_field() ?>
+                                            <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
+                                            <button class="t8-btn t8-btn-success t8-btn-sm" type="submit">
+                                                <i class="fa-solid fa-right-to-bracket"></i> Check In
+                                            </button>
+                                        </form>
+
+                                        <details class="t8-visitor-menu">
+                                            <summary class="t8-btn t8-btn-outline t8-btn-sm" aria-label="More actions">
+                                                <i class="fa-solid fa-ellipsis-vertical"></i>
+                                            </summary>
+                                            <div class="t8-visitor-menu-panel">
+                                                <form method="post" action="<?= e(page_url('visitor', ['action' => 'reschedule'])) ?>">
+                                                    <?= t8_csrf_field() ?>
+                                                    <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
+                                                    <label class="t8-help-text" for="reschedule-<?= e((string) $v['id']) ?>">New schedule</label>
+                                                    <input id="reschedule-<?= e((string) $v['id']) ?>" class="t8-input" type="datetime-local" name="scheduled_date"
+                                                           min="<?= e(date('Y-m-d\TH:i')) ?>"
+                                                           value="<?= e(str_replace(' ', 'T', substr((string) $v['scheduled_date'], 0, 16))) ?>" required>
+                                                    <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">
+                                                        <i class="fa-solid fa-calendar-pen"></i> Change Schedule
+                                                    </button>
+                                                </form>
+
+                                                <form method="post" action="<?= e(page_url('visitor', ['action' => 'cancel'])) ?>"
+                                                      onsubmit="return confirm('Cancel this scheduled visit?');">
+                                                    <?= t8_csrf_field() ?>
+                                                    <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
+                                                    <button class="t8-btn t8-btn-danger t8-btn-sm t8-visitor-menu-cancel" type="submit">
+                                                        <i class="fa-solid fa-xmark"></i> Cancel Visit
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </details>
+                                    </div>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
