@@ -63,54 +63,92 @@
 .t8-visitor-pending-card p:last-child { margin-bottom: 0; }
 .t8-visitor-pending-links { display: flex; flex-wrap: wrap; gap: 7px; }
 
-.t8-card#scheduled-visits {
-    overflow: visible;
+/* =========================================================
+   FIX — Scheduled / Upcoming Visits table.
+   ROOT CAUSE of the phantom vertical scrollbar: the previous version
+   of this block set `overflow: visible;` (shorthand — both axes) and
+   then immediately overrode `overflow-x: auto;` on the very next
+   rule. Per the CSS spec, when one axis is explicitly non-visible
+   while the other is left `visible`, the visible axis silently
+   computes to `auto` too — so overflow-y ended up `auto` again,
+   recreating the scrollbar and clipping the reschedule popover no
+   matter what z-index it had.
+   FIX: only ever touch overflow-x here. overflow-y is left at the
+   browser default (visible) with nothing to fight it.
+   The table header's `position: sticky; top: 0` (from
+   public/css/components.css, meant for tables that DO scroll
+   vertically) is also disabled here, since it was sticking to the
+   top of what had become a tiny scroll box and overlapping the row
+   beneath it. This card's wrap no longer scrolls vertically, so
+   there is nothing for `sticky` to usefully stick to.
+   ========================================================= */
+#scheduled-visits {
     position: relative;
 }
-.t8-card#scheduled-visits .t8-table-wrap {
-    overflow: visible;
+#scheduled-visits .t8-table-wrap {
     overflow-x: auto;
+    /* deliberately no overflow-y declaration — do not add one */
 }
-.t8-card#scheduled-visits .t8-table,
-.t8-card#scheduled-visits .t8-table td,
-.t8-card#scheduled-visits .t8-table th {
-    overflow: visible;
+#scheduled-visits .t8-table th {
+    position: static;
 }
-.t8-card#scheduled-visits .t8-table td {
-    position: relative;
+#scheduled-visits .t8-table th,
+#scheduled-visits .t8-table td {
+    padding: 14px 16px;
+    line-height: 1.4;
+    vertical-align: middle;
 }
+
 .t8-visitor-inline-actions {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
 }
+
+/* ---- Meatball menu trigger ----
+   Plain button now (was a <summary> inside <details>) — the popover
+   itself is driven entirely by JS (see public/js/visitor.js), which
+   portals it to <body> on open, so nothing about its positioning
+   depends on <details>/<summary> native disclosure behavior anymore. */
 .t8-visitor-menu {
     position: relative;
-    z-index: 1;
+    display: inline-flex;
 }
-.t8-visitor-menu summary {
-    list-style: none;
-    cursor: pointer;
+.t8-visitor-menu-trigger {
+    line-height: 1;
 }
-.t8-visitor-menu summary::-webkit-details-marker {
-    display: none;
-}
+
+/* ---- Popover panel ----
+   Hidden (display:none) in its normal DOM position by default, so it
+   never affects row layout or height. JS adds `.t8-portal-open` and
+   moves the element to <body> with `position: fixed` + JS-computed
+   top/left when opened — fixed positioning is relative to the
+   viewport and is NOT affected by any ancestor's overflow, so no
+   table/card clipping setting can ever hide it again. */
 .t8-visitor-menu-panel {
-    position: absolute;
-    right: 0;
-    top: calc(100% + 8px);
-    z-index: 40;
-    min-width: 220px;
-    max-width: min(280px, calc(100vw - 32px));
-    padding: 12px;
+    display: none;
+    min-width: 240px;
+    max-width: min(300px, calc(100vw - 24px));
+    padding: 14px;
     border: 1px solid var(--t8-border);
     border-radius: var(--t8-radius-sm);
     background: #fff;
     box-shadow: var(--t8-shadow-lift);
-    display: flex;
     flex-direction: column;
     gap: 10px;
+}
+.t8-visitor-menu-panel.t8-portal-open {
+    display: flex;
+    position: fixed;
+    z-index: 1000;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity .12s ease, transform .12s ease;
+}
+.t8-visitor-menu-panel.t8-portal-open.t8-portal-visible {
+    opacity: 1;
+    transform: translateY(0);
 }
 .t8-visitor-menu-panel form {
     display: flex;
@@ -127,6 +165,7 @@
     width: 100%;
     justify-content: center;
 }
+
 .t8-onsite-summary-card .t8-card-header {
     display: flex;
     align-items: center;

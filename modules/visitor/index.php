@@ -37,6 +37,19 @@
  *     reschedule, and the full visitor log/stats. There is
  *     intentionally no staff-vs-admin distinction left in this file.
  *
+ * UI FIX (Scheduled / Upcoming Visits table):
+ *   - The meatball ("more actions") control per row used to be a
+ *     native <details>/<summary> disclosure with an absolutely
+ *     positioned panel. It got clipped by the table wrap's overflow
+ *     and forced a vertical scrollbar (root cause was in
+ *     public/css/visitor.css — see that file's notes). It's now a
+ *     plain <button class="t8-visitor-menu-trigger"> + a
+ *     <div class="t8-visitor-menu-panel">, with public/js/visitor.js
+ *     portaling the panel to <body> and positioning it with
+ *     `position: fixed` on open, so it can never be clipped again.
+ *     The forms inside (reschedule / cancel) and their CSRF fields
+ *     are completely unchanged.
+ *
  * Status lifecycle: scheduled -> checked_in -> checked_out
  *                              \-> cancelled
  *
@@ -623,10 +636,18 @@ if (!$showForm) {
                                             </button>
                                         </form>
 
-                                        <details class="t8-visitor-menu">
-                                            <summary class="t8-btn t8-btn-outline t8-btn-sm" aria-label="More actions">
+                                        <!--
+                                            UI FIX: was <details class="t8-visitor-menu"><summary>...
+                                            Now a plain button + div so public/js/visitor.js can portal
+                                            the panel to <body> on open (position: fixed) instead of it
+                                            being absolutely positioned inside a clipped table cell.
+                                            The forms below (reschedule / cancel), including their CSRF
+                                            fields, are byte-for-byte unchanged.
+                                        -->
+                                        <div class="t8-visitor-menu">
+                                            <button type="button" class="t8-btn t8-btn-outline t8-btn-sm t8-visitor-menu-trigger" aria-label="More actions">
                                                 <i class="fa-solid fa-ellipsis-vertical"></i>
-                                            </summary>
+                                            </button>
                                             <div class="t8-visitor-menu-panel">
                                                 <form method="post" action="<?= e(page_url('visitor', ['action' => 'reschedule'])) ?>">
                                                     <?= t8_csrf_field() ?>
@@ -649,7 +670,7 @@ if (!$showForm) {
                                                     </button>
                                                 </form>
                                             </div>
-                                        </details>
+                                        </div>
                                     </div>
                                 </td>
                             </tr>
