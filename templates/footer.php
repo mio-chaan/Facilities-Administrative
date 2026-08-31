@@ -27,6 +27,9 @@ $page = $page ?? current_page();
 <?php if ($page === 'documents'): ?>
     <script src="<?= e(asset('js/documents.js')) ?>"></script>
 <?php endif; ?>
+<?php if ($page === 'retention'): ?>
+    <script src="<?= e(asset('js/retention.js')) ?>"></script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/ai_widget.php'; ?>
 </body>

@@ -142,21 +142,28 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
 if (isset($_GET['ajax_filter']) && $_GET['page'] === 'audit') {
     header('Content-Type: application/json');
     t8_require_role(['admin']);
-    
+
     $action = trim((string) ($_GET['action'] ?? ''));
     $module = trim((string) ($_GET['module'] ?? ''));
     $pageSize = 10;
-    
+
     $params = [];
     $where = [];
     if ($action !== '') { $where[] = 'a.action = :action'; $params['action'] = $action; }
     if ($module !== '') { $where[] = 'a.entity_type = :module'; $params['module'] = $module; }
     $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    
-    $stmt = $pdo->prepare("SELECT a.*, u.full_name FROM audit_logs a JOIN users u ON u.id = a.user_id $whereSql ORDER BY a.created_at DESC, a.id DESC LIMIT $pageSize");
+
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM audit_logs a $whereSql");
+    $countStmt->execute($params);
+    $totalLogs = (int) $countStmt->fetchColumn();
+    $totalPages = max(1, (int) ceil($totalLogs / $pageSize));
+    $currentPage = min(max(1, (int) ($_GET['audit_page'] ?? 1)), $totalPages);
+    $offset = ($currentPage - 1) * $pageSize;
+
+    $stmt = $pdo->prepare("SELECT a.*, u.full_name FROM audit_logs a JOIN users u ON u.id = a.user_id $whereSql ORDER BY a.created_at DESC, a.id DESC LIMIT $pageSize OFFSET $offset");
     $stmt->execute($params);
     $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
+
     $actionLabels = [
         '403_denied' => '403 Denied',
         'approve' => 'Approve',
@@ -177,11 +184,11 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'audit') {
         'toggle_maintenance' => 'Toggle Maintenance',
         'update' => 'Update',
     ];
-    
+
     $formatActionLabel = static function (string $value) use ($actionLabels): string {
         return $actionLabels[$value] ?? ucwords(str_replace('_', ' ', $value));
     };
-    
+
     $html = '';
     if (empty($logs)) {
         $html = '<tr class="t8-table-empty-row"><td colspan="6">No matching audit events.</td></tr>';
@@ -197,8 +204,25 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'audit') {
                 . '</tr>';
         }
     }
-    
-    echo json_encode(['html' => $html]);
+
+    $paginationHtml = '';
+    if ($totalPages > 1) {
+        ob_start();
+        ?>
+        <nav id="t8AuditPagination" class="t8-pagination" aria-label="Audit log pages">
+            <?php if ($currentPage > 1): ?>
+                <a class="t8-btn t8-btn-outline t8-btn-sm t8-audit-page-link" href="<?= e(base_url('index.php?page=audit&action=' . rawurlencode($action) . '&module=' . rawurlencode($module) . '&audit_page=' . ($currentPage - 1))) ?>" data-audit-page="<?= e((string) ($currentPage - 1)) ?>">Previous</a>
+            <?php endif; ?>
+            <span class="t8-help-text">Page <?= e((string) $currentPage) ?> of <?= e((string) $totalPages) ?></span>
+            <?php if ($currentPage < $totalPages): ?>
+                <a class="t8-btn t8-btn-outline t8-btn-sm t8-audit-page-link" href="<?= e(base_url('index.php?page=audit&action=' . rawurlencode($action) . '&module=' . rawurlencode($module) . '&audit_page=' . ($currentPage + 1))) ?>" data-audit-page="<?= e((string) ($currentPage + 1)) ?>">Next</a>
+            <?php endif; ?>
+        </nav>
+        <?php
+        $paginationHtml = (string) ob_get_clean();
+    }
+
+    echo json_encode(['html' => $html, 'pagination_html' => $paginationHtml]);
     exit;
 }
 

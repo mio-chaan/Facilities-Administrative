@@ -459,10 +459,7 @@ if (!$showForm) {
         'Checked-Out' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status = 'checked_out' AND DATE(check_out_time) = CURDATE()")->fetchColumn(),
         'Overdue Visitors' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status IN ('scheduled', 'checked_in') AND scheduled_date < NOW() - INTERVAL 1 DAY")->fetchColumn(),
     ];
-    // Visitor requests currently do not have a separate approval state;
-    // keep these explicit until that workflow is introduced.
-    $pendingVisitRequests = 0;
-    $visitorsRequiringAttention = 0;
+
 }
 ?>
 <div class="t8-visitor-heading">
@@ -491,18 +488,6 @@ if (!$showForm) {
                 </div>
             </section>
         <?php endforeach; ?>
-        <section class="t8-card t8-visitor-pending-card">
-            <div class="t8-card-header"><h2 class="t8-card-title">Pending Actions</h2></div>
-            <div class="t8-card-body">
-                <p><strong><?= e((string) $pendingVisitRequests) ?></strong> visit requests awaiting approval</p>
-                <p><strong><?= e((string) $visitorsRequiringAttention) ?></strong> visitors requiring attention</p>
-                <p class="t8-visitor-pending-links">
-                    <a href="#scheduled-visits">Review visit requests</a>
-                    <span aria-hidden="true">·</span>
-                    <a href="#visitor-log">View visitor logs</a>
-                </p>
-            </div>
-        </section>
     </div>
 <?php endif; ?>
 

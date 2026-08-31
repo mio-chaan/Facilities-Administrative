@@ -41,12 +41,10 @@ $stats = [
     'Visitors Today'       => 0,
     'Active Contracts'     => 0,
     'Documents'            => 0,
-    'Compliance Tasks'     => 0,
     'Open Legal Cases'     => 0,
 ];
 
 $statMeta = [
-    'Pending Reservations' => ['icon' => 'fa-calendar-check', 'variant' => ''],
     'Visitors Today'       => ['icon' => 'fa-id-card-clip',   'variant' => 't8-stat-icon-info'],
     'Active Contracts'     => ['icon' => 'fa-file-contract',  'variant' => 't8-stat-icon-success'],
     'Open Legal Cases'     => ['icon' => 'fa-scale-balanced', 'variant' => 't8-stat-icon-warning'],
@@ -54,11 +52,9 @@ $statMeta = [
 
 $statLinks = [
     'Total Facilities'      => page_url('facilities'),
-    'Pending Reservations' => page_url('reservation'),
     'Visitors Today'        => page_url('visitor'),
     'Active Contracts'      => page_url('contracts'),
     'Documents'             => page_url('documents'),
-    'Compliance Tasks'      => page_url('retention'),
     'Open Legal Cases'      => page_url('legal'),
 ];
 
@@ -104,10 +100,6 @@ try {
 
     $stats['Documents'] = (int) $pdo
         ->query('SELECT COUNT(*) FROM team8_documents WHERE deleted_at IS NULL')
-        ->fetchColumn();
-
-    $stats['Compliance Tasks'] = (int) $pdo
-        ->query("SELECT COUNT(*) FROM team8_compliance_checks WHERE result IN ('needs_review', 'non_compliant')")
         ->fetchColumn();
 
     $stats['Open Legal Cases'] = (int) $pdo
@@ -218,11 +210,6 @@ function t8_activity_label(string $action, string $entityType): string
             </div>
         <?php endif; ?>
     <?php endforeach; ?>
-    <div class="t8-card"><div class="t8-card-header"><h2 class="t8-card-title">Pending Actions</h2></div><div class="t8-card-body">
-        <p style="margin:0 0 8px"><strong><?= e((string) $stats['Pending Reservations']) ?></strong> reservation(s) awaiting approval</p>
-        <p style="margin:0 0 8px"><strong><?= e((string) $stats['Compliance Tasks']) ?></strong> compliance item(s) need review</p>
-        <p style="margin:0"><a href="<?= e(page_url('reservation')) ?>">Review reservations</a> · <a href="<?= e(page_url('audit')) ?>">View audit log</a></p>
-    </div></div>
 </div>
 
 <?php

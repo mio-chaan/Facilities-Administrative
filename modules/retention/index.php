@@ -405,25 +405,26 @@ function t8_retention_suggest_date(int $years): string
         <?php endif; ?>
     </div>
 
-    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+    <div id="t8RetentionToolbar" class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
         <a class="t8-btn t8-btn-accent" href="<?= e(page_url('retention', ['action' => 'create_record'])) ?>">
             <i class="fa-solid fa-plus"></i> Place Document Under Retention
         </a>
         <?php if ($statusFilter === 'active'): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('retention', ['status' => 'archived'])) ?>">
+            <a id="t8RetentionToggle" class="t8-btn t8-btn-outline" href="<?= e(page_url('retention', ['status' => 'archived'])) ?>">
                 <i class="fa-solid fa-box-archive"></i> View Archived
             </a>
         <?php else: ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('retention')) ?>">
+            <a id="t8RetentionToggle" class="t8-btn t8-btn-outline" href="<?= e(page_url('retention')) ?>">
                 <i class="fa-solid fa-list"></i> View Active
             </a>
         <?php endif; ?>
     </div>
 
-    <div class="t8-card" id="retention-records">
-        <div class="t8-card-header">
-            <h2 class="t8-card-title"><?= $statusFilter === 'archived' ? 'Archived Records' : 'Records Under Retention' ?></h2>
-        </div>
+    <div id="t8RetentionTableShell">
+        <div class="t8-card" id="retention-records">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title"><?= $statusFilter === 'archived' ? 'Archived Records' : 'Records Under Retention' ?></h2>
+            </div>
         <?php if ($records === []): ?>
             <div class="t8-empty">
                 <?= $statusFilter === 'archived' ? 'No archived records.' : 'No records under retention yet.' ?>
@@ -499,12 +500,13 @@ function t8_retention_suggest_date(int $years): string
             </div>
         <?php endif; ?>
     </div>
-    <?php if ($recordsTotalPages > 1): ?>
-        <nav class="t8-pagination" aria-label="Retention record pages">
-            <?php if ($recordsPage > 1): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('retention', ['status' => $statusFilter, 'retention_page' => $recordsPage - 1])) ?>">Previous</a><?php endif; ?>
-            <span class="t8-help-text">Showing <?= e((string) (($recordsPage - 1) * $recordsPageSize + 1)) ?>–<?= e((string) min($recordsPage * $recordsPageSize, $recordsTotal)) ?> of <?= e((string) $recordsTotal) ?></span>
-            <?php if ($recordsPage < $recordsTotalPages): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('retention', ['status' => $statusFilter, 'retention_page' => $recordsPage + 1])) ?>">Next</a><?php endif; ?>
-        </nav>
-    <?php endif; ?>
+        <?php if ($recordsTotalPages > 1): ?>
+            <nav class="t8-pagination" aria-label="Retention record pages">
+                <?php if ($recordsPage > 1): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('retention', ['status' => $statusFilter, 'retention_page' => $recordsPage - 1])) ?>">Previous</a><?php endif; ?>
+                <span class="t8-help-text">Showing <?= e((string) (($recordsPage - 1) * $recordsPageSize + 1)) ?>–<?= e((string) min($recordsPage * $recordsPageSize, $recordsTotal)) ?> of <?= e((string) $recordsTotal) ?></span>
+                <?php if ($recordsPage < $recordsTotalPages): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('retention', ['status' => $statusFilter, 'retention_page' => $recordsPage + 1])) ?>">Next</a><?php endif; ?>
+            </nav>
+        <?php endif; ?>
+    </div>
 
 <?php endif; ?>

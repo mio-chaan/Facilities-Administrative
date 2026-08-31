@@ -59,9 +59,6 @@
 .t8-visitor-stat-body .t8-help-text { margin: 0 0 3px; font-size: .68rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .t8-visitor-stat-card .t8-help-text { margin: 0; }
 .t8-visitor-stat-value { font-size: 1.45rem; font-weight: 700; line-height: 1.1; }
-.t8-visitor-pending-card p { margin: 0 0 8px; }
-.t8-visitor-pending-card p:last-child { margin-bottom: 0; }
-.t8-visitor-pending-links { display: flex; flex-wrap: wrap; gap: 7px; }
 
 /* =========================================================
    FIX — Scheduled / Upcoming Visits table.

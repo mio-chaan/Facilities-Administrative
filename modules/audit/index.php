@@ -62,13 +62,13 @@ $formatActionLabel = static function (string $value) use ($actionLabels): string
 <?php if ($logs === []): ?><tr class="t8-table-empty-row"><td colspan="6">No matching audit events.</td></tr><?php else: foreach ($logs as $log): ?><tr><td><?= e($log['full_name']) ?></td><td><?= e($formatActionLabel((string) $log['action'])) ?></td><td><?= e(ucwords(str_replace('_', ' ', $log['entity_type']))) ?></td><td>#<?= e((string) $log['entity_id']) ?></td><td><?= e((string) ($log['new_value'] ?? 'Recorded')) ?></td><td><?= e(format_date($log['created_at'], 'M d, Y g:i A')) ?></td></tr><?php endforeach; endif; ?>
 </tbody></table></div>
 <?php if ($totalPages > 1): ?>
-    <nav class="t8-pagination" aria-label="Audit log pages">
+    <nav id="t8AuditPagination" class="t8-pagination" aria-label="Audit log pages">
         <?php if ($currentPage > 1): ?>
-            <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(base_url('index.php?page=audit&action=' . rawurlencode($action) . '&module=' . rawurlencode($module) . '&audit_page=' . ($currentPage - 1))) ?>">Previous</a>
+            <a class="t8-btn t8-btn-outline t8-btn-sm t8-audit-page-link" href="<?= e(base_url('index.php?page=audit&action=' . rawurlencode($action) . '&module=' . rawurlencode($module) . '&audit_page=' . ($currentPage - 1))) ?>" data-audit-page="<?= e((string) ($currentPage - 1)) ?>">Previous</a>
         <?php endif; ?>
         <span class="t8-help-text">Page <?= e((string) $currentPage) ?> of <?= e((string) $totalPages) ?></span>
         <?php if ($currentPage < $totalPages): ?>
-            <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(base_url('index.php?page=audit&action=' . rawurlencode($action) . '&module=' . rawurlencode($module) . '&audit_page=' . ($currentPage + 1))) ?>">Next</a>
+            <a class="t8-btn t8-btn-outline t8-btn-sm t8-audit-page-link" href="<?= e(base_url('index.php?page=audit&action=' . rawurlencode($action) . '&module=' . rawurlencode($module) . '&audit_page=' . ($currentPage + 1))) ?>" data-audit-page="<?= e((string) ($currentPage + 1)) ?>">Next</a>
         <?php endif; ?>
     </nav>
 <?php endif; ?>

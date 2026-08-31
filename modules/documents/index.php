@@ -966,7 +966,7 @@ function t8_render_camera_capture(): void
         <?php endif; ?>
     </div>
 
-    <form method="get" class="t8-card" style="margin-bottom:var(--t8-space-4); padding:var(--t8-space-4);">
+    <form id="t8DocumentsFilterForm" method="get" class="t8-card" style="margin-bottom:var(--t8-space-4); padding:var(--t8-space-4);">
         <input type="hidden" name="page" value="documents">
         <input type="hidden" name="action" value="browse">
         <?php if (!$isAdmin): ?><p class="t8-help-text" style="margin-top:0;">My Documents: <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'pending'])) ?>">Pending</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'approved'])) ?>">Approved</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'returned_for_revision'])) ?>">Returned for Revision</a></p><?php endif; ?>
@@ -974,11 +974,10 @@ function t8_render_camera_capture(): void
             <label>Search<input class="t8-input" type="search" name="q" value="<?= e($search) ?>" placeholder="Title, type, uploader"></label>
             <label>Category<select class="t8-select" name="category_id"><option value="">All categories</option><?php foreach ($categories as $cat): ?><option value="<?= e((string) $cat['id']) ?>" <?= $categoryFilter === (int) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option><?php endforeach; ?></select></label>
             <label>Review status<select class="t8-select" name="review_status"><option value="">All statuses</option><option value="pending" <?= $reviewFilter === 'pending' ? 'selected' : '' ?>>Pending</option><option value="approved" <?= $reviewFilter === 'approved' ? 'selected' : '' ?>>Approved</option><option value="returned_for_revision" <?= $reviewFilter === 'returned_for_revision' ? 'selected' : '' ?>>Returned for Revision</option></select></label>
-            <button class="t8-btn t8-btn-outline" type="submit">Filter</button>
         </div>
     </form>
 
-    <div class="t8-card">
+    <div id="t8DocumentsResults" class="t8-card">
         <div class="t8-card-header">
             <h2 class="t8-card-title"><?= $statusFilter === 'archived' ? 'Archived Documents' : ($isAdmin ? 'All Documents' : 'My Documents') ?></h2>
         </div>
