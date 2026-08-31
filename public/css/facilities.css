@@ -42,7 +42,9 @@
    Location dropdown (custom combobox)
    Backs the "Location" field on the Add/Edit Facility form. Options
    are rendered server-side from team8_facility_locations; "+ Add
-   Location" appends a new option live via facilities.js.
+   Location" opens the modal dialog defined below (see
+   #t8LocationAddModal / .t8-location-modal-*), which appends a new
+   option live via facilities.js.
    ========================================================= */
 .t8-location-dropdown { position: relative; }
 .t8-location-trigger {
@@ -114,99 +116,98 @@
     cursor: pointer;
 }
 .t8-location-add:hover { background: #fff3f3; }
-.t8-location-add-form {
-    display: flex;
-    gap: 6px;
-    padding: 8px;
-    border-top: 1px solid var(--t8-border);
-    background: var(--t8-secondary);
-}
-.t8-location-add-form input {
-    flex: 1;
-    min-width: 0;
-    padding: 8px 10px;
-    border: 1.5px solid var(--t8-border);
-    border-radius: 6px;
-    font-family: inherit;
-    font-size: 0.84rem;
-    background: #fff;
-}
-.t8-location-add-form input:focus {
-    outline: none;
-    border-color: var(--t8-primary);
-}
-.t8-location-add-form button {
-    flex-shrink: 0;
-    padding: 8px 14px;
-    border: none;
-    border-radius: 6px;
-    background: var(--t8-primary);
-    color: #fff;
-    font-weight: 700;
-    font-size: 0.82rem;
-    cursor: pointer;
-}
-.t8-location-add-form button:hover { background: var(--t8-primary-dark); }
-.t8-location-add-form button[disabled] { opacity: 0.7; cursor: not-allowed; }
-.t8-location-add-error { color: var(--t8-danger); font-size: 0.78rem; margin: 0; padding: 6px 12px 10px; }
 
 .t8-facilities-error { margin-bottom: var(--t8-space-4); }
-.t8-location-add-panel {
-    margin-top: 10px;
-    padding: 16px;
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-}
 
-.t8-location-add-header {
+/* =========================================================
+   "+ Add Location" modal
+   FIX: this used to be an inline panel nested inside the Location
+   dropdown, itself nested inside the main facility <form> — a real
+   <form> in there would have been invalid, nested HTML. It is now a
+   standalone <dialog> (#t8LocationAddModal in
+   modules/facilities/index.php), rendered as a SIBLING of the
+   facility form, with its own independent <form>. Sized and styled to
+   match this app's other <dialog> modals (.t8-cancellation-modal in
+   reservation.css, .t8-onsite-modal in visitor.css) so it feels
+   native to the rest of the system, and is fully responsive down to
+   small screens.
+   ========================================================= */
+.t8-location-modal {
+    width: min(420px, calc(100% - 32px));
+    border: 0;
+    border-radius: var(--t8-radius);
+    padding: 0;
+    box-shadow: var(--t8-shadow-lift);
+}
+.t8-location-modal::backdrop {
+    background: rgba(0, 0, 0, .45);
+}
+.t8-location-modal-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 14px;
+    gap: 12px;
+    padding: var(--t8-space-4) var(--t8-space-5);
+    border-bottom: 1px solid var(--t8-border);
 }
-
-.t8-location-add-header strong {
-    font-size: 15px;
-    color: #1f2937;
+.t8-location-modal-header strong {
+    font-size: 1.02rem;
+    color: var(--t8-ink);
 }
-
-.t8-location-add-close {
+.t8-location-modal-close {
     width: 30px;
     height: 30px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border: 0;
     background: transparent;
-    color: #6b7280;
+    color: var(--t8-text-muted);
     cursor: pointer;
-    border-radius: 6px;
+    border-radius: var(--t8-radius-sm);
+    font-size: 1.05rem;
+    line-height: 1;
 }
-
-.t8-location-add-close:hover {
-    background: #f3f4f6;
-    color: #111827;
+.t8-location-modal-close:hover {
+    background: var(--t8-secondary);
+    color: var(--t8-primary);
 }
-
-.t8-location-add-actions {
+.t8-location-modal-body {
+    padding: var(--t8-space-4) var(--t8-space-5);
+}
+.t8-location-modal-error {
+    margin: 10px 0 0;
+    color: var(--t8-danger);
+    font-size: .82rem;
+}
+.t8-location-modal-footer {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    margin-top: 12px;
+    padding: 0 var(--t8-space-5) var(--t8-space-4);
 }
-
-.t8-location-add-error {
-    margin: 8px 0;
-    color: #dc2626;
-    font-size: 13px;
+@media (max-width: 480px) {
+    .t8-location-modal-footer {
+        flex-direction: column-reverse;
+    }
+    .t8-location-modal-footer .t8-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    .t8-location-modal-header,
+    .t8-location-modal-body {
+        padding-left: var(--t8-space-4);
+        padding-right: var(--t8-space-4);
+    }
 }
 
 .t8-location-option.selected {
-    background: #f3f4f6;
+    background: var(--t8-secondary);
     font-weight: 600;
 }
-
 .t8-location-option.selected::after {
-    content: "✓";
+    content: "\2713";
     float: right;
-    color: #16a34a;
+    color: var(--t8-success);
 }

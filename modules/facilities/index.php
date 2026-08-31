@@ -21,6 +21,43 @@
  *   - Loading/empty/error states: the facilities and locations
  *     queries are wrapped so a missing/partial database never breaks
  *     the page — it shows a clear message instead.
+ *
+ * FIX (Add Location — "Unexpected token '<' ... is not valid JSON"):
+ *   `location_create` is an AJAX action reached through the normal
+ *   front controller (public/index.php), which already writes
+ *   header.php / navbar.php / the shell markup into the request's
+ *   output buffer BEFORE this module file ever runs (see the
+ *   ob_start() / require header.php / require navbar.php / <div
+ *   class="t8-shell"> / require $moduleFile sequence there). Because
+ *   the `location_create` case only set a Content-Type header and
+ *   echoed JSON, the actual response body was still "<!DOCTYPE
+ *   html>...<the full page>...{"id":..,"name":..}" — a full HTML
+ *   document with the JSON tacked onto the end. That's exactly what
+ *   produced "Unexpected token '<' ... is not valid JSON" in the
+ *   browser. The fix discards every buffered output level before
+ *   emitting JSON (`while (ob_get_level() > 0) { ob_end_clean(); }`),
+ *   same pattern already used by redirect() in helpers.php and by
+ *   modules/documents/hr/print.php for its own raw-response case.
+ *
+ * FIX (Add Location modal):
+ *   The "+ Add Location" controls used to live as a plain inline
+ *   panel nested inside the Location dropdown, which itself sits
+ *   inside the main "Add/Edit Facility" <form>. That's the "nested
+ *   form issue" — anything shaped like a second <form> in there would
+ *   have been invalid HTML nested inside the facility form, and Enter
+ *   inside that inline panel had no reliable, form-scoped submit
+ *   target. "+ Add Location" now opens a real, standalone <dialog>
+ *   (#t8LocationAddModal) rendered as a SIBLING of the facility
+ *   <form> — not nested inside it — with its own independent <form>
+ *   (#t8LocationAddForm) that only ever asks for the location name.
+ *   It follows the same <dialog> pattern already used elsewhere in
+ *   this app (see the cancellation-request modal in
+ *   modules/reservation/index.php / public/css/reservation.css and
+ *   the on-site visitor modal in public/css/visitor.css) so it looks
+ *   and behaves consistently with the rest of the system. Submission,
+ *   CSRF, and the "select the new location automatically" behavior
+ *   are unchanged — only the markup shape and the JS wiring in
+ *   public/js/facilities.js were updated to match.
  */
 
 declare(strict_types=1);
@@ -96,6 +133,16 @@ switch ($action) {
     // ---- Dynamic "+ Add Location" (AJAX, JSON) ----
     case 'location_create':
         t8_require_role(['admin']);
+
+        // FIX: discard every buffered output level (header/navbar/shell
+        // markup the front controller already wrote for this request)
+        // BEFORE emitting the Content-Type header and JSON body below.
+        // Without this, the response body is "<!DOCTYPE html>...json",
+        // which is what produced the "Unexpected token '<'" error in
+        // the Add Location modal.
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
         header('Content-Type: application/json');
 
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -541,71 +588,9 @@ if ($showEquipmentForm) {
                             <?php if ($facilityLocations === []): ?>
                                 <p class="t8-location-empty-msg">No locations yet. Add the first one below.</p>
                             <?php endif; ?>
-                          <button
-    type="button"
-    class="t8-location-add"
-    id="t8LocationAdd">
-    <i class="fa-solid fa-plus"></i>
-    Add Location
-</button>
-
-<div
-    id="t8LocationAddPanel"
-    class="t8-location-add-panel"
-    hidden>
-
-    <div class="t8-location-add-header">
-        <strong>Add Location</strong>
-
-        <button
-            type="button"
-            id="t8LocationAddClose"
-            class="t8-location-add-close"
-            aria-label="Close">
-            <i class="fa-solid fa-xmark"></i>
-        </button>
-    </div>
-
-    <div class="t8-field">
-        <label
-            class="t8-label"
-            for="t8LocationAddInput">
-            Location Name
-        </label>
-
-        <input
-            type="text"
-            id="t8LocationAddInput"
-            class="t8-input"
-            placeholder="e.g. Ground Floor"
-            maxlength="150"
-            autocomplete="off">
-    </div>
-
-    <p
-        class="t8-location-add-error"
-        id="t8LocationAddError"
-        hidden>
-    </p>
-
-    <div class="t8-location-add-actions">
-        <button
-            type="button"
-            id="t8LocationAddCancel"
-            class="t8-btn t8-btn-outline">
-            Cancel
-        </button>
-
-        <button
-            type="button"
-            id="t8LocationAddSubmit"
-            class="t8-btn t8-btn-accent">
-            <i class="fa-solid fa-plus"></i>
-            Add Location
-        </button>
-    </div>
-</div>
-
+                            <button type="button" class="t8-location-add" id="t8LocationAdd">
+                                <i class="fa-solid fa-plus"></i> Add Location
+                            </button>
                         </div>
                     </div>
                     <span class="t8-help-text">Choose an existing location, or use "+ Add Location" to create a new one.</span>
@@ -637,6 +622,40 @@ if ($showEquipmentForm) {
             </div>
         </form>
     </div>
+
+    <!--
+        "+ Add Location" modal — deliberately a SIBLING of the facility
+        <form> above, not nested inside it (see the FIX note at the top
+        of this file for why). Only ever asks for the location name —
+        no facility name/type/capacity/quantity fields live here.
+        Closes via the × button, Cancel, clicking the backdrop, or
+        Escape (native <dialog> behavior). Submits via AJAX to the same
+        `location_create` action used before, with the same CSRF token
+        already present on the page (data-csrf on #t8LocationDropdown).
+    -->
+    <dialog id="t8LocationAddModal" class="t8-location-modal">
+        <form id="t8LocationAddForm" novalidate>
+            <div class="t8-location-modal-header">
+                <strong>Add Location</strong>
+                <button type="button" id="t8LocationAddModalClose" class="t8-location-modal-close" aria-label="Close">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="t8-location-modal-body">
+                <div class="t8-field" style="margin-bottom:0;">
+                    <label class="t8-label" for="t8LocationAddInput">Location Name</label>
+                    <input type="text" id="t8LocationAddInput" class="t8-input" placeholder="e.g. Ground Floor" maxlength="150" autocomplete="off">
+                </div>
+                <p class="t8-location-modal-error" id="t8LocationAddError" hidden></p>
+            </div>
+            <div class="t8-location-modal-footer">
+                <button type="button" id="t8LocationAddCancel" class="t8-btn t8-btn-outline">Cancel</button>
+                <button type="submit" id="t8LocationAddSubmit" class="t8-btn t8-btn-accent">
+                    <i class="fa-solid fa-plus"></i> Add Location
+                </button>
+            </div>
+        </form>
+    </dialog>
 
     <?php if ($action === 'edit'): ?>
     <div class="t8-card" style="margin-top:var(--t8-space-4);">
