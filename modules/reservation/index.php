@@ -8,21 +8,6 @@ $isReservationStaff = t8_has_role('facilities_staff');
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
-// Dropdown options for Department. Edit or extend these values as needed.
-const T8_DEPARTMENTS = [
-    'Administration',
-    'Finance',
-    'Human Resources',
-    'Information Technology',
-    'Legal',
-    'Operations',
-    'Procurement',
-    'Facilities',
-    'Security',
-    'Marketing',
-    'Customer Service',
-];
-
 // Single source of truth for facility-type-driven reservation fields.
 const T8_FACILITY_RESERVATION_CONFIG = [
     'Room' => [
@@ -454,9 +439,6 @@ function t8_reservation_validate(PDO $pdo, array $activeFacilities, array $value
 
     if (in_array('requirements', $requiredFields, true) && $values['requirements'] === '') {
         $errors[] = 'Requirements are required.';
-    }
-    if ($values['department'] === '') {
-        $errors[] = 'Department is required.';
     }
     if ($values['key_person'] === '') {
         $errors[] = 'Key person / point of contact is required.';
@@ -1179,16 +1161,6 @@ if (!$showForm) {
                         <option value="">Select a category…</option>
                         <?php foreach ($selectedReservationConfig['event_categories'] as $cat): ?>
                             <option value="<?= e($cat) ?>" <?= $cat === $formValues['event_category'] ? 'selected' : '' ?>><?= e($cat) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <div class="t8-field">
-                    <label class="t8-label" for="department">Department</label>
-                    <select class="t8-select" id="department" name="department" required>
-                        <option value="">Select a department…</option>
-                        <?php foreach (T8_DEPARTMENTS as $dept): ?>
-                            <option value="<?= e($dept) ?>" <?= $dept === $formValues['department'] ? 'selected' : '' ?>><?= e($dept) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>

@@ -1,7 +1,6 @@
 ALTER TABLE team8_facilities
     ADD COLUMN equipment_notes TEXT NULL AFTER description,
-    ADD COLUMN maintenance_status VARCHAR(30) NOT NULL DEFAULT 'operational' AFTER equipment_notes,
-    ADD COLUMN next_maintenance_date DATE NULL AFTER maintenance_status;
+    ADD COLUMN maintenance_status VARCHAR(30) NOT NULL DEFAULT 'operational' AFTER equipment_notes;
 
 CREATE TABLE IF NOT EXISTS team8_facility_maintenance_history (
     id INT AUTO_INCREMENT PRIMARY KEY,

@@ -245,9 +245,6 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!markField(facility, !!facility.value, 'Please select a facility.')) valid = false;
         if (!markField(category, !!category.value, 'Please select an event category.')) valid = false;
 
-        var departmentEl = document.getElementById('department');
-        if (!markField(departmentEl, !!departmentEl.value, 'Department is required.')) valid = false;
-
         var keyPersonEl = document.getElementById('key_person');
         if (!markField(keyPersonEl, !!keyPersonEl.value.trim(), 'Key person / point of contact is required.')) valid = false;
 

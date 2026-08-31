@@ -61,12 +61,12 @@ ON DUPLICATE KEY UPDATE record_type = VALUES(record_type);
 -- =========================================================
 -- FACILITIES, EQUIPMENT, AND RESERVATIONS
 -- =========================================================
-INSERT INTO team8_facilities (id, name, location, facility_type, capacity, description, equipment_notes, maintenance_status, next_maintenance_date, status) VALUES
-    (101, 'Main Conference Room', 'Administration Building, Floor 2', 'Conference Room', 24, 'Presentation-ready meeting room.', 'Projector, whiteboard, video conference bar.', 'operational', DATE_ADD(CURDATE(), INTERVAL 45 DAY), 'active'),
-    (102, 'Training Hall', 'Administration Building, Ground Floor', 'Training Room', 80, 'Large room for orientations and workshops.', 'PA system, projector, 80 chairs.', 'operational', DATE_ADD(CURDATE(), INTERVAL 60 DAY), 'active'),
-    (103, 'Executive Meeting Room', 'Administration Building, Floor 3', 'Meeting Room', 12, 'Private executive meeting space.', 'Display, whiteboard.', 'maintenance', DATE_ADD(CURDATE(), INTERVAL 7 DAY), 'active'),
-    (104, 'Archive Room', 'Records Building, Floor 1', 'Storage', 10, 'Controlled-access paper records storage.', 'Shelving and document boxes.', 'operational', DATE_ADD(CURDATE(), INTERVAL 120 DAY), 'archived')
-ON DUPLICATE KEY UPDATE name = VALUES(name), location = VALUES(location), facility_type = VALUES(facility_type), capacity = VALUES(capacity), description = VALUES(description), equipment_notes = VALUES(equipment_notes), maintenance_status = VALUES(maintenance_status), next_maintenance_date = VALUES(next_maintenance_date), status = VALUES(status);
+INSERT INTO team8_facilities (id, name, location, facility_type, capacity, description, equipment_notes, maintenance_status, status) VALUES
+    (101, 'Main Conference Room', 'Administration Building, Floor 2', 'Conference Room', 24, 'Presentation-ready meeting room.', 'Projector, whiteboard, video conference bar.', 'operational', 'active'),
+    (102, 'Training Hall', 'Administration Building, Ground Floor', 'Training Room', 80, 'Large room for orientations and workshops.', 'PA system, projector, 80 chairs.', 'operational', 'active'),
+    (103, 'Executive Meeting Room', 'Administration Building, Floor 3', 'Meeting Room', 12, 'Private executive meeting space.', 'Display, whiteboard.', 'maintenance', 'active'),
+    (104, 'Archive Room', 'Records Building, Floor 1', 'Storage', 10, 'Controlled-access paper records storage.', 'Shelving and document boxes.', 'operational', 'archived')
+ON DUPLICATE KEY UPDATE name = VALUES(name), location = VALUES(location), facility_type = VALUES(facility_type), capacity = VALUES(capacity), description = VALUES(description), equipment_notes = VALUES(equipment_notes), maintenance_status = VALUES(maintenance_status), status = VALUES(status);
 
 INSERT INTO team8_equipment (id, home_facility_id, name, quantity) VALUES
     (101, 101, 'HD Projector', 2),
