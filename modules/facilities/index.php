@@ -1,5 +1,27 @@
 <?php
-
+/**
+ * modules/facilities/index.php
+ *
+ * UPDATE (dynamic Facilities page + dynamic Location dropdown):
+ *   - Facility cards on the list view are populated ENTIRELY from
+ *     team8_facilities (via $facilities below). The previous
+ *     hardcoded $fallbackFacilities demo array has been removed —
+ *     name, capacity, location, equipment count, today's
+ *     reservations, status, and photo all come from the database.
+ *     The "X Facilities" count is COUNT($facilities), not a fixed 4.
+ *   - The facility-type-keyed T8_FACILITY_LOCATION_OPTIONS constant
+ *     has been removed. "Location" is now a single, flat list backed
+ *     by the team8_facility_locations table (see
+ *     database/migrations/2026_08_31_facility_locations.sql) and
+ *     rendered as a custom dropdown (see t8LocationDropdown markup
+ *     below + public/js/facilities.js + public/css/facilities.css).
+ *   - A "+ Add Location" action lets an admin create a new location
+ *     inline (AJAX -> `location_create` action below) without leaving
+ *     the form; the new location becomes selectable immediately.
+ *   - Loading/empty/error states: the facilities and locations
+ *     queries are wrapped so a missing/partial database never breaks
+ *     the page — it shows a clear message instead.
+ */
 
 declare(strict_types=1);
 
@@ -13,40 +35,19 @@ if (!$isAdmin && $action !== 'list') {
     t8_require_role(['admin']);
 }
 
-// Dropdown options for Facility Type and supported Location values.
-// Add new types or locations here in one place so both server and client logic stay in sync.
-const T8_FACILITY_LOCATION_OPTIONS = [
-    'Room' => [
-        'Ground Floor',
-        'Second Floor',
-        'Main Building',
-        'Annex Building',
-    ],
-    'Area' => [
-        'Dining Area',
-        'Parking Area',
-        'Receiving Area',
-        'Outdoor Area',
-    ],
-    'Equipment' => [
-        'Kitchen',
-        'Dining Area',
-        'Storage Room',
-        'Office',
-    ],
-    'Asset' => [
-        'Kitchen',
-        'Dining Area',
-        'Storage Room',
-        'Office',
-    ],
-    'Utility' => [
-        'Kitchen',
-        'Electrical Room',
-        'Server Room',
-        'Roof Deck',
-    ],
-];
+/**
+ * Fetch every facility location, newest name-order, from the DB.
+ * Returns [] (never throws) if the table/migration isn't present yet
+ * so the page can render a graceful empty state instead of a 500.
+ */
+function t8_facility_locations_fetch(PDO $pdo): array
+{
+    try {
+        return $pdo->query('SELECT id, name FROM team8_facility_locations ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return [];
+    }
+}
 
 /** Fetch a single facility row or null. */
 function t8_facility_fetch(PDO $pdo, int $id): ?array
@@ -57,8 +58,14 @@ function t8_facility_fetch(PDO $pdo, int $id): ?array
     return $row ?: null;
 }
 
-/** Shared validation for both create and edit forms. */
-function t8_facility_validate(string $name, string $location, string $facilityType, int $capacity): array
+/**
+ * Shared validation for both create and edit forms.
+ * $validLocations is the list of currently allowed location NAMEs
+ * (from team8_facility_locations) — when it's non-empty, the chosen
+ * location must be one of them (the dropdown never lets a user type
+ * an arbitrary value, only pick or add-then-pick).
+ */
+function t8_facility_validate(string $name, string $location, string $facilityType, int $capacity, array $validLocations): array
 {
     $errors = [];
     if ($name === '') {
@@ -70,12 +77,11 @@ function t8_facility_validate(string $name, string $location, string $facilityTy
         $errors[] = 'Location is required.';
     } elseif (mb_strlen($location) > 200) {
         $errors[] = 'Location must be 200 characters or fewer.';
+    } elseif ($validLocations !== [] && !in_array($location, $validLocations, true)) {
+        $errors[] = 'Please select a location from the list, or add it first with "+ Add Location".';
     }
-    if (!array_key_exists($facilityType, T8_FACILITY_LOCATION_OPTIONS)) {
-        $errors[] = 'Please select a valid facility type.';
-    }
-    if ($facilityType !== '' && !in_array($location, T8_FACILITY_LOCATION_OPTIONS[$facilityType] ?? [], true)) {
-        $errors[] = 'Please select a valid location for the chosen facility type.';
+    if ($facilityType === '') {
+        $errors[] = 'Please select a facility type.';
     }
     if ($capacity < 1) {
         $errors[] = 'Capacity must be at least 1.';
@@ -87,6 +93,52 @@ $facility = ['name' => '', 'location' => '', 'facility_type' => '', 'capacity' =
 $equipment = ['id' => 0, 'name' => '', 'home_facility_id' => '', 'quantity' => 0];
 
 switch ($action) {
+    // ---- Dynamic "+ Add Location" (AJAX, JSON) ----
+    case 'location_create':
+        t8_require_role(['admin']);
+        header('Content-Type: application/json');
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['error' => 'Method not allowed.']);
+            exit;
+        }
+        if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            http_response_code(419);
+            echo json_encode(['error' => 'Your session expired. Please refresh the page and try again.']);
+            exit;
+        }
+
+        $newLocationName = trim((string) ($_POST['name'] ?? ''));
+        if ($newLocationName === '') {
+            echo json_encode(['error' => 'Please enter a location name.']);
+            exit;
+        }
+        if (mb_strlen($newLocationName) > 150) {
+            echo json_encode(['error' => 'Location name must be 150 characters or fewer.']);
+            exit;
+        }
+
+        try {
+            $existingStmt = $pdo->prepare('SELECT id, name FROM team8_facility_locations WHERE name = :name LIMIT 1');
+            $existingStmt->execute(['name' => $newLocationName]);
+            $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+            if ($existing) {
+                // Already exists — treat as success so the UI can just select it.
+                echo json_encode(['id' => (int) $existing['id'], 'name' => $existing['name']]);
+                exit;
+            }
+
+            $pdo->prepare('INSERT INTO team8_facility_locations (name) VALUES (:name)')->execute(['name' => $newLocationName]);
+            $newLocationId = (int) $pdo->lastInsertId();
+            t8_audit_log($pdo, $currentUserId, 'facility_location', $newLocationId, 'create', null, $newLocationName);
+            echo json_encode(['id' => $newLocationId, 'name' => $newLocationName]);
+        } catch (Throwable $e) {
+            http_response_code(500);
+            echo json_encode(['error' => 'Could not add this location right now. Please try again.']);
+        }
+        exit;
+
     case 'equipment_create':
     case 'equipment_edit':
         t8_require_role(['admin']);
@@ -130,6 +182,9 @@ switch ($action) {
         break;
 
     case 'create':
+        $facilityLocations = t8_facility_locations_fetch($pdo);
+        $validLocationNames = array_column($facilityLocations, 'name');
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $facility = [
                 'name'          => trim((string) ($_POST['name'] ?? '')),
@@ -143,7 +198,7 @@ switch ($action) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
                 $capacityInt = (int) $facility['capacity'];
-                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt);
+                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt, $validLocationNames);
                 if ($facility['next_maintenance_date'] !== '' && strtotime($facility['next_maintenance_date']) === false) {
                     $errors[] = 'Next maintenance date must be valid.';
                 }
@@ -177,6 +232,8 @@ switch ($action) {
             redirect(page_url('facilities'));
         }
         $facility = $existing;
+        $facilityLocations = t8_facility_locations_fetch($pdo);
+        $validLocationNames = array_column($facilityLocations, 'name');
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $facility['name']          = trim((string) ($_POST['name'] ?? ''));
@@ -190,7 +247,7 @@ switch ($action) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
                 $capacityInt = (int) $facility['capacity'];
-                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt);
+                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt, $validLocationNames);
                 if ($facility['next_maintenance_date'] !== '' && strtotime($facility['next_maintenance_date']) === false) {
                     $errors[] = 'Next maintenance date must be valid.';
                 }
@@ -326,9 +383,32 @@ if ($showForm && $action === 'edit' && !empty($facility['id'])) {
     $maintenanceHistory = $historyStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+// The "Location" dropdown is always driven by the DB. On GET requests
+// to create/edit (no POST branch above already fetched it), fetch it
+// here too so the form always has fresh data.
+if ($showForm && !isset($facilityLocations)) {
+    $facilityLocations = t8_facility_locations_fetch($pdo);
+}
+$facilityLocationsUnavailable = $showForm && $facilityLocations === [] && $_SERVER['REQUEST_METHOD'] === 'GET';
+
+// ---------------------------------------------------------------
+// Facility list (cards grid) — fully dynamic. No hardcoded demo
+// facilities: $facilities (and therefore the card grid + the
+// "X Facilities" count) come only from team8_facilities. A DB error
+// here is caught so the rest of the page (nav, sidebar, etc.) still
+// renders, with a clear inline error instead of a fatal.
+// ---------------------------------------------------------------
+$facilities = [];
+$facilitiesError = null;
 if (!$showForm && !$showEquipmentForm) {
-    $sql = $isAdmin ? 'SELECT f.*, (SELECT COUNT(*) FROM team8_reservations r WHERE r.facility_id = f.id) AS reservation_count FROM team8_facilities f ORDER BY f.name' : "SELECT f.*, (SELECT COUNT(*) FROM team8_reservations r WHERE r.facility_id = f.id) AS reservation_count FROM team8_facilities f WHERE f.status = 'active' ORDER BY f.name";
-    $facilities = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    try {
+        $sql = $isAdmin
+            ? 'SELECT f.*, (SELECT COUNT(*) FROM team8_reservations r WHERE r.facility_id = f.id) AS reservation_count FROM team8_facilities f ORDER BY f.name'
+            : "SELECT f.*, (SELECT COUNT(*) FROM team8_reservations r WHERE r.facility_id = f.id) AS reservation_count FROM team8_facilities f WHERE f.status = 'active' ORDER BY f.name";
+        $facilities = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $facilitiesError = 'Facilities could not be loaded right now. Please refresh the page or try again shortly.';
+    }
 }
 
 if ($action === 'equipment') {
@@ -344,11 +424,8 @@ if ($showEquipmentForm) {
 ?>
 <div class="t8-facilities-heading">
     <div><h1>Facilities</h1><p class="t8-help-text"><?= $isAdmin ? 'Add, edit, archive, and reactivate facilities.' : 'Check facility availability before making a reservation.' ?></p></div>
-    <strong class="t8-facilities-count"><?= e((string) (count($facilities ?? []) ?: 4)) ?> Facilities</strong>
+    <strong class="t8-facilities-count"><?= e((string) count($facilities)) ?> Facilit<?= count($facilities) === 1 ? 'y' : 'ies' ?></strong>
 </div>
-<script>
-    window.t8FacilityLocationMap = <?= json_encode(T8_FACILITY_LOCATION_OPTIONS, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-</script>
 
 <?php if ($showEquipmentForm): ?>
     <?php foreach ($errors as $error): ?>
@@ -412,6 +489,12 @@ if ($showEquipmentForm) {
         <div class="t8-alert t8-alert-danger"><?= e($error) ?></div>
     <?php endforeach; ?>
 
+    <?php if ($facilityLocationsUnavailable): ?>
+        <div class="t8-alert t8-alert-warning">
+            No locations have been added yet. Use "+ Add Location" in the dropdown below to create the first one.
+        </div>
+    <?php endif; ?>
+
     <div class="t8-card">
         <div class="t8-card-header">
             <h2 class="t8-card-title"><?= $action === 'edit' ? 'Edit Facility' : 'Add Facility' ?></h2>
@@ -431,7 +514,7 @@ if ($showEquipmentForm) {
                     <label class="t8-label" for="facility_type">Facility Type</label>
                     <select class="t8-select" id="facility_type" name="facility_type" required>
                         <option value="">Select a type…</option>
-                        <?php foreach (array_keys(T8_FACILITY_LOCATION_OPTIONS) as $type): ?>
+                        <?php foreach (['Room', 'Area', 'Equipment', 'Asset', 'Utility'] as $type): ?>
                             <option value="<?= e($type) ?>" <?= $type === $facility['facility_type'] ? 'selected' : '' ?>><?= e($type) ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -439,16 +522,93 @@ if ($showEquipmentForm) {
 
                 <div class="t8-field">
                     <label class="t8-label" for="location">Location</label>
-                    <select class="t8-select" id="location" name="location" required <?= $facility['facility_type'] === '' ? 'disabled' : '' ?>>
-                        <?php if ($facility['facility_type'] === ''): ?>
-                            <option value="" selected disabled>Select a facility type first</option>
-                        <?php else: ?>
-                            <option value="" selected disabled>Select a location</option>
-                            <?php foreach (T8_FACILITY_LOCATION_OPTIONS[$facility['facility_type']] ?? [] as $locationOption): ?>
-                                <option value="<?= e($locationOption) ?>" <?= $locationOption === $facility['location'] ? 'selected' : '' ?>><?= e($locationOption) ?></option>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </select>
+                    <div class="t8-location-dropdown"
+                         id="t8LocationDropdown"
+                         data-create-url="<?= e(page_url('facilities', ['action' => 'location_create'])) ?>"
+                         data-csrf="<?= e(t8_csrf_token()) ?>">
+                        <button type="button" class="t8-location-trigger" id="t8LocationTrigger" aria-haspopup="listbox" aria-expanded="false">
+                            <span id="t8LocationTriggerText"><?= $facility['location'] !== '' ? e($facility['location']) : 'Select a location' ?></span>
+                            <i class="fa-solid fa-chevron-down"></i>
+                        </button>
+                        <input type="hidden" id="location" name="location" value="<?= e((string) $facility['location']) ?>" required>
+
+                        <div class="t8-location-panel" id="t8LocationPanel" role="listbox" hidden>
+                            <ul class="t8-location-options" id="t8LocationOptions">
+                                <?php foreach ($facilityLocations as $loc): ?>
+                                    <li role="option" data-value="<?= e($loc['name']) ?>" class="t8-location-option"><?= e($loc['name']) ?></li>
+                                <?php endforeach; ?>
+                            </ul>
+                            <?php if ($facilityLocations === []): ?>
+                                <p class="t8-location-empty-msg">No locations yet. Add the first one below.</p>
+                            <?php endif; ?>
+                          <button
+    type="button"
+    class="t8-location-add"
+    id="t8LocationAdd">
+    <i class="fa-solid fa-plus"></i>
+    Add Location
+</button>
+
+<div
+    id="t8LocationAddPanel"
+    class="t8-location-add-panel"
+    hidden>
+
+    <div class="t8-location-add-header">
+        <strong>Add Location</strong>
+
+        <button
+            type="button"
+            id="t8LocationAddClose"
+            class="t8-location-add-close"
+            aria-label="Close">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>
+
+    <div class="t8-field">
+        <label
+            class="t8-label"
+            for="t8LocationAddInput">
+            Location Name
+        </label>
+
+        <input
+            type="text"
+            id="t8LocationAddInput"
+            class="t8-input"
+            placeholder="e.g. Ground Floor"
+            maxlength="150"
+            autocomplete="off">
+    </div>
+
+    <p
+        class="t8-location-add-error"
+        id="t8LocationAddError"
+        hidden>
+    </p>
+
+    <div class="t8-location-add-actions">
+        <button
+            type="button"
+            id="t8LocationAddCancel"
+            class="t8-btn t8-btn-outline">
+            Cancel
+        </button>
+
+        <button
+            type="button"
+            id="t8LocationAddSubmit"
+            class="t8-btn t8-btn-accent">
+            <i class="fa-solid fa-plus"></i>
+            Add Location
+        </button>
+    </div>
+</div>
+
+                        </div>
+                    </div>
+                    <span class="t8-help-text">Choose an existing location, or use "+ Add Location" to create a new one.</span>
                 </div>
 
                 <div class="t8-field">
@@ -501,54 +661,70 @@ if ($showEquipmentForm) {
         </a>
     </div><?php endif; ?>
 
+    <?php if ($facilitiesError !== null): ?>
+        <div class="t8-alert t8-alert-danger t8-facilities-error"><?= e($facilitiesError) ?></div>
+    <?php elseif ($facilities === []): ?>
+        <div class="t8-empty">
+            <?= $isAdmin ? 'No facilities yet. Add your first facility to get started.' : 'No facilities are available right now.' ?>
+            <?php if ($isAdmin): ?>
+                <br><br>
+                <a class="t8-btn t8-btn-accent" href="<?= e(page_url('facilities', ['action' => 'create'])) ?>">
+                    <i class="fa-solid fa-plus"></i> Add Facility
+                </a>
+            <?php endif; ?>
+        </div>
+    <?php else: ?>
         <div class="t8-facilities-grid">
-        <?php
-            $fallbackFacilities = [
-                ['id' => 0, 'name' => 'Conference Room A', 'location' => '2nd Floor, Main Building', 'facility_type' => 'Room', 'capacity' => 30, 'reservation_count' => 3, 'status' => 'active', 'card_status' => 'Available', 'equipment_count' => 8, 'photo' => 'https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=700&q=80'],
-                ['id' => 0, 'name' => 'Function Hall', 'location' => 'Ground Floor, Main Building', 'facility_type' => 'Room', 'capacity' => 150, 'reservation_count' => 2, 'status' => 'active', 'card_status' => 'Reserved', 'equipment_count' => 15, 'photo' => 'img/function-hall.jpg'],
-                ['id' => 0, 'name' => 'Training Room', 'location' => '3rd Floor, Annex Building', 'facility_type' => 'Room', 'capacity' => 40, 'reservation_count' => 0, 'status' => 'maintenance', 'card_status' => 'Under Maintenance', 'equipment_count' => 10, 'photo' => 'https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=700&q=80'],
-                ['id' => 0, 'name' => 'Computer Lab', 'location' => '2nd Floor, IT Building', 'facility_type' => 'Room', 'capacity' => 25, 'reservation_count' => 1, 'status' => 'archived', 'card_status' => 'Inactive', 'equipment_count' => 12, 'photo' => 'https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=700&q=80'],
-            ];
-            $cardFacilities = $facilities !== [] ? $facilities : $fallbackFacilities;
-            foreach ($cardFacilities as $facilityCard):
+        <?php foreach ($facilities as $facilityCard):
                 $facilityId = (int) ($facilityCard['id'] ?? 0);
-                $facilityName = (string) ($facilityCard['name'] ?? 'Function Hall');
-                if (strcasecmp($facilityName, 'function hall') === 0) {
-                    $facilityName = 'Function Hall';
-                }
-                $facilityPhoto = (string) ($facilityCard['photo'] ?? '');
-                if ($facilityPhoto === '' && strcasecmp($facilityName, 'Function Hall') === 0) {
-                    $facilityPhoto = 'img/function-hall.jpg';
-                }
-                if ($facilityPhoto === '' || ($facilityPhoto === 'img/function-hall.jpg' && !is_file(__DIR__ . '/../../public/' . $facilityPhoto))) {
-                    $facilityPhoto = 'img/ramyunbg.jpg';
-                }
+                $facilityName = (string) ($facilityCard['name'] ?? '');
+                $facilityPhoto = 'img/ramyunbg.jpg';
                 $maintenanceStatus = (string) ($facilityCard['maintenance_status'] ?? 'operational');
-                $cardStatus = $facilityCard['card_status'] ?? ((($facilityCard['status'] ?? 'active') === 'archived') ? 'Inactive' : ($maintenanceStatus === 'maintenance' ? 'Maintenance' : 'Available'));
+                $cardStatus = (($facilityCard['status'] ?? 'active') === 'archived')
+                    ? 'Inactive'
+                    : ($maintenanceStatus === 'maintenance' ? 'Maintenance' : 'Available');
                 $statusClass = match ($cardStatus) {
                     'Inactive' => 'inactive',
                     'Maintenance' => 'maintenance',
                     default => 'available',
                 };
-                $editUrl = $facilityId > 0 ? page_url('facilities', ['action' => 'edit', 'id' => $facilityId]) : page_url('facilities', ['action' => 'create']);
-                $reserveUrl = page_url('reservation', ['action' => 'create', 'facility_id' => $facilityId]);
+                $editUrl = page_url('facilities', ['action' => 'edit', 'id' => $facilityId]);
                 $maintenanceButtonLabel = $maintenanceStatus === 'maintenance' ? 'Activate' : 'Maintenance';
+
+                $equipmentCountStmt = $pdo->prepare('SELECT COUNT(*) FROM team8_equipment WHERE home_facility_id = :id');
+                $equipmentCountStmt->execute(['id' => $facilityId]);
+                $equipmentCount = (int) $equipmentCountStmt->fetchColumn();
+
+                $todaysReservationsStmt = $pdo->prepare(
+                    "SELECT COUNT(*) FROM team8_reservations
+                     WHERE facility_id = :id
+                       AND status IN ('pending', 'approved')
+                       AND DATE(COALESCE(start_time, schedule, expected_return_date)) = CURDATE()"
+                );
+                $todaysReservationsStmt->execute(['id' => $facilityId]);
+                $todaysReservations = (int) $todaysReservationsStmt->fetchColumn();
         ?>
             <article class="t8-facility-card">
-                <div class="t8-facility-card-photo" role="img" aria-label="<?= e($facilityName) ?> event space"><img src="<?= e($facilityPhoto) ?>" alt="" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&amp;fit=crop&amp;w=700&amp;q=80';"><span class="t8-facility-status t8-facility-status-<?= e($statusClass) ?>"><i></i><?= e($cardStatus) ?></span></div>
+                <div class="t8-facility-card-photo" role="img" aria-label="<?= e($facilityName) ?>"><img src="<?= e($facilityPhoto) ?>" alt="" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&amp;fit=crop&amp;w=700&amp;q=80';"><span class="t8-facility-status t8-facility-status-<?= e($statusClass) ?>"><i></i><?= e($cardStatus) ?></span></div>
                 <div class="t8-facility-card-content">
                     <div class="t8-facility-card-heading"><h2><?= e($facilityName) ?></h2></div>
-                    <div class="t8-facility-card-details"><span><i class="fa-solid fa-users"></i><b>Capacity</b> <?= e((string) $facilityCard['capacity']) ?> persons</span><span><i class="fa-solid fa-location-dot"></i><b>Location</b> <?= e((string) $facilityCard['location']) ?></span><span><i class="fa-solid fa-boxes-stacked"></i><b>Equipment</b> <?= e((string) ($facilityCard['equipment_count'] ?? 0)) ?> items</span><span><i class="fa-solid fa-calendar-check"></i><b>Today's Reservations</b> <?= e((string) ($facilityCard['reservation_count'] ?? 0)) ?></span></div>
+                    <div class="t8-facility-card-details">
+                        <span><i class="fa-solid fa-users"></i><b>Capacity</b> <?= e((string) $facilityCard['capacity']) ?> persons</span>
+                        <span><i class="fa-solid fa-location-dot"></i><b>Location</b> <?= e((string) $facilityCard['location']) ?></span>
+                        <span><i class="fa-solid fa-boxes-stacked"></i><b>Equipment</b> <?= e((string) $equipmentCount) ?> items</span>
+                        <span><i class="fa-solid fa-calendar-check"></i><b>Today's Reservations</b> <?= e((string) $todaysReservations) ?></span>
+                    </div>
                     <?php if ($isAdmin): ?>
                         <div class="t8-facility-card-actions">
                             <a class="t8-btn t8-btn-accent" href="<?= e($editUrl) ?>">Edit</a>
                             <form method="post" action="<?= e(page_url('facilities', ['action' => 'toggle_maintenance'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $facilityId) ?>"><button class="t8-btn t8-btn-outline" type="submit"><?= e($maintenanceButtonLabel) ?></button></form>
-                            <?php if ($facilityId > 0): ?><form method="post" action="<?= e(page_url('facilities', ['action' => 'delete'])) ?>" onsubmit="return confirm('Delete this facility permanently? This is only available when it has no linked records.');"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $facilityId) ?>"><button class="t8-facility-more t8-facility-more-bottom t8-facility-delete" type="submit" title="Delete facility" aria-label="Delete facility"><i class="fa-solid fa-trash"></i></button></form><?php endif; ?>
+                            <form method="post" action="<?= e(page_url('facilities', ['action' => 'delete'])) ?>" onsubmit="return confirm('Delete this facility permanently? This is only available when it has no linked records.');"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $facilityId) ?>"><button class="t8-facility-more t8-facility-more-bottom t8-facility-delete" type="submit" title="Delete facility" aria-label="Delete facility"><i class="fa-solid fa-trash"></i></button></form>
                         </div>
                     <?php endif; ?>
                 </div>
             </article>
         <?php endforeach; ?>
         </div>
+    <?php endif; ?>
 
 <?php endif; ?>

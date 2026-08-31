@@ -37,3 +37,176 @@
 @media (min-width: 641px) and (max-width: 999px) { .t8-facilities-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .t8-facility-form-grid { grid-template-columns:1fr; } }
 @media (max-width: 640px) { .t8-facilities-heading { flex-direction:column; } .t8-facilities-grid { grid-template-columns:1fr; } .t8-facility-card-photo { height:190px; } .t8-facility-card-content { padding:16px; } .t8-facility-card-details { font-size:.78rem; gap:9px; } .t8-facility-card-details b { font-size:.7rem; } }
+
+/* =========================================================
+   Location dropdown (custom combobox)
+   Backs the "Location" field on the Add/Edit Facility form. Options
+   are rendered server-side from team8_facility_locations; "+ Add
+   Location" appends a new option live via facilities.js.
+   ========================================================= */
+.t8-location-dropdown { position: relative; }
+.t8-location-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 11px 14px;
+    border: 1.5px solid var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    background: var(--t8-secondary);
+    color: var(--t8-text);
+    font-family: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.t8-location-trigger:hover { border-color: var(--t8-primary); }
+.t8-location-trigger:focus-visible {
+    outline: none;
+    border-color: var(--t8-primary);
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(178, 34, 34, 0.12);
+}
+.t8-location-trigger i { color: var(--t8-text-muted); font-size: 0.78rem; transition: transform 0.15s ease; flex-shrink: 0; }
+.t8-location-trigger[aria-expanded="true"] i { transform: rotate(180deg); }
+
+.t8-location-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    background: #fff;
+    border: 1.5px solid var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    box-shadow: var(--t8-shadow-lift);
+    overflow: hidden;
+}
+.t8-location-options {
+    list-style: none;
+    margin: 0;
+    padding: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+.t8-location-option {
+    padding: 9px 12px;
+    border-radius: 6px;
+    font-size: 0.87rem;
+    color: var(--t8-text);
+    cursor: pointer;
+}
+.t8-location-option:hover { background: var(--t8-secondary); color: var(--t8-primary); }
+.t8-location-empty-msg { margin: 0; padding: 12px; font-size: 0.8rem; color: var(--t8-text-muted); text-align: center; }
+.t8-location-add {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border: none;
+    border-top: 1px solid var(--t8-border);
+    background: var(--t8-secondary);
+    color: var(--t8-primary);
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.t8-location-add:hover { background: #fff3f3; }
+.t8-location-add-form {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    border-top: 1px solid var(--t8-border);
+    background: var(--t8-secondary);
+}
+.t8-location-add-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1.5px solid var(--t8-border);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.84rem;
+    background: #fff;
+}
+.t8-location-add-form input:focus {
+    outline: none;
+    border-color: var(--t8-primary);
+}
+.t8-location-add-form button {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    border: none;
+    border-radius: 6px;
+    background: var(--t8-primary);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+.t8-location-add-form button:hover { background: var(--t8-primary-dark); }
+.t8-location-add-form button[disabled] { opacity: 0.7; cursor: not-allowed; }
+.t8-location-add-error { color: var(--t8-danger); font-size: 0.78rem; margin: 0; padding: 6px 12px 10px; }
+
+.t8-facilities-error { margin-bottom: var(--t8-space-4); }
+.t8-location-add-panel {
+    margin-top: 10px;
+    padding: 16px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.t8-location-add-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.t8-location-add-header strong {
+    font-size: 15px;
+    color: #1f2937;
+}
+
+.t8-location-add-close {
+    width: 30px;
+    height: 30px;
+    border: 0;
+    background: transparent;
+    color: #6b7280;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+.t8-location-add-close:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.t8-location-add-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.t8-location-add-error {
+    margin: 8px 0;
+    color: #dc2626;
+    font-size: 13px;
+}
+
+.t8-location-option.selected {
+    background: #f3f4f6;
+    font-weight: 600;
+}
+
+.t8-location-option.selected::after {
+    content: "✓";
+    float: right;
+    color: #16a34a;
+}
