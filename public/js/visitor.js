@@ -1,13 +1,28 @@
 document.addEventListener('DOMContentLoaded', function () {
     var type = document.getElementById('visitor_type');
+    var otherType = document.getElementById('visitor_type_other');
     var purpose = document.getElementById('purpose');
     if (!type || !purpose) return;
+    var form = type.form;
     var map = JSON.parse(type.getAttribute('data-purpose-map') || '{}');
+    function applyOtherType() {
+        var isOther = type.value === 'Other';
+        if (otherType) {
+            otherType.hidden = !isOther;
+            otherType.required = isOther;
+            if (!isOther) otherType.value = '';
+        }
+        if (form) form.classList.toggle('t8-visitor-other-active', isOther);
+    }
     function applyPurpose() {
         var value = map[type.value] || '';
         if (value) purpose.value = value;
     }
-    type.addEventListener('change', applyPurpose);
+    type.addEventListener('change', function () {
+        applyOtherType();
+        applyPurpose();
+    });
+    applyOtherType();
     if (!purpose.value) applyPurpose();
 
     var scheduledDate = document.getElementById('scheduled_date');

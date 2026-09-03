@@ -187,6 +187,7 @@ function t8_visitor_status_badge(string $status): string
 $formValues = [
     'full_name'       => '',
     'visitor_type'    => '',
+    'visitor_type_other' => '',
     'contact_suffix'  => '',
     'purpose'         => '',
     'scheduled_date'  => date('Y-m-d\TH:i'), // default to "now" for the form
@@ -218,6 +219,7 @@ switch ($action) {
             $formValues = [
                 'full_name'       => trim((string) ($_POST['full_name'] ?? '')),
                 'visitor_type'    => (string) ($_POST['visitor_type'] ?? ''),
+                'visitor_type_other' => trim((string) ($_POST['visitor_type_other'] ?? '')),
                 'contact_suffix'  => trim((string) ($_POST['contact_suffix'] ?? '')),
                 'purpose'         => trim((string) ($_POST['purpose'] ?? '')),
                 'scheduled_date'  => t8_normalize_datetime((string) ($_POST['scheduled_date'] ?? '')),
@@ -227,6 +229,15 @@ switch ($action) {
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
+                if ($formValues['visitor_type'] === 'Other') {
+                    if ($formValues['visitor_type_other'] === '') {
+                        $errors[] = 'Please specify the visitor type.';
+                    } elseif (mb_strlen($formValues['visitor_type_other']) > 50) {
+                        $errors[] = 'Visitor type cannot exceed 50 characters.';
+                    } else {
+                        $formValues['visitor_type'] = $formValues['visitor_type_other'];
+                    }
+                }
                 $mappedPurpose = T8_VISITOR_TYPE_PURPOSES[$formValues['visitor_type']] ?? '';
                 if ($mappedPurpose !== '') {
                     $formValues['purpose'] = $mappedPurpose;
@@ -234,7 +245,8 @@ switch ($action) {
                 if ($formValues['full_name'] === '') {
                     $errors[] = 'Visitor name is required.';
                 }
-                if (!in_array($formValues['visitor_type'], T8_VISITOR_TYPES, true)) {
+                if ($formValues['visitor_type'] !== $formValues['visitor_type_other']
+                    && !in_array($formValues['visitor_type'], T8_VISITOR_TYPES, true)) {
                     $errors[] = 'Please select a visitor type.';
                 }
                 if ($formValues['purpose'] === '') {
@@ -502,7 +514,7 @@ if (!$showForm) {
             <h2 class="t8-card-title">New Visit Request</h2>
         </div>
 
-        <form method="post" action="<?= e(page_url('visitor', ['action' => 'create'])) ?>" novalidate>
+        <form class="t8-visitor-form-grid" method="post" action="<?= e(page_url('visitor', ['action' => 'create'])) ?>" novalidate>
             <?= t8_csrf_field() ?>
 
             <div class="t8-field">
@@ -511,14 +523,19 @@ if (!$showForm) {
                        value="<?= e($formValues['full_name']) ?>" required>
             </div>
 
-            <div class="t8-field">
+            <div class="t8-field t8-visitor-type-field">
                 <label class="t8-label" for="visitor_type">Visitor Type</label>
-                <select class="t8-select" id="visitor_type" name="visitor_type" required data-purpose-map="<?= e((string) json_encode(T8_VISITOR_TYPE_PURPOSES)) ?>">
-                    <option value="">Select a type…</option>
-                    <?php foreach (T8_VISITOR_TYPES as $type): ?>
-                        <option value="<?= e($type) ?>" <?= $type === $formValues['visitor_type'] ? 'selected' : '' ?>><?= e($type) ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <div class="t8-visitor-type-control">
+                    <select class="t8-select" id="visitor_type" name="visitor_type" required data-purpose-map="<?= e((string) json_encode(T8_VISITOR_TYPE_PURPOSES)) ?>">
+                        <option value="">Select a type…</option>
+                        <?php foreach (T8_VISITOR_TYPES as $type): ?>
+                            <option value="<?= e($type) ?>" <?= $type === $formValues['visitor_type'] || ($type === 'Other' && $formValues['visitor_type_other'] !== '') ? 'selected' : '' ?>><?= e($type) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <input class="t8-input" type="text" id="visitor_type_other" name="visitor_type_other"
+                           value="<?= e($formValues['visitor_type_other']) ?>" maxlength="50"
+                           placeholder="Specify visitor type" hidden>
+                </div>
             </div>
 
             <div class="t8-field">
@@ -547,7 +564,7 @@ if (!$showForm) {
                 <span class="t8-help-text">Optional. Enter exactly 10 digits after +63, e.g. 9123456789.</span>
             </div>
 
-            <div class="t8-field">
+            <div class="t8-field t8-visitor-purpose-field">
                 <label class="t8-label" for="purpose">Purpose of Visit</label>
                 <input class="t8-input" type="text" id="purpose" name="purpose"
                        value="<?= e($formValues['purpose']) ?>" required>
