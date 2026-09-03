@@ -246,3 +246,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+/**
+ * Facility Type Change Handler
+ * Updates the capacity/quality label and unit when facility type changes.
+ * - Room, Area → "Capacity" (people)
+ * - Equipment, Asset, Utility → "Quality" (rating)
+ */
+document.addEventListener('DOMContentLoaded', () => {
+    const facilityTypeSelect = document.getElementById('facility_type');
+    const capacityLabel = document.getElementById('capacityLabel');
+    const capacityUnit = document.getElementById('capacityUnit');
+
+    if (!facilityTypeSelect || !capacityLabel || !capacityUnit) {
+        return;
+    }
+
+    function updateCapacityLabel() {
+        const facilityType = facilityTypeSelect.value;
+        const capacityTypes = ['Room', 'Area'];
+        
+        if (capacityTypes.includes(facilityType)) {
+            capacityLabel.textContent = 'Capacity';
+            capacityUnit.textContent = 'Unit: people';
+        } else {
+            capacityLabel.textContent = 'Quality';
+            capacityUnit.textContent = 'Unit: rating';
+        }
+    }
+
+    facilityTypeSelect.addEventListener('change', updateCapacityLabel);
+});
+

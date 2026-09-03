@@ -23,6 +23,15 @@
 #t8ReservationForm.t8-reservation-form-grid > a.t8-btn {
     grid-column: 1 / -1;
 }
+#t8ReservationForm.t8-reservation-form-grid > .t8-reservation-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-start;
+    gap: 16px;
+}
+#t8ReservationForm.t8-reservation-form-grid > .t8-reservation-actions > .t8-btn {
+    width: 140px;
+}
 
 .t8-reservation-datetime {
     display: grid;

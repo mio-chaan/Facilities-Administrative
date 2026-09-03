@@ -1,6 +1,8 @@
 
 
 /* ---- Buttons ---- */
+[hidden] { display: none !important; }
+
 .t8-btn {
     display: inline-flex;
     align-items: center;

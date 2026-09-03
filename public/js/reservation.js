@@ -91,10 +91,19 @@ document.addEventListener('DOMContentLoaded', function () {
     var category = document.getElementById('event_category');
     var config = JSON.parse(form.getAttribute('data-facility-config') || '{}');
     var fields = form.querySelectorAll('[data-reservation-field]');
+    var availability = document.getElementById('t8ReservationAvailability');
+    var suggestionsButton = document.getElementById('t8ReservationSuggestionsButton');
+    var suggestions = document.getElementById('t8ReservationSuggestions');
+    var availabilityTimer = null;
 
     function selectedType() {
         var option = facility.options[facility.selectedIndex];
         return option ? option.getAttribute('data-facility-type') || '' : '';
+    }
+
+    function supportsSuggestions() {
+        var type = selectedType();
+        return !!facility.value && ['Room', 'Area'].indexOf(type) !== -1;
     }
 
     function resetTypeFields() {
@@ -115,6 +124,13 @@ document.addEventListener('DOMContentLoaded', function () {
         var settings = config[type] || { event_categories: [], visible_fields: [], required_fields: [] };
         var selectedCategory = category.value;
         if (reset) resetTypeFields();
+
+        if (suggestionsButton) {
+            suggestionsButton.hidden = !supportsSuggestions();
+        }
+        if (suggestions) {
+            suggestions.hidden = true;
+        }
 
         category.innerHTML = '<option value="">Select a category…</option>';
         settings.event_categories.forEach(function (value) {
@@ -149,21 +165,25 @@ document.addEventListener('DOMContentLoaded', function () {
     facility.addEventListener('change', function () { applyType(true); });
     applyType(false);
 
-    var availability = document.getElementById('t8ReservationAvailability');
-    var suggestionsButton = document.getElementById('t8ReservationSuggestionsButton');
-    var suggestions = document.getElementById('t8ReservationSuggestions');
-    var availabilityTimer = null;
     function updateAvailability() {
-        if (!availability || !facility.value || !document.getElementById('start_time').value || !document.getElementById('end_time').value) {
+        if (!facility.value || !supportsSuggestions()) {
+            if (availability) availability.hidden = true;
+            if (suggestionsButton) suggestionsButton.hidden = true;
+            if (suggestions) suggestions.hidden = true;
+            return;
+        }
+        if (!availability || !document.getElementById('start_time').value || !document.getElementById('end_time').value) {
             if (availability) availability.hidden = true;
             if (suggestionsButton) suggestionsButton.hidden = true;
             if (suggestions) suggestions.hidden = true;
             return;
         }
         clearTimeout(availabilityTimer);
+        var selectedFacilityId = facility.value;
+        var selectedFacilityType = selectedType();
         availabilityTimer = setTimeout(function () {
             var params = new URLSearchParams({
-                facility_id: facility.value,
+                facility_id: selectedFacilityId,
                 start_time: document.getElementById('start_time').value,
                 end_time: document.getElementById('end_time').value
             });
@@ -172,15 +192,25 @@ document.addEventListener('DOMContentLoaded', function () {
             fetch('reservation_availability.php?' + params.toString(), { headers: { 'Accept': 'application/json' } })
                 .then(function (response) { return response.json(); })
                 .then(function (data) {
+                    // Ignore responses for a facility that is no longer selected.
+                    // Otherwise a delayed Room/Area availability request could reveal
+                    // the suggestions button after switching to another facility type.
+                    if (facility.value !== selectedFacilityId || selectedType() !== selectedFacilityType || !supportsSuggestions()) {
+                        return;
+                    }
                     availability.textContent = data.message || 'Availability could not be checked.';
                     availability.style.color = data.available ? 'var(--t8-success)' : 'var(--t8-danger)';
                     availability.hidden = false;
                     if (suggestionsButton) suggestionsButton.hidden = !!data.available;
                 })
                 .catch(function () {
+                    if (facility.value !== selectedFacilityId || selectedType() !== selectedFacilityType || !supportsSuggestions()) {
+                        return;
+                    }
                     availability.textContent = 'Availability could not be checked right now.';
                     availability.style.color = 'var(--t8-danger)';
                     availability.hidden = false;
+                    if (suggestionsButton) suggestionsButton.hidden = true;
                 });
         }, 180);
     }
@@ -244,6 +274,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (!markField(facility, !!facility.value, 'Please select a facility.')) valid = false;
         if (!markField(category, !!category.value, 'Please select an event category.')) valid = false;
+
+        var departmentEl = document.getElementById('department');
+        if (!markField(departmentEl, !!departmentEl.value, 'Department is required.')) valid = false;
 
         var keyPersonEl = document.getElementById('key_person');
         if (!markField(keyPersonEl, !!keyPersonEl.value.trim(), 'Key person / point of contact is required.')) valid = false;

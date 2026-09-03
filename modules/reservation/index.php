@@ -8,6 +8,21 @@ $isReservationStaff = t8_has_role('facilities_staff');
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
+// Dropdown options for Department. Edit or extend these values as needed.
+const T8_DEPARTMENTS = [
+    'Administration',
+    'Finance',
+    'Human Resources',
+    'Information Technology',
+    'Legal',
+    'Operations',
+    'Procurement',
+    'Facilities',
+    'Security',
+    'Marketing',
+    'Customer Service',
+];
+
 // Single source of truth for facility-type-driven reservation fields.
 const T8_FACILITY_RESERVATION_CONFIG = [
     'Room' => [
@@ -439,6 +454,9 @@ function t8_reservation_validate(PDO $pdo, array $activeFacilities, array $value
 
     if (in_array('requirements', $requiredFields, true) && $values['requirements'] === '') {
         $errors[] = 'Requirements are required.';
+    }
+    if ($values['department'] === '') {
+        $errors[] = 'Department is required.';
     }
     if ($values['key_person'] === '') {
         $errors[] = 'Key person / point of contact is required.';
@@ -1166,6 +1184,16 @@ if (!$showForm) {
                 </div>
 
                 <div class="t8-field">
+                    <label class="t8-label" for="department">Department</label>
+                    <select class="t8-select" id="department" name="department" required>
+                        <option value="">Select a department…</option>
+                        <?php foreach (T8_DEPARTMENTS as $dept): ?>
+                            <option value="<?= e($dept) ?>" <?= $dept === $formValues['department'] ? 'selected' : '' ?>><?= e($dept) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="t8-field">
                     <label class="t8-label" for="key_person">Key Person / Point of Contact</label>
                     <input class="t8-input" type="text" id="key_person" name="key_person"
                            value="<?= e($formValues['key_person']) ?>" placeholder="Name of the person to coordinate with" required>
@@ -1255,11 +1283,13 @@ if (!$showForm) {
                     <span class="t8-help-text">Event Category covers the main purpose; use this only for extra notes.</span>
                 </div>
 
-                <button class="t8-btn t8-btn-accent" type="submit">
-                    <i class="fa-solid fa-check"></i>
-                    <?= $action === 'edit' ? 'Save Changes' : ($isAdmin ? 'Continue' : 'Submit Request') ?>
-                </button>
-                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('reservation')) ?>">Cancel</a>
+                <div class="t8-reservation-actions">
+                    <button class="t8-btn t8-btn-accent" type="submit">
+                        <i class="fa-solid fa-check"></i>
+                        <?= $action === 'edit' ? 'Save Changes' : ($isAdmin ? 'Continue' : 'Submit Request') ?>
+                    </button>
+                    <a class="t8-btn t8-btn-outline" href="<?= e(page_url('reservation')) ?>">Cancel</a>
+                </div>
             </form>
         <?php endif; ?>
     </div>

@@ -126,7 +126,7 @@ function t8_facility_validate(string $name, string $location, string $facilityTy
     return $errors;
 }
 
-$facility = ['name' => '', 'location' => '', 'facility_type' => '', 'capacity' => '', 'maintenance_note' => ''];
+$facility = ['name' => '', 'location' => '', 'facility_type' => '', 'capacity' => '', 'next_maintenance_date' => '', 'maintenance_note' => ''];
 $equipment = ['id' => 0, 'name' => '', 'home_facility_id' => '', 'quantity' => 0];
 
 switch ($action) {
@@ -238,6 +238,7 @@ switch ($action) {
                 'location'      => trim((string) ($_POST['location'] ?? '')),
                 'facility_type' => (string) ($_POST['facility_type'] ?? ''),
                 'capacity'      => (string) ($_POST['capacity'] ?? ''),
+                'next_maintenance_date' => trim((string) ($_POST['next_maintenance_date'] ?? '')),
             ];
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
@@ -245,17 +246,21 @@ switch ($action) {
             } else {
                 $capacityInt = (int) $facility['capacity'];
                 $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt, $validLocationNames);
+                if ($facility['next_maintenance_date'] !== '' && strtotime($facility['next_maintenance_date']) === false) {
+                    $errors[] = 'Next maintenance date must be valid.';
+                }
 
                 if (!$errors) {
                     $stmt = $pdo->prepare(
-                        'INSERT INTO team8_facilities (name, location, facility_type, capacity, status)
-                         VALUES (:name, :location, :facility_type, :capacity, "active")'
+                        'INSERT INTO team8_facilities (name, location, facility_type, capacity, next_maintenance_date, status)
+                         VALUES (:name, :location, :facility_type, :capacity, :next_maintenance_date, "active")'
                     );
                     $stmt->execute([
                         'name'          => $facility['name'],
                         'location'      => $facility['location'],
                         'facility_type' => $facility['facility_type'],
                         'capacity'      => $capacityInt,
+                        'next_maintenance_date' => $facility['next_maintenance_date'] !== '' ? $facility['next_maintenance_date'] : null,
                     ]);
                     $newId = (int) $pdo->lastInsertId();
                     t8_audit_log($pdo, $currentUserId, 'facility', $newId, 'create', null, $facility['name']);
@@ -282,6 +287,7 @@ switch ($action) {
             $facility['location']      = trim((string) ($_POST['location'] ?? ''));
             $facility['facility_type'] = (string) ($_POST['facility_type'] ?? '');
             $facility['capacity']      = (string) ($_POST['capacity'] ?? '');
+            $facility['next_maintenance_date'] = trim((string) ($_POST['next_maintenance_date'] ?? ''));
             $facility['maintenance_note'] = trim((string) ($_POST['maintenance_note'] ?? ''));
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
@@ -289,6 +295,9 @@ switch ($action) {
             } else {
                 $capacityInt = (int) $facility['capacity'];
                 $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt, $validLocationNames);
+                if ($facility['next_maintenance_date'] !== '' && strtotime($facility['next_maintenance_date']) === false) {
+                    $errors[] = 'Next maintenance date must be valid.';
+                }
 
                 if (!$errors) {
                     $stmt = $pdo->prepare(
@@ -296,7 +305,8 @@ switch ($action) {
                          SET name = :name,
                              location = :location,
                              facility_type = :facility_type,
-                             capacity = :capacity
+                             capacity = :capacity,
+                             next_maintenance_date = :next_maintenance_date
                          WHERE id = :id'
                     );
                     $stmt->execute([
@@ -304,6 +314,7 @@ switch ($action) {
                         'location'      => $facility['location'],
                         'facility_type' => $facility['facility_type'],
                         'capacity'      => $capacityInt,
+                        'next_maintenance_date' => $facility['next_maintenance_date'] !== '' ? $facility['next_maintenance_date'] : null,
                         'id'            => $id,
                     ]);
                     if ($facility['maintenance_note'] !== '') {
@@ -582,8 +593,7 @@ if ($showEquipmentForm) {
                             </button>
                         </div>
                     </div>
-                    <span class="t8-help-text">Choose an existing location, or use "+ Add Location" to create a new one.</span>
-                </div>
+                   </div>
 
                 <div class="t8-field">
                     <label class="t8-label" for="capacity">Capacity</label>
@@ -591,7 +601,10 @@ if ($showEquipmentForm) {
                            value="<?= e((string) $facility['capacity']) ?>" required>
                 </div>
 
-
+                <div class="t8-field">
+                    <label class="t8-label" for="next_maintenance_date">Next Maintenance Date</label>
+                    <input class="t8-input" type="date" id="next_maintenance_date" name="next_maintenance_date" value="<?= e((string) ($facility['next_maintenance_date'] ?? '')) ?>">
+                </div>
                 <?php if ($action === 'edit'): ?>
                 <div class="t8-field t8-form-span-2">
                     <label class="t8-label" for="maintenance_note">Maintenance History Note <span class="t8-help-text">(optional)</span></label>
