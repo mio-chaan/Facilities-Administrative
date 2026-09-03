@@ -930,11 +930,36 @@ if (!$showForm) {
     $reservationFacilityFilter = (int) ($_GET['facility'] ?? 0);
     $reservationTypeFilter = trim((string) ($_GET['type'] ?? ''));
     $reservationStatusFilter = trim((string) ($_GET['status'] ?? ''));
+    $reservationSearchFilter = trim((string) ($_GET['search'] ?? ''));
+    $reservationRangeFilter = trim((string) ($_GET['range'] ?? ''));
     $reservationFilters = [
         'facility' => $reservationFacilityFilter > 0 ? $reservationFacilityFilter : '',
         'type' => $reservationTypeFilter,
         'status' => $reservationStatusFilter,
+        'search' => $reservationSearchFilter,
+        'range' => $reservationRangeFilter,
     ];
+
+    /** Reusable SQL fragment for the "Schedule" quick filter (today / this week / this month). */
+    function t8_reservation_range_condition(string $range): ?string
+    {
+        switch ($range) {
+            case 'today':
+                return "DATE(COALESCE(r.start_time, r.schedule, r.expected_return_date)) = CURDATE()";
+            case 'week':
+                return "COALESCE(r.start_time, r.schedule, r.expected_return_date) BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)";
+            case 'month':
+                return "COALESCE(r.start_time, r.schedule, r.expected_return_date) BETWEEN CURDATE() AND LAST_DAY(CURDATE())";
+            default:
+                return null;
+        }
+    }
+
+    /** Human-readable label for a Schedule range value, used by the filter chips. */
+    function t8_reservation_range_label(string $range): string
+    {
+        return ['today' => 'Today', 'week' => 'This week', 'month' => 'This month'][$range] ?? ucfirst($range);
+    }
 
     // Completed approved bookings are retained for audit purposes with an
     // explicit final status and are no longer part of active reservation lists.
@@ -996,11 +1021,22 @@ if (!$showForm) {
             $allWhere[] = 'r.status = :filter_status';
             $allParams['filter_status'] = $reservationStatusFilter;
         }
+        if ($reservationSearchFilter !== '') {
+            $allWhere[] = '(u.full_name LIKE :filter_search OR r.department LIKE :filter_search OR r.key_person LIKE :filter_search)';
+            $allParams['filter_search'] = '%' . $reservationSearchFilter . '%';
+        }
+        if ($reservationRangeFilter !== '') {
+            $rangeCondition = t8_reservation_range_condition($reservationRangeFilter);
+            if ($rangeCondition !== null) {
+                $allWhere[] = $rangeCondition;
+            }
+        }
         $allWhereSql = implode(' AND ', $allWhere);
         $allCountStmt = $pdo->prepare(
             "SELECT COUNT(*)
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
+             JOIN users u ON u.id = r.user_id
              WHERE {$allWhereSql}"
         );
         $allCountStmt->execute($allParams);
@@ -1009,7 +1045,7 @@ if (!$showForm) {
         $allPage = min(max(1, (int) ($_GET['page'] ?? 1)), $allTotalPages);
         $allOffset = ($allPage - 1) * $reservationPageSize;
         $allStmt = $pdo->prepare(
-            "SELECT r.*, f.name AS facility_name, f.facility_type, f.capacity AS facility_capacity, u.full_name AS requester_name
+            "SELECT r.*, f.name AS facility_name, f.facility_type, f.capacity AS facility_capacity, f.location AS facility_location, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
@@ -1120,6 +1156,86 @@ if (!$showForm) {
         $myReservations = t8_reservations_annotate_conflicts($pdo, $myReservations);
     }
 
+}
+
+/**
+ * Renders the meatball trigger + dropdown menu + data-* attributes used
+ * by the shared #t8ReservationDetailModal dialog (see markup near the
+ * bottom of this file). $r must include the joined facility/requester
+ * columns (facility_name, facility_type, facility_location, requester_name).
+ * Reschedule/Cancel items are conditional on status, matching the same
+ * rules already enforced server-side in the 'edit'/'cancel' actions above.
+ */
+function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId): void
+{
+    $id = (int) $r['id'];
+    $notes = t8_reservation_extract_notes((string) ($r['description'] ?? ''));
+    $remarks = (string) ($r['remarks'] ?? '') !== '' ? (string) $r['remarks'] : t8_reservation_extract_remarks((string) ($r['description'] ?? ''));
+    $schedule = t8_reservation_schedule($r);
+    $summary = t8_reservation_summary($r);
+    $ref = 'RES-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+    $isOwnRow = $currentUserId !== null && (int) ($r['user_id'] ?? 0) === $currentUserId;
+    $canReschedule = $r['status'] === 'approved' && ($isAdmin || $isOwnRow);
+    $canCancel = in_array($r['status'], ['approved', 'pending'], true) && ($isAdmin || $isOwnRow);
+    ?>
+    <div class="t8-res-menu">
+        <button type="button" class="t8-res-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions"
+                data-ref="<?= e($ref) ?>"
+                data-facility="<?= e((string) ($r['facility_name'] ?? '')) ?>"
+                data-facility-type="<?= e((string) ($r['facility_type'] ?? 'Unknown')) ?>"
+                data-facility-location="<?= e((string) ($r['facility_location'] ?? '—')) ?>"
+                data-requester="<?= e((string) ($r['requester_name'] ?? '—')) ?>"
+                data-department="<?= e((string) ($r['department'] ?? '—')) ?>"
+                data-key-person="<?= e((string) ($r['key_person'] ?? '—')) ?>"
+                data-category="<?= e($summary['category']) ?>"
+                data-status="<?= e((string) $r['status']) ?>"
+                data-schedule-primary="<?= e($schedule['primary']) ?>"
+                data-schedule-secondary="<?= e($schedule['secondary']) ?>"
+                data-participants="<?= e((string) ($r['expected_participants'] ?? '')) ?>"
+                data-quantity="<?= e((string) ($r['quantity'] ?? '')) ?>"
+                data-return-date="<?= e(!empty($r['expected_return_date']) ? format_date((string) $r['expected_return_date'], 'M d, Y') : '') ?>"
+                data-notes="<?= e($notes) ?>"
+                data-remarks="<?= e($remarks) ?>"
+                data-requirements="<?= e((string) ($r['requirements'] ?? '')) ?>"
+                data-created="<?= e(format_date((string) ($r['created_at'] ?? ''), 'M d, Y g:i A')) ?>"
+                data-updated="<?= e(format_date((string) ($r['updated_at'] ?? ''), 'M d, Y g:i A')) ?>"
+                data-conflict="<?= !empty($r['has_conflict']) ? '1' : '0' ?>">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+        </button>
+        <div class="t8-res-menu-panel" role="menu">
+            <button type="button" class="t8-res-menu-item t8-res-view-details" role="menuitem">
+                <i class="fa-solid fa-eye"></i> View Details
+            </button>
+            <button type="button" class="t8-res-menu-item t8-res-copy-ref" role="menuitem" data-copy="<?= e($ref) ?>">
+                <i class="fa-solid fa-copy"></i> Copy Reservation Ref
+            </button>
+            <?php if ($canReschedule || $canCancel): ?>
+                <div class="t8-res-menu-divider"></div>
+            <?php endif; ?>
+            <?php if ($canReschedule): ?>
+                <a class="t8-res-menu-item" role="menuitem" href="<?= e(page_url('reservation', ['action' => 'edit', 'id' => $id])) ?>">
+                    <i class="fa-solid fa-calendar-pen"></i> Reschedule
+                </a>
+            <?php endif; ?>
+            <?php if ($canCancel): ?>
+                <?php if ($isAdmin || $r['status'] === 'pending'): ?>
+                    <form method="post" action="<?= e(page_url('reservation', ['action' => 'cancel'])) ?>"
+                          onsubmit="return confirm('Cancel this reservation?');">
+                        <?= t8_csrf_field() ?>
+                        <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                        <button class="t8-res-menu-item t8-danger" type="submit" role="menuitem">
+                            <i class="fa-solid fa-xmark"></i> Cancel Reservation
+                        </button>
+                    </form>
+                <?php elseif (!t8_reservation_has_started($r)): ?>
+                    <button type="button" class="t8-res-menu-item t8-danger" role="menuitem" data-cancel-reservation-id="<?= e((string) $id) ?>">
+                        <i class="fa-solid fa-xmark"></i> Request Cancellation
+                    </button>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
 }
 ?>
 <h1>Facilities Reservation</h1>
@@ -1452,10 +1568,45 @@ if (!$showForm) {
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
             </div>
-            <div class="t8-reservation-filters" data-filter-table="t8AllReservations" data-filter-type="all">
-                <label>Facility <select class="t8-select" data-filter-facility><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
-                <label>Type <select class="t8-select" data-filter-type-select><option value="">All types</option><?php foreach (array_keys(T8_FACILITY_RESERVATION_CONFIG) as $type): ?><option value="<?= e($type) ?>" <?= $reservationFilters['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></label>
-                <label>Status <select class="t8-select" data-filter-status><option value="">All statuses</option><?php foreach (['approved', 'cancellation_pending'] as $status): ?><option value="<?= e($status) ?>" <?= $reservationFilters['status'] === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?></select></label>
+            <div class="t8-reservation-toolbar" data-filter-table="t8AllReservations" data-filter-type="all">
+                <div class="t8-reservation-filters-row">
+                    <div class="t8-filter-search">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" class="t8-input" data-filter-search placeholder="Search requester, key person, department…" value="<?= e($reservationFilters['search']) ?>">
+                    </div>
+                    <label>Facility <select class="t8-select" data-filter-facility><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
+                    <label>Type <select class="t8-select" data-filter-type-select><option value="">All types</option><?php foreach (array_keys(T8_FACILITY_RESERVATION_CONFIG) as $type): ?><option value="<?= e($type) ?>" <?= $reservationFilters['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></label>
+                    <label>Status <select class="t8-select" data-filter-status><option value="">All statuses</option><?php foreach (['approved', 'cancellation_pending'] as $status): ?><option value="<?= e($status) ?>" <?= $reservationFilters['status'] === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?></select></label>
+                    <label>Schedule <select class="t8-select" data-filter-range>
+                        <option value="">Any time</option>
+                        <?php foreach (['today' => 'Today', 'week' => 'This week', 'month' => 'This month'] as $rangeKey => $rangeLabel): ?>
+                            <option value="<?= e($rangeKey) ?>" <?= $reservationFilters['range'] === $rangeKey ? 'selected' : '' ?>><?= e($rangeLabel) ?></option>
+                        <?php endforeach; ?>
+                    </select></label>
+                </div>
+                <div class="t8-reservation-filters-meta">
+                    <div class="t8-filter-chips" data-filter-chips>
+                        <?php
+                        $activeChips = [];
+                        if ($reservationFilters['facility'] !== '') {
+                            foreach ($activeFacilities as $fc) { if ((int) $fc['id'] === (int) $reservationFilters['facility']) { $activeChips['facility'] = 'Facility: ' . $fc['name']; break; } }
+                        }
+                        if ($reservationFilters['type'] !== '') { $activeChips['type'] = 'Type: ' . $reservationFilters['type']; }
+                        if ($reservationFilters['status'] !== '') { $activeChips['status'] = 'Status: ' . ucwords(str_replace('_', ' ', $reservationFilters['status'])); }
+                        if ($reservationFilters['search'] !== '') { $activeChips['search'] = 'Search: "' . $reservationFilters['search'] . '"'; }
+                        if ($reservationFilters['range'] !== '') { $activeChips['range'] = 'Schedule: ' . t8_reservation_range_label($reservationFilters['range']); }
+                        ?>
+                        <?php if ($activeChips === []): ?>
+                            <span class="t8-filter-empty-chips">No filters applied</span>
+                        <?php else: ?>
+                            <?php foreach ($activeChips as $chipKey => $chipLabel): ?>
+                                <span class="t8-filter-chip"><?= e($chipLabel) ?> <button type="button" data-remove-filter="<?= e($chipKey) ?>" aria-label="Remove filter">&times;</button></span>
+                            <?php endforeach; ?>
+                            <button type="button" class="t8-filter-clear-all">Clear all filters</button>
+                        <?php endif; ?>
+                    </div>
+                    <div class="t8-filter-result-count" data-filter-result-count>Showing <strong><?= e((string) count($allReservations)) ?></strong> of <strong><?= e((string) $allTotal) ?></strong> reservations</div>
+                </div>
             </div>
             <div class="t8-table-wrap">
                 <table class="t8-table" id="t8AllReservations">
@@ -1469,15 +1620,14 @@ if (!$showForm) {
                             <th>Reservation</th>
                             <th>Schedule</th>
                             <th>Status</th>
-                            <th>Actions</th>
+                            <th style="text-align:right;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if ($allReservations === []): ?>
                             <tr>
                                 <td colspan="10" class="t8-table-empty-row">
-                                    No reservations have been made yet.
-                                    Once a reservation is submitted, it will appear here.
+                                    No reservations match your filters.
                                 </td>
                             </tr>
                         <?php else: ?>
@@ -1498,23 +1648,10 @@ if (!$showForm) {
                                                 <i class="fa-solid fa-triangle-exclamation"></i>
                                             </span>
                                         <?php endif; ?>
-                                        <?php if ($r['status'] === 'approved'): ?>
-                                            <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) ?>">
-                                                <i class="fa-solid fa-calendar-pen"></i> Reschedule
-                                            </a>
-                                            <form method="post" action="<?= e(page_url('reservation', ['action' => 'cancel'])) ?>"
-                                                  onsubmit="return confirm('Cancel this reservation and move it to Archive?');">
-                                                <?= t8_csrf_field() ?>
-                                                <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
-                                                <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                    <i class="fa-solid fa-xmark"></i> Cancel
-                                                </button>
-                                            </form>
-                                        <?php elseif ($r['status'] === 'cancellation_pending'): ?>
+                                        <?php if ($r['status'] === 'cancellation_pending'): ?>
                                             <span class="t8-help-text">Cancellation review pending</span>
-                                        <?php else: ?>
-                                            <span class="t8-help-text">—</span>
                                         <?php endif; ?>
+                                        <?php t8_reservation_render_menu($r, $isAdmin, $currentUserId); ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -1721,6 +1858,59 @@ if (!$showForm) {
                 <p class="t8-help-text">This request will be sent to an Administrator for approval. The reservation remains active until it is approved.</p>
                 <div style="display:flex;gap:8px;margin-top:16px;"><button class="t8-btn t8-btn-outline" type="button" data-close-cancellation-modal>Cancel</button><button class="t8-btn t8-btn-danger" type="submit">Submit Cancellation Request</button></div>
             </form>
+        </dialog>
+    <?php endif; ?>
+
+    <?php if ($isAdmin): ?>
+        <!--
+            Shared detail dialog for the "All Reservations" table's meatball
+            menu (see t8_reservation_render_menu() above). One dialog, filled
+            via JS from the clicked trigger's data-* attributes, instead of
+            one <dialog> per row.
+        -->
+        <dialog id="t8ReservationDetailModal" class="t8-res-detail-modal">
+            <div class="t8-res-detail-header">
+                <div>
+                    <h2 id="t8ResDetailTitle">Reservation</h2>
+                    <span class="t8-res-detail-ref" id="t8ResDetailRef"></span>
+                </div>
+                <button type="button" class="t8-res-detail-close" data-close-detail-modal aria-label="Close">&times;</button>
+            </div>
+            <div class="t8-res-detail-body">
+                <div id="t8ResDetailConflict" class="t8-conflict-note" hidden>
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span>This reservation currently overlaps with another approved booking for the same facility.</span>
+                </div>
+                <div class="t8-res-detail-grid">
+                    <div class="t8-res-detail-item"><span>Status</span><strong id="t8ResDetailStatus">—</strong></div>
+                    <div class="t8-res-detail-item"><span>Facility Type</span><strong id="t8ResDetailType">—</strong></div>
+                    <div class="t8-res-detail-item"><span>Requested By</span><strong id="t8ResDetailRequester">—</strong></div>
+                    <div class="t8-res-detail-item"><span>Department</span><strong id="t8ResDetailDepartment">—</strong></div>
+                    <div class="t8-res-detail-item"><span>Key Person / POC</span><strong id="t8ResDetailKeyPerson">—</strong></div>
+                    <div class="t8-res-detail-item"><span>Event Category</span><strong id="t8ResDetailCategory">—</strong></div>
+                    <div class="t8-res-detail-item"><span>Schedule</span><strong id="t8ResDetailSchedule">—</strong></div>
+                    <div class="t8-res-detail-item"><span>Location</span><strong id="t8ResDetailLocation">—</strong></div>
+                    <div class="t8-res-detail-item" id="t8ResDetailQtyWrap" hidden><span>Quantity / Return</span><strong id="t8ResDetailQty">—</strong></div>
+                    <div class="t8-res-detail-item" id="t8ResDetailParticipantsWrap" hidden><span>Participants</span><strong id="t8ResDetailParticipants">—</strong></div>
+                    <div class="t8-res-detail-item full" id="t8ResDetailRequirementsWrap" hidden><span>Requirements</span><strong id="t8ResDetailRequirements">—</strong></div>
+                </div>
+
+                <div class="t8-res-detail-section"><i class="fa-solid fa-note-sticky"></i> Notes / Additional Details</div>
+                <div class="t8-res-detail-notes" id="t8ResDetailNotes">No additional notes were provided for this reservation.</div>
+
+                <div id="t8ResDetailRemarksWrap" hidden>
+                    <div class="t8-res-detail-section"><i class="fa-solid fa-comment"></i> Remarks</div>
+                    <div class="t8-res-detail-notes" id="t8ResDetailRemarks"></div>
+                </div>
+
+                <div class="meta-footer" style="display:flex; justify-content:space-between; margin-top:18px; padding-top:14px; border-top:1px solid var(--t8-border); font-size:.72rem; color:var(--t8-text-muted);">
+                    <span id="t8ResDetailCreated">—</span>
+                    <span id="t8ResDetailUpdated">—</span>
+                </div>
+            </div>
+            <div class="t8-res-detail-footer">
+                <button type="button" class="t8-btn t8-btn-outline" data-close-detail-modal>Close</button>
+            </div>
         </dialog>
     <?php endif; ?>
 
