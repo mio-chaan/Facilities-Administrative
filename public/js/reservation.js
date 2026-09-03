@@ -106,6 +106,18 @@ document.addEventListener('DOMContentLoaded', function () {
         return !!facility.value && ['Room', 'Area'].indexOf(type) !== -1;
     }
 
+    function applyParticipantCapacity() {
+        var participants = document.getElementById('expected_participants');
+        var selectedOption = facility.options[facility.selectedIndex];
+        var capacity = selectedOption ? Number(selectedOption.getAttribute('data-facility-capacity') || 0) : 0;
+        if (!participants) return;
+
+        participants.max = capacity > 0 ? String(capacity) : '';
+        if (capacity > 0 && participants.value !== '' && Number(participants.value) > capacity) {
+            participants.value = String(capacity);
+        }
+    }
+
     function resetTypeFields() {
         category.value = '';
         fields.forEach(function (wrapper) {
@@ -123,7 +135,12 @@ document.addEventListener('DOMContentLoaded', function () {
         var capacity = selectedOption ? Number(selectedOption.getAttribute('data-facility-capacity') || 0) : 0;
         var settings = config[type] || { event_categories: [], visible_fields: [], required_fields: [] };
         var selectedCategory = category.value;
+        var participants = document.getElementById('expected_participants');
+        var previousParticipants = participants ? participants.value : '';
         if (reset) resetTypeFields();
+        if (reset && participants && settings.visible_fields.indexOf('participants') !== -1) {
+            participants.value = previousParticipants;
+        }
 
         if (suggestionsButton) {
             suggestionsButton.hidden = !supportsSuggestions();
@@ -156,6 +173,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (!active && window.T8Validate) T8Validate.clearError(input);
             }
         });
+        applyParticipantCapacity();
         var returnDate = document.getElementById('return_date');
         if (returnDate && ['Equipment', 'Asset'].indexOf(type) !== -1 && !returnDate.value) {
             returnDate.value = new Date().toISOString().slice(0, 10);
@@ -163,6 +181,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     facility.addEventListener('change', function () { applyType(true); });
+    var participants = document.getElementById('expected_participants');
+    if (participants) participants.addEventListener('input', applyParticipantCapacity);
     applyType(false);
 
     function updateAvailability() {
