@@ -246,6 +246,7 @@ function t8_retention_suggest_date(int $years): string
 ?>
 <div class="t8-retention-heading">
     <div><h1>Records Retention</h1><p class="t8-help-text">Track retention policies, disposition schedules, and compliance for records.</p></div>
+    <?php if ($showList): ?><a class="t8-btn t8-btn-accent" href="<?= e(page_url('retention', ['action' => 'create_schedule'])) ?>"><i class="fa-solid fa-plus"></i> Add Schedule</a><?php endif; ?>
 </div>
 
 <?php foreach ($errors as $error): ?>

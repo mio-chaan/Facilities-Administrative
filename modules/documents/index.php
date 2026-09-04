@@ -219,7 +219,7 @@ $hrActions = [
     'explanation_new', 'explanation_view', 'explanation_review',
     'memorandum_new', 'memorandum_edit', 'memorandum_view', 'memorandum_status',
     'certificate_new', 'certificate_view', 'certificate_status',
-    'hr_print', 'hr_attachment_download',
+    'hr_print',
 ];
 
 if (in_array($action, $hrActions, true)) {
@@ -523,8 +523,7 @@ switch ($action) {
             // page below - avoids storing AI output in the database.
             $_SESSION['t8_ai_summary_' . $summaryVersionId] = $aiSummary;
         } catch (Throwable $e) {
-            error_log('AI document summarization failed: ' . $e->getMessage());
-            t8_flash_set('danger', 'AI summarization is temporarily unavailable.');
+            t8_flash_set('danger', 'AI summarization failed: ' . $e->getMessage());
         }
         redirect(page_url('documents', ['action' => 'versions', 'id' => $summaryDocumentId, 'summary_version' => $summaryVersionId]));
         break;

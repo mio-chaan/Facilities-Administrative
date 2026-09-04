@@ -76,13 +76,6 @@ CREATE TABLE IF NOT EXISTS team8_login_throttle (
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS team8_hr_document_sequences (
-    prefix        VARCHAR(20) NOT NULL,
-    document_year SMALLINT NOT NULL,
-    next_number   INT NOT NULL,
-    PRIMARY KEY (prefix, document_year)
-) ENGINE=InnoDB;
-
 
 -- =========================================================
 -- MODULE: FACILITIES RESERVATION
@@ -101,12 +94,6 @@ CREATE TABLE team8_facilities (
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT chk_team8_facilities_capacity CHECK (capacity >= 1)
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS team8_facility_locations (
-    id         INT AUTO_INCREMENT PRIMARY KEY,
-    name       VARCHAR(150) NOT NULL UNIQUE,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_facility_maintenance_history (
@@ -616,7 +603,5 @@ CREATE INDEX idx_team8_contractobl_duedate ON team8_contract_obligations(due_dat
 CREATE UNIQUE INDEX uq_team8_legal_documents_case_document ON team8_legal_documents(case_id, document_id);
 CREATE UNIQUE INDEX uq_team8_contract_documents_contract_document ON team8_contract_documents(contract_id, document_id);
 CREATE UNIQUE INDEX uq_team8_contract_parties_contract_party_role ON team8_contract_parties(contract_id, party_id, role_in_contract);
-CREATE UNIQUE INDEX uq_team8_nte_incident ON team8_notice_to_explain(incident_report_id);
-CREATE UNIQUE INDEX uq_team8_explanation_nte ON team8_explanations(nte_id);
 
 SET FOREIGN_KEY_CHECKS = 1;

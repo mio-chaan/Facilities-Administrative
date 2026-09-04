@@ -86,18 +86,9 @@ if (!function_exists('t8_hr_generate_doc_number')) {
     function t8_hr_generate_doc_number(PDO $pdo, string $prefix, string $table): string
     {
         $year = date('Y');
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS team8_hr_document_sequences ('
-            . 'prefix VARCHAR(20) NOT NULL, document_year SMALLINT NOT NULL, '
-            . 'next_number INT NOT NULL, PRIMARY KEY (prefix, document_year)) ENGINE=InnoDB'
-        );
-        $stmt = $pdo->prepare(
-            'INSERT INTO team8_hr_document_sequences (prefix, document_year, next_number)
-             VALUES (:prefix, :document_year, LAST_INSERT_ID(1))
-             ON DUPLICATE KEY UPDATE next_number = LAST_INSERT_ID(next_number + 1)'
-        );
-        $stmt->execute(['prefix' => $prefix, 'document_year' => (int) $year]);
-        $sequence = (int) $pdo->lastInsertId();
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE YEAR(created_at) = :year");
+        $stmt->execute(['year' => $year]);
+        $sequence = (int) $stmt->fetchColumn() + 1;
         return sprintf('%s-%s-%06d', $prefix, $year, $sequence);
     }
 }
@@ -219,21 +210,6 @@ if (!function_exists('t8_hr_store_attachment')) {
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         if (!in_array($ext, $allowed, true)) {
             throw new RuntimeException('Attachment type not allowed. Allowed: ' . implode(', ', $allowed) . '.');
-        }
-
-        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
-        $allowedMimes = [
-            'pdf' => ['application/pdf'],
-            'png' => ['image/png'],
-            'jpg' => ['image/jpeg'],
-            'jpeg' => ['image/jpeg'],
-            'doc' => ['application/msword', 'application/octet-stream'],
-            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
-            'xls' => ['application/vnd.ms-excel', 'application/octet-stream'],
-            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip'],
-        ];
-        if ($mime === false || !in_array($mime, $allowedMimes[$ext], true)) {
-            throw new RuntimeException('The attachment contents do not match the selected file type.');
         }
 
         $dir = UPLOAD_DIR . '/hr_documents';

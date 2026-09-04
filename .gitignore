@@ -14,7 +14,10 @@ node_modules/
 
 # Logs
 *.log
+<<<<<<< HEAD
 # Local secret config
 app/config/config.local.php
+
+tests/
 
 

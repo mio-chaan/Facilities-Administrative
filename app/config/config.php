@@ -8,9 +8,9 @@ declare(strict_types=1);
 // ---- App-wide settings — edit these for your environment ---------------
 
 define('APP_NAME', 'RAM YUM - Facilities & Administrative Management');
-define('APP_ENV', getenv('APP_ENV') ?: 'local');
-define('APP_DEBUG', filter_var(getenv('APP_DEBUG') ?: (APP_ENV === 'local' ? '1' : '0'), FILTER_VALIDATE_BOOLEAN));
-define('APP_URL', rtrim(getenv('APP_URL') ?: 'http://localhost:8000', '/'));
+define('APP_ENV', 'local');              // 'local' | 'production'
+define('APP_DEBUG', true);               // true = show real PHP errors (local only)
+define('APP_URL', 'http://localhost:8000'); 
 define('APP_TIMEZONE', 'Asia/Manila');
 define('DB_TEAM8_PREFIX', 'team8_');
 // Load local config (contains secrets) if present

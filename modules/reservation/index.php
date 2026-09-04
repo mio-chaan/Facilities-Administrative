@@ -737,21 +737,14 @@ switch ($action) {
         if (!$target || !in_array($target['status'], ['pending', 'approved', 'cancellation_pending'], true)) {
             t8_flash_set('danger', "That reservation can't be cancelled.");
         } elseif ($isAdmin) {
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare("UPDATE team8_reservations
-                               SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'admin_cancelled', cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
-                               WHERE id = :id")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->prepare("UPDATE team8_reservation_cancellation_requests
-                               SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW(), admin_remark = 'Cancelled by administrator'
-                               WHERE reservation_id = :id AND status = 'pending'")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) { $pdo->rollBack(); }
-                throw $e;
-            }
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'admin_cancelled', cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW(), admin_remark = 'Cancelled by administrator'
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'admin_cancel');
             t8_flash_set('success', 'Reservation cancelled and moved to Archive.');
         } elseif ((int) $target['user_id'] === $currentUserId && $target['status'] === 'pending') {
@@ -780,23 +773,16 @@ switch ($action) {
                 if ($reason === '') {
                     t8_flash_set('danger', 'A reason for cancellation is required.');
                 } else {
-                    $pdo->beginTransaction();
-                    try {
-                        $pdo->prepare("UPDATE team8_reservations
-                                       SET status = 'cancellation_pending', cancellation_reason = :reason,
-                                           cancellation_requested_by = :user_id, cancellation_requested_at = NOW(), cancellation_decision = 'pending'
-                                       WHERE id = :id")
-                            ->execute(['reason' => $reason, 'user_id' => $currentUserId, 'id' => $id]);
-                        $requestStmt = $pdo->prepare(
-                            "INSERT INTO team8_reservation_cancellation_requests (reservation_id, requested_by, reason, status)
-                             VALUES (:reservation_id, :requested_by, :reason, 'pending')"
-                        );
-                        $requestStmt->execute(['reservation_id' => $id, 'requested_by' => $currentUserId, 'reason' => $reason]);
-                        $pdo->commit();
-                    } catch (Throwable $e) {
-                        if ($pdo->inTransaction()) { $pdo->rollBack(); }
-                        throw $e;
-                    }
+                    $pdo->prepare("UPDATE team8_reservations
+                                   SET status = 'cancellation_pending', cancellation_reason = :reason,
+                                       cancellation_requested_by = :user_id, cancellation_requested_at = NOW(), cancellation_decision = 'pending'
+                                   WHERE id = :id")
+                        ->execute(['reason' => $reason, 'user_id' => $currentUserId, 'id' => $id]);
+                    $requestStmt = $pdo->prepare(
+                        "INSERT INTO team8_reservation_cancellation_requests (reservation_id, requested_by, reason, status)
+                         VALUES (:reservation_id, :requested_by, :reason, 'pending')"
+                    );
+                    $requestStmt->execute(['reservation_id' => $id, 'requested_by' => $currentUserId, 'reason' => $reason]);
                     t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_request', 'approved', $reason);
                     t8_flash_set('success', 'Cancellation request sent to an administrator for review.');
                 }
@@ -819,41 +805,27 @@ switch ($action) {
         if (!$target || $target['status'] !== 'cancellation_pending' || !in_array($decision, ['approved', 'rejected'], true)) {
             t8_flash_set('danger', 'That cancellation request is no longer available for review.');
         } elseif ($decision === 'approved') {
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare("UPDATE team8_reservations
-                               SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'approved',
-                                   cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
-                               WHERE id = :id")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->prepare("UPDATE team8_reservation_cancellation_requests
-                               SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW()
-                               WHERE reservation_id = :id AND status = 'pending'")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) { $pdo->rollBack(); }
-                throw $e;
-            }
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'approved',
+                               cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW()
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_approved', 'cancellation_pending', (string) ($target['cancellation_reason'] ?? ''));
             t8_flash_set('success', 'Cancellation approved. Reservation moved to Archive.');
         } else {
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare("UPDATE team8_reservations
-                               SET status = 'approved', cancellation_decision = 'rejected',
-                                   cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
-                               WHERE id = :id")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->prepare("UPDATE team8_reservation_cancellation_requests
-                               SET status = 'rejected', reviewed_by = :admin_id, reviewed_at = NOW()
-                               WHERE reservation_id = :id AND status = 'pending'")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) { $pdo->rollBack(); }
-                throw $e;
-            }
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'approved', cancellation_decision = 'rejected',
+                               cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'rejected', reviewed_by = :admin_id, reviewed_at = NOW()
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_rejected', 'cancellation_pending', (string) ($target['cancellation_reason'] ?? ''));
             t8_flash_set('success', 'Cancellation request rejected. Reservation remains active.');
         }
@@ -916,29 +888,17 @@ switch ($action) {
         $id = (int) ($_POST['id'] ?? 0);
         $target = t8_reservation_fetch($pdo, $id);
         if ($target && $target['status'] === 'pending' && t8_reservation_is_future($target)) {
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare('SELECT id FROM team8_facilities WHERE id = :id FOR UPDATE')
-                    ->execute(['id' => $target['facility_id']]);
-                if ($target['start_time'] && $target['end_time'] && t8_reservation_has_conflict($pdo, (int) $target['facility_id'], (string) $target['start_time'], (string) $target['end_time'], $id)) {
-                    $pdo->rollBack();
-                    t8_flash_set('danger', 'This facility already has an overlapping reservation. Please reschedule before approval.');
-                    redirect(page_url('reservation'));
-                }
-                $newStatus = $action === 'approve' ? 'approved' : 'rejected';
-                $pdo->prepare('UPDATE team8_reservations SET status = :status WHERE id = :id')
-                    ->execute(['status' => $newStatus, 'id' => $id]);
-                $pdo->prepare(
-                    'INSERT INTO team8_reservation_approvals (reservation_id, approver_id, step_order, status, decided_at)
-                     VALUES (:reservation_id, :approver_id, 1, :status, NOW())'
-                )->execute(['reservation_id' => $id, 'approver_id' => $currentUserId, 'status' => $newStatus]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                throw $e;
+            if ($target['start_time'] && $target['end_time'] && t8_reservation_has_conflict($pdo, (int) $target['facility_id'], (string) $target['start_time'], (string) $target['end_time'], $id)) {
+                t8_flash_set('danger', 'This facility already has an overlapping reservation. Please reschedule before approval.');
+                redirect(page_url('reservation'));
             }
+            $newStatus = $action === 'approve' ? 'approved' : 'rejected';
+            $pdo->prepare('UPDATE team8_reservations SET status = :status WHERE id = :id')
+                ->execute(['status' => $newStatus, 'id' => $id]);
+            $pdo->prepare(
+                'INSERT INTO team8_reservation_approvals (reservation_id, approver_id, step_order, status, decided_at)
+                 VALUES (:reservation_id, :approver_id, 1, :status, NOW())'
+            )->execute(['reservation_id' => $id, 'approver_id' => $currentUserId, 'status' => $newStatus]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, $action);
             // Moving out of Pending Approvals and into All Reservations is
             // automatic - both tables below simply query by status, so a

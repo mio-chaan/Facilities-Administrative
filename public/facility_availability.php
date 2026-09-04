@@ -32,7 +32,6 @@ require_once __DIR__ . '/../app/includes/helpers.php';
 require_once __DIR__ . '/../app/includes/reservation_helpers.php';
 
 header('Content-Type: application/json');
-header('Cache-Control: no-store');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     http_response_code(405);

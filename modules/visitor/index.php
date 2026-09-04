@@ -74,15 +74,11 @@ $isAdmin = t8_has_role('admin');
 // Equal access: every authenticated user reaching this module (the
 // 'visitor' route carries no role restriction) sees and manages every
 // visitor the same way — no admin-only vs staff-only branch.
-$canViewAllVisitors = t8_has_role(['admin', 'front_desk', 'facilities_staff']);
-$canManageVisits = $canViewAllVisitors;
+$canViewAllVisitors = true;
+$canManageVisits = true;
 
 $action = $_GET['action'] ?? 'list';
 $errors = [];
-
-if (!$canManageVisits && in_array($action, ['checkin', 'checkout', 'reschedule', 'cancel'], true)) {
-    t8_require_role(['admin', 'front_desk', 'facilities_staff']);
-}
 
 // Dropdown options for Visitor Type. Add more here as needed - no
 // other code changes required.
@@ -201,13 +197,13 @@ $formValues = [
 /** Expire unclaimed visits once their scheduled check-in time has passed. */
 function t8_expire_visitor_bookings(PDO $pdo, int $actorId): void
 {
-    $ids = $pdo->query("SELECT id FROM team8_visitors WHERE status = 'scheduled' AND scheduled_date < DATE_SUB(NOW(), INTERVAL 2 HOUR)")
+    $ids = $pdo->query("SELECT id FROM team8_visitors WHERE status = 'scheduled' AND scheduled_date < NOW()")
         ->fetchAll(PDO::FETCH_COLUMN);
     if ($ids === []) {
         return;
     }
 
-    $pdo->query("UPDATE team8_visitors SET status = 'expired' WHERE status = 'scheduled' AND scheduled_date < DATE_SUB(NOW(), INTERVAL 2 HOUR)");
+    $pdo->query("UPDATE team8_visitors SET status = 'expired' WHERE status = 'scheduled' AND scheduled_date < NOW()");
     foreach ($ids as $id) {
         t8_audit_log($pdo, $actorId, 'visitor', (int) $id, 'expired', 'scheduled', 'scheduled date passed');
     }
@@ -310,8 +306,7 @@ switch ($action) {
         }
         $id = (int) ($_POST['id'] ?? 0);
         $target = t8_visitor_fetch($pdo, $id);
-        if ($target && $target['status'] === 'scheduled' && strtotime((string) $target['scheduled_date']) <= time()
-            && strtotime((string) $target['scheduled_date']) >= strtotime('-2 hours')) {
+        if ($target && $target['status'] === 'scheduled' && strtotime((string) $target['scheduled_date']) > time()) {
             $pdo->prepare("UPDATE team8_visitors SET status = 'checked_in', check_in_time = NOW() WHERE id = :id")
                 ->execute(['id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'visitor', $id, 'check_in');
@@ -414,52 +409,49 @@ switch ($action) {
 $showForm = $action === 'create';
 
 if (!$showForm) {
-    $visitorScopeSql = $canViewAllVisitors ? '' : ' AND v.logged_by = :scope_user_id';
-    $visitorScopeParams = $canViewAllVisitors ? [] : ['scope_user_id' => $currentUserId];
+    // Equal access: no owner-scoping — everyone sees every visitor
+    // record in every list/table below, regardless of who logged it.
     $visitorPageSize = 5;
-    $scheduledTotalStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_visitors v WHERE v.status = 'scheduled'{$visitorScopeSql}");
-    $scheduledTotalStmt->execute($visitorScopeParams);
+    $scheduledTotalStmt = $pdo->query("SELECT COUNT(*) FROM team8_visitors v WHERE v.status = 'scheduled'");
     $scheduledTotalPages = max(1, (int) ceil((int) $scheduledTotalStmt->fetchColumn() / $visitorPageSize));
     $scheduledPage = min(max(1, (int) ($_GET['scheduled_page'] ?? 1)), $scheduledTotalPages);
     $scheduledStmt = $pdo->prepare(
         "SELECT v.*, u.full_name AS logged_by_name
          FROM team8_visitors v
          JOIN users u ON u.id = v.logged_by
-         WHERE v.status = 'scheduled'{$visitorScopeSql}
+         WHERE v.status = 'scheduled'
          ORDER BY v.scheduled_date ASC, v.id ASC
          LIMIT {$visitorPageSize} OFFSET " . (($scheduledPage - 1) * $visitorPageSize)
     );
-    $scheduledStmt->execute($visitorScopeParams);
+    $scheduledStmt->execute();
     $scheduledVisits = $scheduledStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $currentlyInTotalStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_visitors v WHERE v.status = 'checked_in'{$visitorScopeSql}");
-    $currentlyInTotalStmt->execute($visitorScopeParams);
+    $currentlyInTotalStmt = $pdo->query("SELECT COUNT(*) FROM team8_visitors v WHERE v.status = 'checked_in'");
     $currentlyInTotalPages = max(1, (int) ceil((int) $currentlyInTotalStmt->fetchColumn() / $visitorPageSize));
     $currentlyInPage = min(max(1, (int) ($_GET['onsite_page'] ?? 1)), $currentlyInTotalPages);
     $currentlyInStmt = $pdo->prepare(
         "SELECT v.*, u.full_name AS logged_by_name
          FROM team8_visitors v
          JOIN users u ON u.id = v.logged_by
-         WHERE v.status = 'checked_in'{$visitorScopeSql}
+         WHERE v.status = 'checked_in'
          ORDER BY v.check_in_time ASC, v.id ASC
          LIMIT {$visitorPageSize} OFFSET " . (($currentlyInPage - 1) * $visitorPageSize)
     );
-    $currentlyInStmt->execute($visitorScopeParams);
+    $currentlyInStmt->execute();
     $currentlyIn = $currentlyInStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $allVisitorsTotalStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_visitors v WHERE 1=1{$visitorScopeSql}");
-    $allVisitorsTotalStmt->execute($visitorScopeParams);
+    $allVisitorsTotalStmt = $pdo->query('SELECT COUNT(*) FROM team8_visitors v WHERE 1=1');
     $allVisitorsTotalPages = max(1, (int) ceil((int) $allVisitorsTotalStmt->fetchColumn() / $visitorPageSize));
     $allVisitorsPage = min(max(1, (int) ($_GET['log_page'] ?? 1)), $allVisitorsTotalPages);
     $allVisitorsStmt = $pdo->prepare(
-           "SELECT v.*, u.full_name AS logged_by_name
+        'SELECT v.*, u.full_name AS logged_by_name
          FROM team8_visitors v
          JOIN users u ON u.id = v.logged_by
-         WHERE 1=1{$visitorScopeSql}
+         WHERE 1=1
          ORDER BY v.created_at DESC, v.id DESC
-            LIMIT {$visitorPageSize} OFFSET " . (($allVisitorsPage - 1) * $visitorPageSize)
+         LIMIT ' . $visitorPageSize . ' OFFSET ' . (($allVisitorsPage - 1) * $visitorPageSize)
     );
-    $allVisitorsStmt->execute($visitorScopeParams);
+    $allVisitorsStmt->execute();
     $allVisitors = $allVisitorsStmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Equal access: the summary stats / KPI cards are computed and
@@ -472,19 +464,13 @@ if (!$showForm) {
         'Checked-Out' => ['icon' => 'fa-door-open', 'variant' => 't8-visitor-icon-info'],
         'Overdue Visitors' => ['icon' => 'fa-clock', 'variant' => 't8-visitor-icon-purple'],
     ];
-    $visitorStats = [];
-    $statQueries = [
-        'Visitors Today' => 'DATE(scheduled_date) = CURDATE()',
-        'Scheduled Visitors' => "status = 'scheduled'",
-        'Currently On-Site' => "status = 'checked_in'",
-        'Checked-Out' => "status = 'checked_out' AND DATE(check_out_time) = CURDATE()",
-        'Overdue Visitors' => "status IN ('scheduled', 'checked_in') AND scheduled_date < NOW() - INTERVAL 1 DAY",
+    $visitorStats = [
+        'Visitors Today' => (int) $pdo->query('SELECT COUNT(*) FROM team8_visitors WHERE DATE(scheduled_date) = CURDATE()')->fetchColumn(),
+        'Scheduled Visitors' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status = 'scheduled'")->fetchColumn(),
+        'Currently On-Site' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status = 'checked_in'")->fetchColumn(),
+        'Checked-Out' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status = 'checked_out' AND DATE(check_out_time) = CURDATE()")->fetchColumn(),
+        'Overdue Visitors' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status IN ('scheduled', 'checked_in') AND scheduled_date < NOW() - INTERVAL 1 DAY")->fetchColumn(),
     ];
-    foreach ($statQueries as $label => $condition) {
-        $statStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_visitors v WHERE {$condition}" . ($canViewAllVisitors ? '' : ' AND v.logged_by = :scope_user_id'));
-        $statStmt->execute($visitorScopeParams);
-        $visitorStats[$label] = (int) $statStmt->fetchColumn();
-    }
 
 }
 ?>

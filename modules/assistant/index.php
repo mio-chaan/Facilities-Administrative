@@ -76,9 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         echo json_encode(['reply' => $reply]);
     } catch (Throwable $e) {
-        error_log('AI assistant request failed: ' . $e->getMessage());
-        http_response_code(502);
-        echo json_encode(['error' => 'The AI assistant is temporarily unavailable.']);
+        echo json_encode(['error' => $e->getMessage()]);
     }
     exit;
 }
