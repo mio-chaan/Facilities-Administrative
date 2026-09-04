@@ -194,6 +194,10 @@ document.addEventListener("DOMContentLoaded", function () {
             if (itemEl.classList.contains("t8-notif-item-unread")) {
                 markRead(itemEl.getAttribute("data-notif-id"), itemEl);
             }
+            var targetUrl = itemEl.getAttribute("data-target-url");
+            if (targetUrl) {
+                window.location.assign(targetUrl);
+            }
         });
     });
 
@@ -225,4 +229,59 @@ document.addEventListener("DOMContentLoaded", function () {
                 .catch(function () { /* fail quietly */ });
         });
     }
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+    // AJAX filtering and pagination for audit logs
+    var filters = document.querySelector('[data-filter-table="t8AuditTable"]');
+    if (!filters) return;
+
+    var table = document.getElementById(filters.getAttribute('data-filter-table'));
+    if (!table) return;
+
+    var actionSelect = filters.querySelector('[data-filter-action]');
+    var moduleSelect = filters.querySelector('[data-filter-module]');
+    var tableBody = table.querySelector('tbody');
+    var pagination = document.getElementById('t8AuditPagination');
+
+    if (!tableBody) return;
+
+    function fetchAuditPage(pageNumber) {
+        var params = new URLSearchParams();
+        params.append('page', 'audit');
+        params.append('ajax_filter', '1');
+        if (pageNumber) params.append('audit_page', String(pageNumber));
+        if (actionSelect && actionSelect.value) params.append('action', actionSelect.value);
+        if (moduleSelect && moduleSelect.value) params.append('module', moduleSelect.value);
+
+        fetch('?' + params.toString(), {
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+            .then(function (response) { return response.json(); })
+            .then(function (data) {
+                if (tableBody && data.html) {
+                    tableBody.innerHTML = data.html;
+                }
+                if (pagination && data.pagination_html !== undefined) {
+                    pagination.innerHTML = data.pagination_html;
+                }
+                if (pagination && pagination.innerHTML === '') {
+                    pagination.remove();
+                }
+            })
+            .catch(function (error) { console.error('Audit filter error:', error); });
+    }
+
+    if (actionSelect) actionSelect.addEventListener('change', function () { fetchAuditPage(1); });
+    if (moduleSelect) moduleSelect.addEventListener('change', function () { fetchAuditPage(1); });
+
+    document.querySelectorAll('#t8AuditPagination .t8-audit-page-link').forEach(function (link) {
+        link.addEventListener('click', function (event) {
+            event.preventDefault();
+            fetchAuditPage(link.getAttribute('data-audit-page'));
+        });
+    });
 });

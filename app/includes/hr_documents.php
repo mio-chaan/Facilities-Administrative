@@ -372,8 +372,7 @@ if (!function_exists('t8_hr_dashboard_stats')) {
             $stats['pending_incidents']    = (int) $pdo->query("SELECT COUNT(*) FROM team8_incident_reports WHERE status = 'pending'")->fetchColumn();
             $stats['pending_nte']          = (int) $pdo->query("SELECT COUNT(*) FROM team8_notice_to_explain WHERE status = 'pending'")->fetchColumn();
             $stats['pending_explanations'] = (int) $pdo->query("SELECT COUNT(*) FROM team8_explanations WHERE status = 'pending'")->fetchColumn();
-            $stats['pending_approval']     = (int) $pdo->query("SELECT COUNT(*) FROM team8_memorandums WHERE status = 'pending'")->fetchColumn()
-                                            + (int) $pdo->query("SELECT COUNT(*) FROM team8_certificates WHERE status = 'pending'")->fetchColumn();
+            $stats['pending_approval']     = (int) $pdo->query("SELECT COUNT(*) FROM team8_documents WHERE status = 'pending' AND deleted_at IS NULL")->fetchColumn();
         } catch (PDOException $e) {
             // Fresh clone without the HR migration imported yet — fail soft like the rest of the dashboard.
         }

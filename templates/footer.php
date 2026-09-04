@@ -7,6 +7,8 @@ $page = $page ?? current_page();
 </footer>
 
 <script src="<?= e(asset('js/app.js')) ?>"></script>
+<script src="<?= e(asset('js/global-search.js')) ?>"></script>
+<script src="<?= e(asset('js/context-bar.js')) ?>"></script>
 <?php if ($page === 'dashboard'): ?>
     <script src="<?= e(asset('js/dashboard.js')) ?>"></script>
 <?php endif; ?>
@@ -24,6 +26,9 @@ $page = $page ?? current_page();
 <?php endif; ?>
 <?php if ($page === 'documents'): ?>
     <script src="<?= e(asset('js/documents.js')) ?>"></script>
+<?php endif; ?>
+<?php if ($page === 'retention'): ?>
+    <script src="<?= e(asset('js/retention.js')) ?>"></script>
 <?php endif; ?>
 
 <?php include __DIR__ . '/ai_widget.php'; ?>

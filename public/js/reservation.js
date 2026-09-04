@@ -25,138 +25,422 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     }
-
     var form = document.getElementById('t8ReservationForm');
 
-    // ---------------------------------------------------------------
-    // ARCHIVE FILTERS: Month/Year (existing) combined with the new
-    // Type / Facility / Status filters. All active filters are ANDed
-    // together against the row's matching data-reservation-* attribute.
-    // ---------------------------------------------------------------
-    document.querySelectorAll('[data-reservation-filters]').forEach(function (filters) {
+    // ---- AJAX filtering for reservation tables (Facility/Type/Status,
+    //      plus Search/Schedule on the "All Reservations" admin toolbar) ----
+    document.querySelectorAll('[data-filter-table][data-filter-type]').forEach(function (filters) {
         var table = document.getElementById(filters.getAttribute('data-filter-table'));
         if (!table) return;
 
-        var month = filters.querySelector('[data-filter-month]');
-        var year = filters.querySelector('[data-filter-year]');
-        var type = filters.querySelector('[data-filter-type]');
-        var facility = filters.querySelector('[data-filter-facility]');
-        var status = filters.querySelector('[data-filter-status]');
+        var facilitySelect = filters.querySelector('[data-filter-facility]');
+        var typeSelect = filters.querySelector('[data-filter-type-select]');
+        var statusSelect = filters.querySelector('[data-filter-status]');
+        var searchInput = filters.querySelector('[data-filter-search]');
+        var rangeSelect = filters.querySelector('[data-filter-range]');
+        var chipsEl = filters.querySelector('[data-filter-chips]');
+        var resultCountEl = filters.querySelector('[data-filter-result-count]');
+        var tableBody = table.querySelector('tbody');
+        var filterType = filters.getAttribute('data-filter-type');
+        var searchTimer = null;
 
-        var rows = Array.prototype.slice.call(table.querySelectorAll('[data-reservation-row]'));
+        if (!tableBody) return;
 
-        if (year) {
-            var years = {};
-            rows.forEach(function (row) {
-                var date = row.getAttribute('data-reservation-date') || '';
-                if (date) years[date.slice(0, 4)] = true;
+        function buildParams() {
+            var params = new URLSearchParams();
+            params.append('page', 'reservation');
+            params.append('ajax_filter', '1');
+            params.append('table', filterType);
+            if (facilitySelect && facilitySelect.value) params.append('facility', facilitySelect.value);
+            if (typeSelect && typeSelect.value) params.append('type', typeSelect.value);
+            if (statusSelect && statusSelect.value) params.append('status', statusSelect.value);
+            if (searchInput && searchInput.value.trim()) params.append('search', searchInput.value.trim());
+            if (rangeSelect && rangeSelect.value) params.append('range', rangeSelect.value);
+            return params;
+        }
+
+        function renderChips() {
+            if (!chipsEl) return;
+            var chips = [];
+            if (facilitySelect && facilitySelect.value) {
+                chips.push({
+                    label: 'Facility: ' + facilitySelect.options[facilitySelect.selectedIndex].text,
+                    clear: function () { facilitySelect.value = ''; }
+                });
+            }
+            if (typeSelect && typeSelect.value) {
+                chips.push({
+                    label: 'Type: ' + typeSelect.value,
+                    clear: function () { typeSelect.value = ''; }
+                });
+            }
+            if (statusSelect && statusSelect.value) {
+                chips.push({
+                    label: 'Status: ' + statusSelect.options[statusSelect.selectedIndex].text,
+                    clear: function () { statusSelect.value = ''; }
+                });
+            }
+            if (searchInput && searchInput.value.trim()) {
+                chips.push({
+                    label: 'Search: "' + searchInput.value.trim() + '"',
+                    clear: function () { searchInput.value = ''; }
+                });
+            }
+            if (rangeSelect && rangeSelect.value) {
+                chips.push({
+                    label: 'Schedule: ' + rangeSelect.options[rangeSelect.selectedIndex].text,
+                    clear: function () { rangeSelect.value = ''; }
+                });
+            }
+
+            chipsEl.innerHTML = '';
+            if (!chips.length) {
+                chipsEl.innerHTML = '<span class="t8-filter-empty-chips">No filters applied</span>';
+                return;
+            }
+            chips.forEach(function (chip) {
+                var el = document.createElement('span');
+                el.className = 't8-filter-chip';
+                el.textContent = chip.label + ' ';
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.innerHTML = '&times;';
+                btn.setAttribute('aria-label', 'Remove filter');
+                btn.addEventListener('click', function () {
+                    chip.clear();
+                    applyAjaxFilters();
+                });
+                el.appendChild(btn);
+                chipsEl.appendChild(el);
             });
-            Object.keys(years).sort().reverse().forEach(function (value) {
-                var option = document.createElement('option');
-                option.value = value;
-                option.textContent = value;
-                year.appendChild(option);
+            var clearAll = document.createElement('button');
+            clearAll.type = 'button';
+            clearAll.className = 't8-filter-clear-all';
+            clearAll.textContent = 'Clear all filters';
+            clearAll.addEventListener('click', function () {
+                if (facilitySelect) facilitySelect.value = '';
+                if (typeSelect) typeSelect.value = '';
+                if (statusSelect) statusSelect.value = '';
+                if (searchInput) searchInput.value = '';
+                if (rangeSelect) rangeSelect.value = '';
+                applyAjaxFilters();
+            });
+            chipsEl.appendChild(clearAll);
+        }
+
+        function applyAjaxFilters() {
+            var params = buildParams();
+            fetch('?' + params.toString(), { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (response) { return response.json(); })
+                .then(function (data) {
+                    if (tableBody && typeof data.html !== 'undefined') {
+                        tableBody.innerHTML = data.html;
+                    }
+                    if (resultCountEl && typeof data.total !== 'undefined' && typeof data.count !== 'undefined') {
+                        resultCountEl.innerHTML = 'Showing <strong>' + data.count + '</strong> of <strong>' + data.total + '</strong> reservations';
+                    }
+                    renderChips();
+                    initMeatballMenus(tableBody);
+                })
+                .catch(function (error) { console.error('Filter error:', error); });
+        }
+
+        if (facilitySelect) facilitySelect.addEventListener('change', applyAjaxFilters);
+        if (typeSelect) typeSelect.addEventListener('change', applyAjaxFilters);
+        if (statusSelect) statusSelect.addEventListener('change', applyAjaxFilters);
+        if (rangeSelect) rangeSelect.addEventListener('change', applyAjaxFilters);
+        if (searchInput) {
+            searchInput.addEventListener('input', function () {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(applyAjaxFilters, 300);
             });
         }
 
+        // Chip "remove" buttons rendered server-side on first page load
+        // (progressive enhancement / no-JS-safe) — wire them the same
+        // way as the JS-rendered ones above so removing a chip doesn't
+        // require a full reload once JS is available.
+        if (chipsEl) {
+            var controlsByKey = { facility: facilitySelect, type: typeSelect, status: statusSelect, search: searchInput, range: rangeSelect };
+            chipsEl.querySelectorAll('[data-remove-filter]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var control = controlsByKey[btn.getAttribute('data-remove-filter')];
+                    if (control) control.value = '';
+                    applyAjaxFilters();
+                });
+            });
+            var clearAllServer = chipsEl.querySelector('.t8-filter-clear-all');
+            if (clearAllServer) {
+                clearAllServer.addEventListener('click', function () {
+                    Object.keys(controlsByKey).forEach(function (key) {
+                        if (controlsByKey[key]) controlsByKey[key].value = '';
+                    });
+                    applyAjaxFilters();
+                });
+            }
+        }
+    });
+
+    document.querySelectorAll('[data-reservation-filters]').forEach(function (filters) {
+        var table = document.getElementById(filters.getAttribute('data-filter-table'));
+        if (!table) return;
+        var month = filters.querySelector('[data-filter-month]');
+        var year = filters.querySelector('[data-filter-year]');
+        if (!month || !year) return;
+        var rows = Array.prototype.slice.call(table.querySelectorAll('[data-reservation-row]'));
+        var years = {};
+        rows.forEach(function (row) { var date = row.getAttribute('data-reservation-date') || ''; if (date) years[date.slice(0, 4)] = true; });
+        Object.keys(years).sort().reverse().forEach(function (value) { var option = document.createElement('option'); option.value = value; option.textContent = value; year.appendChild(option); });
         function applyFilters() {
             rows.forEach(function (row) {
                 var date = row.getAttribute('data-reservation-date') || '';
-                var matchesMonth = !month || !month.value || Number(date.slice(5, 7)) === Number(month.value);
-                var matchesYear = !year || !year.value || date.slice(0, 4) === year.value;
-                var matchesType = !type || !type.value || row.getAttribute('data-reservation-type') === type.value;
-                var matchesFacility = !facility || !facility.value || row.getAttribute('data-reservation-facility') === facility.value;
-                var matchesStatus = !status || !status.value || row.getAttribute('data-reservation-status') === status.value;
-                row.hidden = !(matchesMonth && matchesYear && matchesType && matchesFacility && matchesStatus);
+                var matchesMonth = !month.value || Number(date.slice(5, 7)) === Number(month.value);
+                var matchesYear = !year.value || date.slice(0, 4) === year.value;
+                row.hidden = !(matchesMonth && matchesYear);
             });
         }
-
-        [month, year, type, facility, status].forEach(function (select) {
-            if (select) select.addEventListener('change', applyFilters);
-        });
+        month.addEventListener('change', applyFilters);
+        year.addEventListener('change', applyFilters);
     });
+
+    // ===================================================================
+    // Row meatball menu (.t8-res-menu-trigger / .t8-res-menu-panel) —
+    // "All Reservations" (admin). PORTALS the panel to <body> on open,
+    // same technique as public/js/visitor.js's scheduled-visits menu, so
+    // it can never be clipped by .t8-table-wrap's overflow-x: auto.
+    // ===================================================================
+    var openPanel = null;
+    var openTrigger = null;
+    var placeholder = null;
+
+    function closeOpenMenu() {
+        if (!openPanel) return;
+        openPanel.classList.remove('t8-portal-open', 't8-portal-visible');
+        openPanel.style.top = '';
+        openPanel.style.left = '';
+        if (placeholder && placeholder.parentNode) {
+            placeholder.parentNode.insertBefore(openPanel, placeholder);
+            placeholder.parentNode.removeChild(placeholder);
+        }
+        if (openTrigger) {
+            openTrigger.setAttribute('aria-expanded', 'false');
+            openTrigger.classList.remove('is-active');
+        }
+        openPanel = null;
+        openTrigger = null;
+        placeholder = null;
+    }
+
+    function positionMenu(panel, trigger) {
+        var margin = 8;
+        var rect = trigger.getBoundingClientRect();
+        var pw = panel.offsetWidth;
+        var ph = panel.offsetHeight;
+        var spaceBelow = window.innerHeight - rect.bottom;
+        var openUpward = spaceBelow < (ph + margin) && rect.top > (ph + margin);
+        var top = openUpward ? (rect.top - ph - margin) : (rect.bottom + margin);
+        top = Math.max(margin, Math.min(top, window.innerHeight - ph - margin));
+        var left = rect.right - pw;
+        left = Math.max(margin, Math.min(left, window.innerWidth - pw - margin));
+        panel.style.top = top + 'px';
+        panel.style.left = left + 'px';
+    }
+
+    function openMenuFor(trigger) {
+        var wrap = trigger.closest('.t8-res-menu');
+        var panel = wrap ? wrap.querySelector('.t8-res-menu-panel') : null;
+        if (!panel) return;
+
+        if (openPanel === panel) {
+            closeOpenMenu();
+            return;
+        }
+        closeOpenMenu();
+
+        placeholder = document.createComment('t8-res-menu-slot');
+        panel.parentNode.insertBefore(placeholder, panel);
+        document.body.appendChild(panel);
+
+        panel.classList.add('t8-portal-open');
+        positionMenu(panel, trigger);
+        requestAnimationFrame(function () {
+            requestAnimationFrame(function () { panel.classList.add('t8-portal-visible'); });
+        });
+
+        openPanel = panel;
+        openTrigger = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+        trigger.classList.add('is-active');
+    }
+
+    function initMeatballMenus(scope) {
+        (scope || document).querySelectorAll('.t8-res-menu-trigger').forEach(function (trigger) {
+            if (trigger.dataset.t8ResMenuBound === '1') return;
+            trigger.dataset.t8ResMenuBound = '1';
+            trigger.setAttribute('aria-haspopup', 'true');
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.addEventListener('click', function (e) {
+                e.stopPropagation();
+                openMenuFor(trigger);
+            });
+        });
+    }
+    initMeatballMenus(document);
+
+    document.addEventListener('click', function (e) {
+        if (!openPanel) return;
+        var clickedInsidePanel = openPanel.contains(e.target);
+        var clickedTrigger = openTrigger && openTrigger.contains(e.target);
+        if (!clickedInsidePanel && !clickedTrigger) closeOpenMenu();
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeOpenMenu(); });
+    window.addEventListener('resize', function () { if (openPanel && openTrigger) positionMenu(openPanel, openTrigger); });
+    window.addEventListener('scroll', function () { if (openPanel && openTrigger) positionMenu(openPanel, openTrigger); }, true);
+
+    // ---- "Copy Reservation Ref" ----
+    document.addEventListener('click', function (e) {
+        var copyBtn = e.target.closest('.t8-res-copy-ref');
+        if (!copyBtn) return;
+        var ref = copyBtn.getAttribute('data-copy') || '';
+        if (navigator.clipboard && ref) {
+            navigator.clipboard.writeText(ref).catch(function () {});
+        }
+        var original = copyBtn.innerHTML;
+        copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        setTimeout(function () { copyBtn.innerHTML = original; }, 1400);
+        closeOpenMenu();
+    });
+
+    // ---- "View Details" -> populate the shared detail <dialog> from
+    //      the meatball trigger's data-* attributes ----
+    var detailModal = document.getElementById('t8ReservationDetailModal');
+    var statusLabels = { approved: 'Approved', cancellation_pending: 'Pending', pending: 'Pending', cancelled: 'Cancelled', rejected: 'Rejected', completed: 'Completed', expired: 'Expired' };
+
+    function setText(id, value) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+
+    function getActiveMenuTriggerForItem(item) {
+        if (!item) return null;
+        if (openPanel && openPanel.contains(item) && openTrigger) {
+            return openTrigger;
+        }
+        var wrap = item.closest('.t8-res-menu');
+        if (wrap) {
+            var trigger = wrap.querySelector('.t8-res-menu-trigger');
+            if (trigger) return trigger;
+        }
+        return null;
+    }
+
+    document.addEventListener('click', function (e) {
+        var viewBtn = e.target.closest('.t8-res-view-details');
+        if (!viewBtn || !detailModal) return;
+        var trigger = getActiveMenuTriggerForItem(viewBtn);
+        if (!trigger) return;
+        var d = trigger.dataset;
+
+        setText('t8ResDetailTitle', (d.facility || 'Reservation') + (d.category ? ' — ' + d.category : ''));
+        setText('t8ResDetailRef', d.ref || '');
+        setText('t8ResDetailStatus', statusLabels[d.status] || (d.status || '—'));
+        setText('t8ResDetailType', d.facilityType || '—');
+        setText('t8ResDetailRequester', d.requester || '—');
+        setText('t8ResDetailDepartment', d.department || '—');
+        setText('t8ResDetailKeyPerson', d.keyPerson || '—');
+        setText('t8ResDetailCategory', d.category || '—');
+        setText('t8ResDetailSchedule', (d.schedulePrimary || '—') + (d.scheduleSecondary ? ' · ' + d.scheduleSecondary : ''));
+        setText('t8ResDetailLocation', d.facilityLocation || '—');
+        setText('t8ResDetailCreated', d.created ? 'Created ' + d.created : '');
+        setText('t8ResDetailUpdated', d.updated ? 'Last updated ' + d.updated : '');
+
+        var qtyWrap = document.getElementById('t8ResDetailQtyWrap');
+        if (d.quantity) {
+            qtyWrap.hidden = false;
+            setText('t8ResDetailQty', 'Qty ' + d.quantity + (d.returnDate ? ' · Return by ' + d.returnDate : ''));
+        } else {
+            qtyWrap.hidden = true;
+        }
+
+        var participantsWrap = document.getElementById('t8ResDetailParticipantsWrap');
+        if (d.participants) {
+            participantsWrap.hidden = false;
+            setText('t8ResDetailParticipants', d.participants);
+        } else {
+            participantsWrap.hidden = true;
+        }
+
+        var requirementsWrap = document.getElementById('t8ResDetailRequirementsWrap');
+        if (d.requirements) {
+            requirementsWrap.hidden = false;
+            setText('t8ResDetailRequirements', d.requirements);
+        } else {
+            requirementsWrap.hidden = true;
+        }
+
+        var notesEl = document.getElementById('t8ResDetailNotes');
+        if (d.notes) {
+            notesEl.textContent = d.notes;
+            notesEl.classList.remove('is-empty');
+        } else {
+            notesEl.textContent = 'No additional notes were provided for this reservation.';
+            notesEl.classList.add('is-empty');
+        }
+
+        var remarksWrap = document.getElementById('t8ResDetailRemarksWrap');
+        if (d.remarks) {
+            remarksWrap.hidden = false;
+            setText('t8ResDetailRemarks', d.remarks);
+        } else {
+            remarksWrap.hidden = true;
+        }
+
+        document.getElementById('t8ResDetailConflict').hidden = d.conflict !== '1';
+
+        closeOpenMenu();
+        if (typeof detailModal.showModal === 'function') detailModal.showModal();
+    });
+
+    if (detailModal) {
+        detailModal.querySelectorAll('[data-close-detail-modal]').forEach(function (btn) {
+            btn.addEventListener('click', function () { detailModal.close(); });
+        });
+        detailModal.addEventListener('click', function (e) {
+            if (e.target === detailModal) detailModal.close();
+        });
+    }
 
     if (!form) return;
 
-    var facilitySelect = document.getElementById('facility_id');
+    var facility = document.getElementById('facility_id');
     var category = document.getElementById('event_category');
     var config = JSON.parse(form.getAttribute('data-facility-config') || '{}');
     var fields = form.querySelectorAll('[data-reservation-field]');
-    var quantityInput = document.getElementById('quantity');
-    var participantsInput = document.getElementById('expected_participants');
-    var quantityHint = document.getElementById('t8QuantityAvailabilityHint');
-    var participantsHint = document.getElementById('t8ParticipantsCapacityHint');
-    var availabilityUrl = form.getAttribute('data-availability-url') || '';
-    var currentReservationId = form.getAttribute('data-reservation-id') || '';
+    var availability = document.getElementById('t8ReservationAvailability');
+    var suggestionsButton = document.getElementById('t8ReservationSuggestionsButton');
+    var suggestions = document.getElementById('t8ReservationSuggestions');
+    var availabilityTimer = null;
 
     function selectedType() {
-        var option = facilitySelect.options[facilitySelect.selectedIndex];
+        var option = facility.options[facility.selectedIndex];
         return option ? option.getAttribute('data-facility-type') || '' : '';
     }
 
-    function selectedCapacity() {
-        var option = facilitySelect.options[facilitySelect.selectedIndex];
-        var raw = option ? option.getAttribute('data-capacity') : null;
-        return raw ? parseInt(raw, 10) : null;
+    function supportsSuggestions() {
+        var type = selectedType();
+        return !!facility.value && ['Room', 'Area'].indexOf(type) !== -1;
     }
 
-    // ---------------------------------------------------------------
-    // CAPACITY VALIDATION: whenever the selected facility changes,
-    // cap Participants at the facility's capacity, and (for
-    // Equipment/Asset) fetch the CURRENT available quantity from
-    // public/facility_availability.php and cap Quantity at that. The
-    // server still re-validates on submit (see
-    // t8_reservation_validate() / t8_reservation_committed_quantity()
-    // in modules/reservation/index.php) - this is a convenience layer,
-    // not the actual protection.
-    // ---------------------------------------------------------------
-    function refreshCapacityLimits() {
-        var capacity = selectedCapacity();
-        var type = selectedType();
+    function applyParticipantCapacity() {
+        var participants = document.getElementById('expected_participants');
+        var selectedOption = facility.options[facility.selectedIndex];
+        var capacity = selectedOption ? Number(selectedOption.getAttribute('data-facility-capacity') || 0) : 0;
+        if (!participants) return;
 
-        if (participantsInput) {
-            if (capacity !== null) {
-                participantsInput.max = String(capacity);
-                if (participantsHint) {
-                    participantsHint.hidden = false;
-                    participantsHint.textContent = "Cannot exceed this facility's capacity (" + capacity + ").";
-                }
-            } else {
-                participantsInput.removeAttribute('max');
-                if (participantsHint) participantsHint.hidden = true;
-            }
+        participants.max = capacity > 0 ? String(capacity) : '';
+        if (capacity > 0 && participants.value !== '' && Number(participants.value) > capacity) {
+            participants.value = String(capacity);
         }
-
-        if (!quantityInput) return;
-
-        var facilityId = facilitySelect.value;
-        var isQuantityType = type === 'Equipment' || type === 'Asset';
-
-        if (!isQuantityType || !facilityId || !availabilityUrl) {
-            quantityInput.removeAttribute('max');
-            if (quantityHint) quantityHint.hidden = true;
-            return;
-        }
-
-        var url = availabilityUrl + '?facility_id=' + encodeURIComponent(facilityId);
-        if (currentReservationId) {
-            url += '&exclude_id=' + encodeURIComponent(currentReservationId);
-        }
-
-        fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (!data || typeof data.available !== 'number') return;
-                quantityInput.max = String(data.available);
-                if (quantityHint) {
-                    quantityHint.hidden = false;
-                    quantityHint.textContent = data.available + ' of ' + data.capacity + ' currently available.';
-                }
-            })
-            .catch(function () {
-                // Fail quietly - the server-side check still protects the data
-                // even if this convenience lookup can't be reached.
-            });
     }
 
     function resetTypeFields() {
@@ -172,9 +456,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function applyType(reset) {
         var type = selectedType();
+        var selectedOption = facility.options[facility.selectedIndex];
+        var capacity = selectedOption ? Number(selectedOption.getAttribute('data-facility-capacity') || 0) : 0;
         var settings = config[type] || { event_categories: [], visible_fields: [], required_fields: [] };
         var selectedCategory = category.value;
+        var participants = document.getElementById('expected_participants');
+        var previousParticipants = participants ? participants.value : '';
         if (reset) resetTypeFields();
+        if (reset && participants && settings.visible_fields.indexOf('participants') !== -1) {
+            participants.value = previousParticipants;
+        }
+
+        if (suggestionsButton) {
+            suggestionsButton.hidden = !supportsSuggestions();
+        }
+        if (suggestions) {
+            suggestions.hidden = true;
+        }
 
         category.innerHTML = '<option value="">Select a category…</option>';
         settings.event_categories.forEach(function (value) {
@@ -194,15 +492,104 @@ document.addEventListener('DOMContentLoaded', function () {
             if (input) {
                 input.disabled = !active;
                 input.required = active && settings.required_fields.indexOf(field) !== -1;
+                if (field === 'participants' || field === 'quantity') {
+                    input.max = capacity > 0 ? String(field === 'quantity' ? Math.min(capacity, 3) : capacity) : '';
+                }
                 if (!active && window.T8Validate) T8Validate.clearError(input);
             }
         });
-
-        refreshCapacityLimits();
+        applyParticipantCapacity();
+        var returnDate = document.getElementById('return_date');
+        if (returnDate && ['Equipment', 'Asset'].indexOf(type) !== -1 && !returnDate.value) {
+            returnDate.value = new Date().toISOString().slice(0, 10);
+        }
     }
 
-    facilitySelect.addEventListener('change', function () { applyType(true); });
+    facility.addEventListener('change', function () { applyType(true); });
+    var participants = document.getElementById('expected_participants');
+    if (participants) participants.addEventListener('input', applyParticipantCapacity);
     applyType(false);
+
+    function updateAvailability() {
+        if (!facility.value || !supportsSuggestions()) {
+            if (availability) availability.hidden = true;
+            if (suggestionsButton) suggestionsButton.hidden = true;
+            if (suggestions) suggestions.hidden = true;
+            return;
+        }
+        if (!availability || !document.getElementById('start_time').value || !document.getElementById('end_time').value) {
+            if (availability) availability.hidden = true;
+            if (suggestionsButton) suggestionsButton.hidden = true;
+            if (suggestions) suggestions.hidden = true;
+            return;
+        }
+        clearTimeout(availabilityTimer);
+        var selectedFacilityId = facility.value;
+        var selectedFacilityType = selectedType();
+        availabilityTimer = setTimeout(function () {
+            var params = new URLSearchParams({
+                facility_id: selectedFacilityId,
+                start_time: document.getElementById('start_time').value,
+                end_time: document.getElementById('end_time').value
+            });
+            var editId = new URLSearchParams(window.location.search).get('id');
+            if (editId) params.set('exclude_id', editId);
+            fetch('reservation_availability.php?' + params.toString(), { headers: { 'Accept': 'application/json' } })
+                .then(function (response) { return response.json(); })
+                .then(function (data) {
+                    // Ignore responses for a facility that is no longer selected.
+                    // Otherwise a delayed Room/Area availability request could reveal
+                    // the suggestions button after switching to another facility type.
+                    if (facility.value !== selectedFacilityId || selectedType() !== selectedFacilityType || !supportsSuggestions()) {
+                        return;
+                    }
+                    availability.textContent = data.message || 'Availability could not be checked.';
+                    availability.style.color = data.available ? 'var(--t8-success)' : 'var(--t8-danger)';
+                    availability.hidden = false;
+                    if (suggestionsButton) suggestionsButton.hidden = !!data.available;
+                })
+                .catch(function () {
+                    if (facility.value !== selectedFacilityId || selectedType() !== selectedFacilityType || !supportsSuggestions()) {
+                        return;
+                    }
+                    availability.textContent = 'Availability could not be checked right now.';
+                    availability.style.color = 'var(--t8-danger)';
+                    availability.hidden = false;
+                    if (suggestionsButton) suggestionsButton.hidden = true;
+                });
+        }, 180);
+    }
+    if (suggestionsButton) {
+        suggestionsButton.addEventListener('click', function () {
+            suggestionsButton.disabled = true;
+            suggestionsButton.textContent = 'Finding alternatives...';
+            var params = new URLSearchParams({
+                facility_id: facility.value,
+                start_time: document.getElementById('start_time').value,
+                end_time: document.getElementById('end_time').value
+            });
+            fetch('reservation_suggestions.php?' + params.toString(), { headers: { 'Accept': 'application/json' } })
+                .then(function (response) { return response.json(); })
+                .then(function (data) {
+                    suggestions.textContent = data.suggestions || 'No alternative dates found.';
+                    suggestions.hidden = false;
+                })
+                .catch(function () {
+                    suggestions.textContent = 'Alternative dates are unavailable right now.';
+                    suggestions.hidden = false;
+                })
+                .finally(function () {
+                    suggestionsButton.disabled = false;
+                    suggestionsButton.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Suggest alternatives';
+                });
+        });
+    }
+    ['change', 'input'].forEach(function (eventName) {
+        [facility, document.getElementById('start_time'), document.getElementById('end_time')].forEach(function (element) {
+            element.addEventListener(eventName, updateAvailability);
+        });
+    });
+    updateAvailability();
 
     /**
      * FIX (show error messages when required fields are left empty):
@@ -230,7 +617,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var settings = config[type] || { required_fields: [], event_categories: [] };
         var valid = true;
 
-        if (!markField(facilitySelect, !!facilitySelect.value, 'Please select a facility.')) valid = false;
+        if (!markField(facility, !!facility.value, 'Please select a facility.')) valid = false;
         if (!markField(category, !!category.value, 'Please select an event category.')) valid = false;
 
         var departmentEl = document.getElementById('department');
@@ -250,19 +637,6 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
 
-        // CAPACITY VALIDATION: block submit client-side when Quantity or
-        // Participants exceeds the max="" set by refreshCapacityLimits().
-        // This is convenience only — t8_reservation_validate() on the
-        // server is the real enforcement and cannot be bypassed.
-        if (quantityInput && quantityInput.max !== '' && quantityInput.value !== '') {
-            var qtyValid = Number(quantityInput.value) <= Number(quantityInput.max);
-            if (!markField(quantityInput, qtyValid, 'Only ' + quantityInput.max + ' unit(s) are currently available for this facility.')) valid = false;
-        }
-        if (participantsInput && participantsInput.max !== '' && participantsInput.value !== '') {
-            var partValid = Number(participantsInput.value) <= Number(participantsInput.max);
-            if (!markField(participantsInput, partValid, 'Cannot exceed this facility\'s capacity (' + participantsInput.max + ').')) valid = false;
-        }
-
         if (settings.required_fields.indexOf('time_range') !== -1) {
             var start = document.getElementById('start_time');
             var end = document.getElementById('end_time');
@@ -271,123 +645,16 @@ document.addEventListener('DOMContentLoaded', function () {
             if (start.value && end.value && !markField(end, new Date(start.value) < new Date(end.value), 'End time must be after start time.')) {
                 valid = false;
             }
+            if (start.value && !markField(start, new Date(start.value) > new Date(), 'Please select a future schedule.')) valid = false;
+        }
+
+        if (settings.required_fields.indexOf('schedule') !== -1) {
+            var schedule = document.getElementById('schedule');
+            if (schedule.value && !markField(schedule, new Date(schedule.value) > new Date(), 'Please select a future schedule.')) valid = false;
         }
 
         if (!valid) {
             event.preventDefault();
         }
     });
-});
-
-/**
- * DYNAMIC STATUS: polls public/reservation_status_poll.php every few
- * seconds for every reservation row currently on screen inside a
- * `.t8-live-status` table (Admin "All Reservations", Staff "My
- * Reservations", Staff "All Reservations") and patches the status
- * badge, conflict indicator, and cancel-eligibility note in place -
- * so an Approved -> Ongoing transition, or one admin/staff member's
- * action, shows up for everyone else looking at the same reservation
- * without a manual page refresh.
- *
- * Deliberately independent of the DOMContentLoaded block above so a
- * page with no live tables (e.g. the create/edit form) simply does
- * nothing here.
- */
-document.addEventListener('DOMContentLoaded', function () {
-    var liveTables = document.querySelectorAll('.t8-live-status');
-    if (!liveTables.length) return;
-
-    var POLL_INTERVAL_MS = 20000;
-    var csrfInput = document.querySelector('input[name="csrf_token"]');
-    var csrfToken = csrfInput ? csrfInput.value : '';
-
-    var badgeLabels = {
-        pending: 'Pending',
-        approved: 'Approved',
-        ongoing: 'Ongoing',
-        completed: 'Completed',
-        rejected: 'Rejected',
-        cancelled: 'Cancelled',
-        cancellation_pending: 'Cancellation Pending',
-    };
-
-    function statusLabel(status) {
-        if (badgeLabels[status]) return badgeLabels[status];
-        return status.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-    }
-
-    function collectVisibleIds() {
-        var ids = [];
-        liveTables.forEach(function (table) {
-            table.querySelectorAll('tr[data-reservation-id]').forEach(function (row) {
-                var id = row.getAttribute('data-reservation-id');
-                if (id) ids.push(id);
-            });
-        });
-        return ids;
-    }
-
-    function applyUpdate(item) {
-        var badge = document.getElementById('t8-res-status-' + item.id);
-        if (badge) {
-            // Swap the t8-badge-<oldStatus> class for the new one without
-            // disturbing the plain "t8-badge" base class.
-            Array.prototype.slice.call(badge.classList).forEach(function (cls) {
-                if (cls.indexOf('t8-badge-') === 0) badge.classList.remove(cls);
-            });
-            badge.classList.add('t8-badge-' + item.display_status);
-            badge.textContent = statusLabel(item.display_status);
-        }
-
-        var conflictCell = document.getElementById('t8-res-conflict-' + item.id);
-        if (conflictCell) {
-            if (item.has_conflict) {
-                conflictCell.innerHTML = '<span class="t8-badge" title="Time Conflict" style="background:#E67E22; color:#fff; font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> !</span>';
-            } else {
-                conflictCell.innerHTML = '<span class="t8-help-text">—</span>';
-            }
-        }
-
-        // Once a reservation flips to Ongoing (or moves away from an
-        // Approved state entirely), any "Cancel" / "Request
-        // Cancellation" trigger button for it is no longer valid -
-        // disable it in place rather than leaving a stale, clickable
-        // button whose eventual POST would just be rejected server-side.
-        var cancelButton = document.querySelector('[data-cancel-reservation-id="' + item.id + '"]');
-        if (cancelButton && (item.display_status === 'ongoing' || item.status !== 'approved')) {
-            cancelButton.disabled = true;
-            cancelButton.title = 'This reservation is Ongoing or no longer Approved — contact an administrator.';
-        }
-    }
-
-    function poll() {
-        var ids = collectVisibleIds();
-        if (!ids.length) return;
-
-        var body = new URLSearchParams();
-        ids.forEach(function (id) { body.append('ids[]', id); });
-        body.append('csrf_token', csrfToken);
-
-        fetch('reservation_status_poll.php', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            body: body.toString()
-        })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (!data || !Array.isArray(data.reservations)) return;
-                data.reservations.forEach(applyUpdate);
-            })
-            .catch(function () {
-                // Silent - a failed poll just means badges stay as they were
-                // until the next successful poll or a manual refresh.
-            });
-    }
-
-    setInterval(poll, POLL_INTERVAL_MS);
 });

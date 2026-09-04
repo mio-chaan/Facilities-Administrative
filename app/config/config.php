@@ -26,7 +26,9 @@ if (!defined('GEMINI_API_KEY')) {
     define('GEMINI_API_KEY', getenv('GEMINI_API_KEY') ?: ($_ENV['GEMINI_API_KEY'] ?? ''));
 }
 define('UPLOAD_MAX_SIZE_MB', 10);
-define('UPLOAD_DIR', dirname(__DIR__, 2) . '/public/uploads');
+// Files are served only through authorised application actions, never directly
+// by the web server.
+define('UPLOAD_DIR', dirname(__DIR__, 2) . '/storage/uploads');
 
 
 define('AUTH_DEV_BYPASS', false);

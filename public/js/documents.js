@@ -6,29 +6,6 @@
  */
 
 document.addEventListener('DOMContentLoaded', function () {
-    // ---- Template picker: Generate HR Document (hr/generate.php) ----
-    var continueBtn = document.getElementById('t8TemplateContinue');
-    var templateOptions = document.querySelectorAll('.t8-template-option');
-
-    if (continueBtn && templateOptions.length) {
-        templateOptions.forEach(function (option) {
-            var input = option.querySelector('input[type="radio"]');
-            option.addEventListener('click', function () {
-                input.checked = true;
-                continueBtn.disabled = false;
-            });
-        });
-
-        continueBtn.addEventListener('click', function () {
-            var checked = document.querySelector('.t8-template-option input[type="radio"]:checked');
-            if (!checked) { return; }
-            var target = checked.closest('.t8-template-option').getAttribute('data-target');
-            if (target) {
-                window.location.href = target;
-            }
-        });
-    }
-
     // ---- Dashboard: client-side filter of the Recent Documents list ----
     var searchInput = document.getElementById('t8DocsSearch');
     var recentItems = document.querySelectorAll('.t8-docs-recent-item');
@@ -43,4 +20,77 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
     }
+
+    // ---- Browse list: AJAX filter without a full page reload ----
+    var filterForm = document.getElementById('t8DocumentsFilterForm');
+    var resultsContainer = document.getElementById('t8DocumentsResults');
+
+    if (!filterForm || !resultsContainer) {
+        return;
+    }
+
+    var qInput = filterForm.querySelector('input[name="q"]');
+    var categoryInput = filterForm.querySelector('select[name="category_id"]');
+    var reviewInput = filterForm.querySelector('select[name="review_status"]');
+    var pendingRequest = null;
+
+    function buildDocumentsUrl() {
+        var params = new URLSearchParams();
+        params.set('page', 'documents');
+        params.set('action', 'browse');
+        params.set('q', qInput ? qInput.value.trim() : '');
+        if (categoryInput && categoryInput.value) {
+            params.set('category_id', categoryInput.value);
+        }
+        if (reviewInput && reviewInput.value) {
+            params.set('review_status', reviewInput.value);
+        }
+        return '?' + params.toString();
+    }
+
+    function applyDocumentsFilter() {
+        if (pendingRequest) {
+            window.clearTimeout(pendingRequest);
+        }
+
+        pendingRequest = window.setTimeout(function () {
+            var url = buildDocumentsUrl();
+            window.history.replaceState({}, '', url);
+
+            fetch(url, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'text/html'
+                }
+            })
+                .then(function (response) { return response.text(); })
+                .then(function (html) {
+                    var container = document.createElement('div');
+                    container.innerHTML = html;
+                    var nextResults = container.querySelector('#t8DocumentsResults');
+                    if (!nextResults) {
+                        return;
+                    }
+                    resultsContainer.innerHTML = nextResults.innerHTML;
+                })
+                .catch(function (error) {
+                    console.error('Documents filter error:', error);
+                });
+        }, 150);
+    }
+
+    if (qInput) {
+        qInput.addEventListener('input', applyDocumentsFilter);
+    }
+    if (categoryInput) {
+        categoryInput.addEventListener('change', applyDocumentsFilter);
+    }
+    if (reviewInput) {
+        reviewInput.addEventListener('change', applyDocumentsFilter);
+    }
+
+    filterForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        applyDocumentsFilter();
+    });
 });

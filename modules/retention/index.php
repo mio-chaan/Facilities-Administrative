@@ -27,6 +27,13 @@ $isAdmin = t8_has_role('admin');
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
+// Retention policy, record creation, archival and disposal are official
+// records operations.  Staff can only view records for which they are the
+// recorded custodian.
+if (!$isAdmin && in_array($action, ['create_schedule', 'create_record', 'archive', 'restore', 'mark_for_disposal', 'dispose', 'reactivate'], true)) {
+    t8_require_role(['admin']);
+}
+
 /** Fetch one record row with joined display names, or null. */
 function t8_retention_record_fetch(PDO $pdo, int $id): ?array
 {
@@ -126,6 +133,7 @@ switch ($action) {
         }
         break;
 
+    case 'mark_for_disposal':
     case 'dispose':
     case 'reactivate':
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -138,14 +146,24 @@ switch ($action) {
         }
         $id = (int) ($_POST['id'] ?? 0);
         $record = t8_retention_record_fetch($pdo, $id);
-        if ($record) {
-            $newStatus = $action === 'dispose' ? 'disposed' : 'active';
-            $pdo->prepare('UPDATE team8_records SET status = :status WHERE id = :id')
-                ->execute(['status' => $newStatus, 'id' => $id]);
-            t8_audit_log($pdo, $currentUserId, 'record', $id, $action);
-            t8_flash_set('success', $action === 'dispose' ? 'Record marked as disposed.' : 'Record reactivated.');
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+        if ($record && $action === 'mark_for_disposal' && $record['status'] === 'archived' && $reason !== '') {
+            $pdo->prepare("UPDATE team8_records SET status = 'for_disposal', disposal_reason = :reason WHERE id = :id")
+                ->execute(['reason' => $reason, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'record', $id, 'for_disposal', 'archived', $reason);
+            t8_flash_set('success', 'Record marked for disposal.');
+        } elseif ($record && $action === 'dispose' && $record['status'] === 'for_disposal' && $reason !== '') {
+            $pdo->prepare("UPDATE team8_records SET status = 'disposed', disposed_at = NOW(), disposal_reason = :reason WHERE id = :id")
+                ->execute(['reason' => $reason, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'record', $id, 'dispose', 'for_disposal', $reason);
+            t8_flash_set('success', 'Record marked as disposed.');
+        } elseif ($record && $action === 'reactivate') {
+            $pdo->prepare("UPDATE team8_records SET status = 'active', deleted_at = NULL, archived_at = NULL WHERE id = :id")
+                ->execute(['id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'record', $id, 'reactivate');
+            t8_flash_set('success', 'Record reactivated.');
         } else {
-            t8_flash_set('danger', 'Record not found.');
+            t8_flash_set('danger', 'A valid record status and reason are required.');
         }
         redirect(page_url('retention'));
         break;
@@ -162,15 +180,19 @@ switch ($action) {
         }
         $id = (int) ($_POST['id'] ?? 0);
         $record = t8_retention_record_fetch($pdo, $id);
-        if ($record) {
-            $sql = $action === 'archive'
-                ? 'UPDATE team8_records SET deleted_at = NOW() WHERE id = :id'
-                : 'UPDATE team8_records SET deleted_at = NULL WHERE id = :id';
-            $pdo->prepare($sql)->execute(['id' => $id]);
-            t8_audit_log($pdo, $currentUserId, 'record', $id, $action);
-            t8_flash_set('success', $action === 'archive' ? 'Record archived.' : 'Record restored.');
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+        if ($record && $action === 'archive' && $record['status'] === 'active' && $reason !== '') {
+            $pdo->prepare("UPDATE team8_records SET status = 'archived', deleted_at = NOW(), archived_at = NOW(), archive_reason = :reason WHERE id = :id")
+                ->execute(['reason' => $reason, 'id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'record', $id, 'archive', 'active', $reason);
+            t8_flash_set('success', 'Record archived.');
+        } elseif ($record && $action === 'restore' && $record['status'] === 'archived') {
+            $pdo->prepare("UPDATE team8_records SET status = 'active', deleted_at = NULL, archived_at = NULL WHERE id = :id")
+                ->execute(['id' => $id]);
+            t8_audit_log($pdo, $currentUserId, 'record', $id, 'restore', 'archived', 'active');
+            t8_flash_set('success', 'Record restored.');
         } else {
-            t8_flash_set('danger', 'Record not found.');
+            t8_flash_set('danger', 'An active record and archive reason are required.');
         }
         redirect(page_url('retention'));
         break;
@@ -179,19 +201,41 @@ switch ($action) {
 $showScheduleForm = $action === 'create_schedule';
 $showRecordForm = $action === 'create_record';
 $showList = !$showScheduleForm && !$showRecordForm;
+$retentionStats = ['total' => 0, 'active' => 0, 'ending' => 0, 'archived' => 0, 'compliance' => 100];
 
 if ($showList) {
     $statusFilter = ($_GET['status'] ?? 'active') === 'archived' ? 'archived' : 'active';
     $whereClause = $statusFilter === 'archived' ? 'r.deleted_at IS NOT NULL' : 'r.deleted_at IS NULL';
-    $records = $pdo->query(
+    $scopeSql = $isAdmin ? '' : ' AND r.custodian_id = :user_id';
+    $recordsPageSize = 10;
+    $recordsPage = max(1, (int) ($_GET['retention_page'] ?? 1));
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_records r WHERE $whereClause$scopeSql");
+    $countStmt->execute($isAdmin ? [] : ['user_id' => $currentUserId]);
+    $recordsTotal = (int) $countStmt->fetchColumn();
+    $recordsTotalPages = max(1, (int) ceil($recordsTotal / $recordsPageSize));
+    $recordsPage = min($recordsPage, $recordsTotalPages);
+    $recordsStmt = $pdo->prepare(
         "SELECT r.*, d.title AS document_title, s.record_type, s.retention_years, u.full_name AS custodian_name
          FROM team8_records r
          JOIN team8_documents d ON d.id = r.document_id
          JOIN team8_retention_schedules s ON s.id = r.schedule_id
          JOIN users u ON u.id = r.custodian_id
-         WHERE $whereClause
-         ORDER BY r.disposition_date ASC"
-    )->fetchAll(PDO::FETCH_ASSOC);
+         WHERE $whereClause$scopeSql
+         ORDER BY r.disposition_date ASC
+         LIMIT {$recordsPageSize} OFFSET " . (($recordsPage - 1) * $recordsPageSize)
+    );
+    $recordsStmt->execute($isAdmin ? [] : ['user_id' => $currentUserId]);
+    $records = $recordsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if ($isAdmin) {
+        $endingSoon = $pdo->query("SELECT r.*, d.title AS document_title FROM team8_records r JOIN team8_documents d ON d.id = r.document_id WHERE r.status = 'active' AND r.disposition_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY) ORDER BY r.disposition_date ASC")->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    $retentionStats['total'] = (int) $pdo->query('SELECT COUNT(*) FROM team8_records')->fetchColumn();
+    $retentionStats['active'] = (int) $pdo->query("SELECT COUNT(*) FROM team8_records WHERE status = 'active' AND deleted_at IS NULL")->fetchColumn();
+    $retentionStats['archived'] = (int) $pdo->query("SELECT COUNT(*) FROM team8_records WHERE status = 'archived' OR deleted_at IS NOT NULL")->fetchColumn();
+    $retentionStats['ending'] = (int) $pdo->query("SELECT COUNT(*) FROM team8_records WHERE status = 'active' AND disposition_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
+    $retentionStats['compliance'] = $retentionStats['total'] > 0 ? (int) round(($retentionStats['active'] / $retentionStats['total']) * 100) : 100;
 }
 
 /** Suggests a disposition_date = today + N years, for the create-record form default. */
@@ -200,8 +244,10 @@ function t8_retention_suggest_date(int $years): string
     return date('Y-m-d', strtotime("+{$years} years"));
 }
 ?>
-<h1>Records Retention</h1>
-<p class="t8-help-text">Track retention policies, disposition schedules, and compliance for records.</p>
+<div class="t8-retention-heading">
+    <div><h1>Records Retention</h1><p class="t8-help-text">Track retention policies, disposition schedules, and compliance for records.</p></div>
+    <?php if ($showList): ?><a class="t8-btn t8-btn-accent" href="<?= e(page_url('retention', ['action' => 'create_schedule'])) ?>"><i class="fa-solid fa-plus"></i> Add Schedule</a><?php endif; ?>
+</div>
 
 <?php foreach ($errors as $error): ?>
     <div class="t8-alert t8-alert-danger"><?= e($error) ?></div>
@@ -305,6 +351,29 @@ function t8_retention_suggest_date(int $years): string
 
 <?php else: ?>
 
+    <div class="t8-retention-kpi-grid" aria-label="Retention summary">
+        <div class="t8-retention-kpi"><div class="t8-retention-kpi-icon"><i class="fa-solid fa-folder-open"></i></div><div><span>Total Records</span><strong><?= e((string) $retentionStats['total']) ?></strong><small>All tracked records</small></div></div>
+        <div class="t8-retention-kpi t8-retention-kpi-green"><div class="t8-retention-kpi-icon"><i class="fa-solid fa-shield-halved"></i></div><div><span>Active Retention</span><strong><?= e((string) $retentionStats['active']) ?></strong><small>Currently protected</small></div></div>
+        <div class="t8-retention-kpi t8-retention-kpi-orange"><div class="t8-retention-kpi-icon"><i class="fa-solid fa-clock"></i></div><div><span>Ending Soon</span><strong><?= e((string) $retentionStats['ending']) ?></strong><small>Next 30 days</small></div></div>
+        <div class="t8-retention-kpi t8-retention-kpi-gray"><div class="t8-retention-kpi-icon"><i class="fa-solid fa-box-archive"></i></div><div><span>Archived</span><strong><?= e((string) $retentionStats['archived']) ?></strong><small>Historical records</small></div></div>
+    </div>
+
+    <?php if ($isAdmin): ?>
+        <div class="t8-retention-summary-grid">
+        <div class="t8-card" style="margin-bottom:var(--t8-space-4);">
+            <div class="t8-card-header"><h2 class="t8-card-title">Retention Ending Soon</h2></div>
+            <?php if ($endingSoon === []): ?><div class="t8-empty">No active records reach the end of retention in the next 30 days.</div>
+            <?php else: ?><div class="t8-table-wrap"><table class="t8-table"><thead><tr><th>Record</th><th>Expiration Date</th></tr></thead><tbody><?php foreach ($endingSoon as $soon): ?><tr><td><?= e($soon['document_title']) ?></td><td><?= e(format_date($soon['disposition_date'], 'M d, Y')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
+        </div>
+        <div class="t8-card t8-compliance-card">
+            <div class="t8-card-header"><h2 class="t8-card-title"><i class="fa-solid fa-chart-pie"></i> Compliance Status</h2><a class="t8-card-link" href="#retention-records">View Compliance <span aria-hidden="true">→</span></a></div>
+            <div class="t8-compliance-score"><strong><?= e((string) $retentionStats['compliance']) ?>%</strong><span>compliant records</span></div>
+            <div class="t8-compliance-bar"><span style="width:<?= e((string) $retentionStats['compliance']) ?>%"></span></div>
+            <div class="t8-compliance-meta"><span><i class="fa-solid fa-circle-check"></i> <?= e((string) $retentionStats['active']) ?> active</span><span><i class="fa-solid fa-circle-exclamation"></i> <?= e((string) $retentionStats['ending']) ?> need attention</span></div>
+        </div>
+        </div>
+    <?php endif; ?>
+
     <div class="t8-card">
         <div class="t8-card-header">
             <h2 class="t8-card-title">Retention Schedules</h2>
@@ -336,25 +405,26 @@ function t8_retention_suggest_date(int $years): string
         <?php endif; ?>
     </div>
 
-    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+    <div id="t8RetentionToolbar" class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
         <a class="t8-btn t8-btn-accent" href="<?= e(page_url('retention', ['action' => 'create_record'])) ?>">
             <i class="fa-solid fa-plus"></i> Place Document Under Retention
         </a>
         <?php if ($statusFilter === 'active'): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('retention', ['status' => 'archived'])) ?>">
+            <a id="t8RetentionToggle" class="t8-btn t8-btn-outline" href="<?= e(page_url('retention', ['status' => 'archived'])) ?>">
                 <i class="fa-solid fa-box-archive"></i> View Archived
             </a>
         <?php else: ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('retention')) ?>">
+            <a id="t8RetentionToggle" class="t8-btn t8-btn-outline" href="<?= e(page_url('retention')) ?>">
                 <i class="fa-solid fa-list"></i> View Active
             </a>
         <?php endif; ?>
     </div>
 
-    <div class="t8-card">
-        <div class="t8-card-header">
-            <h2 class="t8-card-title"><?= $statusFilter === 'archived' ? 'Archived Records' : 'Records Under Retention' ?></h2>
-        </div>
+    <div id="t8RetentionTableShell">
+        <div class="t8-card" id="retention-records">
+            <div class="t8-card-header">
+                <h2 class="t8-card-title"><?= $statusFilter === 'archived' ? 'Archived Records' : 'Records Under Retention' ?></h2>
+            </div>
         <?php if ($records === []): ?>
             <div class="t8-empty">
                 <?= $statusFilter === 'archived' ? 'No archived records.' : 'No records under retention yet.' ?>
@@ -376,6 +446,7 @@ function t8_retention_suggest_date(int $years): string
                         <?php foreach ($records as $r): ?>
                             <?php
                                 $isOverdue = $r['status'] === 'active' && strtotime($r['disposition_date']) < strtotime('today');
+                                $isExpiring = $r['status'] === 'active' && strtotime($r['disposition_date']) <= strtotime('+30 days');
                             ?>
                             <tr>
                                 <td><?= e($r['document_title']) ?></td>
@@ -385,43 +456,34 @@ function t8_retention_suggest_date(int $years): string
                                 <td>
                                     <?php if ($r['status'] === 'disposed'): ?>
                                         <span class="t8-badge t8-badge-rejected">Disposed</span>
+                                    <?php elseif ($r['status'] === 'for_disposal'): ?>
+                                        <span class="t8-badge t8-badge-pending">For Disposal</span>
+                                    <?php elseif ($r['status'] === 'archived'): ?>
+                                        <span class="t8-badge t8-badge-archived">Archived</span>
                                     <?php elseif ($isOverdue): ?>
                                         <span class="t8-badge t8-badge-pending">
                                             <i class="fa-solid fa-triangle-exclamation"></i> Overdue
                                         </span>
                                     <?php else: ?>
-                                        <span class="t8-badge t8-badge-approved">Active</span>
+                                        <span class="t8-badge <?= $isExpiring ? 't8-badge-pending' : 't8-badge-approved' ?>"><?= $isExpiring ? 'Expiring' : 'Active' ?></span>
                                     <?php endif; ?>
                                 </td>
                                 <td style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <?php if ($statusFilter === 'active'): ?>
-                                        <?php if ($r['status'] === 'active'): ?>
-                                            <form method="post" action="<?= e(page_url('retention', ['action' => 'dispose'])) ?>"
-                                                  onsubmit="return confirm('Mark this record as disposed?');">
-                                                <?= t8_csrf_field() ?>
-                                                <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
-                                                <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                    <i class="fa-solid fa-trash"></i> Dispose
-                                                </button>
-                                            </form>
-                                        <?php else: ?>
-                                            <form method="post" action="<?= e(page_url('retention', ['action' => 'reactivate'])) ?>">
-                                                <?= t8_csrf_field() ?>
-                                                <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
-                                                <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">
-                                                    <i class="fa-solid fa-rotate-left"></i> Reactivate
-                                                </button>
-                                            </form>
+                                    <?php if ($isAdmin && $statusFilter === 'active'): ?>
+                                        <?php if ($r['status'] === 'for_disposal'): ?>
+                                            <form method="post" action="<?= e(page_url('retention', ['action' => 'dispose'])) ?>"><input type="hidden" name="id" value="<?= e((string) $r['id']) ?>"><?= t8_csrf_field() ?><input class="t8-input" name="reason" placeholder="Disposal reason" required><button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">Dispose</button></form>
                                         <?php endif; ?>
                                         <form method="post" action="<?= e(page_url('retention', ['action' => 'archive'])) ?>"
                                               onsubmit="return confirm('Archive this record?');">
                                             <?= t8_csrf_field() ?>
                                             <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
+                                            <input class="t8-input" name="reason" placeholder="Archive reason" required>
                                             <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">
                                                 <i class="fa-solid fa-box-archive"></i> Archive
                                             </button>
                                         </form>
-                                    <?php else: ?>
+                                    <?php elseif ($isAdmin && $r['status'] === 'archived'): ?>
+                                        <form method="post" action="<?= e(page_url('retention', ['action' => 'mark_for_disposal'])) ?>"><input type="hidden" name="id" value="<?= e((string) $r['id']) ?>"><?= t8_csrf_field() ?><input class="t8-input" name="reason" placeholder="Disposal reason" required><button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">For Disposal</button></form>
                                         <form method="post" action="<?= e(page_url('retention', ['action' => 'restore'])) ?>">
                                             <?= t8_csrf_field() ?>
                                             <input type="hidden" name="id" value="<?= e((string) $r['id']) ?>">
@@ -436,6 +498,14 @@ function t8_retention_suggest_date(int $years): string
                     </tbody>
                 </table>
             </div>
+        <?php endif; ?>
+    </div>
+        <?php if ($recordsTotalPages > 1): ?>
+            <nav class="t8-pagination" aria-label="Retention record pages">
+                <?php if ($recordsPage > 1): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('retention', ['status' => $statusFilter, 'retention_page' => $recordsPage - 1])) ?>">Previous</a><?php endif; ?>
+                <span class="t8-help-text">Showing <?= e((string) (($recordsPage - 1) * $recordsPageSize + 1)) ?>–<?= e((string) min($recordsPage * $recordsPageSize, $recordsTotal)) ?> of <?= e((string) $recordsTotal) ?></span>
+                <?php if ($recordsPage < $recordsTotalPages): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('retention', ['status' => $statusFilter, 'retention_page' => $recordsPage + 1])) ?>">Next</a><?php endif; ?>
+            </nav>
         <?php endif; ?>
     </div>
 

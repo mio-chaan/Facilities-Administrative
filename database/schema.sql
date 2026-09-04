@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     user_id     INT NOT NULL,
     message     VARCHAR(500) NOT NULL,
+    target_url  VARCHAR(500) NULL,
     status      VARCHAR(30) NOT NULL DEFAULT 'unread',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id)
@@ -85,11 +86,25 @@ CREATE TABLE team8_facilities (
     name          VARCHAR(150) NOT NULL,
     location      VARCHAR(200) NOT NULL,
     facility_type VARCHAR(100) NULL,
-    capacity      INT NOT NULL DEFAULT 0,
+    capacity      INT NOT NULL DEFAULT 1,
     description   TEXT NULL,
+    equipment_notes TEXT NULL,
+    maintenance_status VARCHAR(30) NOT NULL DEFAULT 'operational',
     status        ENUM('active','archived') NOT NULL DEFAULT 'active',
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT chk_team8_facilities_capacity CHECK (capacity >= 1)
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_facility_maintenance_history (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    facility_id   INT NOT NULL,
+    performed_by  INT NOT NULL,
+    maintenance_date DATE NOT NULL,
+    notes         TEXT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_t8_maintenance_facility FOREIGN KEY (facility_id) REFERENCES team8_facilities(id),
+    CONSTRAINT fk_t8_maintenance_user FOREIGN KEY (performed_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_equipment (
@@ -99,6 +114,7 @@ CREATE TABLE team8_equipment (
     quantity        INT NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT chk_team8_equipment_quantity CHECK (quantity >= 0),
     CONSTRAINT fk_team8_equipment_facility FOREIGN KEY (home_facility_id) REFERENCES team8_facilities(id)
 ) ENGINE=InnoDB;
 
@@ -108,7 +124,7 @@ CREATE TABLE team8_reservations (
     user_id                 INT NOT NULL,
     start_time              DATETIME NULL,
     end_time                DATETIME NULL,
-    status                  VARCHAR(30) NOT NULL DEFAULT 'pending',
+    status                  VARCHAR(30) NOT NULL DEFAULT 'pending', -- pending | approved | rejected | cancellation_pending | cancelled | completed | expired
     department              VARCHAR(150) NULL,
     key_person              VARCHAR(150) NULL,
     expected_participants   INT NULL,
@@ -129,9 +145,12 @@ CREATE TABLE team8_reservations (
     cancellation_reviewed_at DATETIME NULL,
     cancellation_decision   VARCHAR(30) NULL,
     deleted_at              DATETIME NULL,
+    CONSTRAINT chk_team8_reservations_participants CHECK (expected_participants IS NULL OR expected_participants > 0),
+    CONSTRAINT chk_team8_reservations_quantity CHECK (quantity IS NULL OR quantity > 0),
     CONSTRAINT fk_team8_reservations_facility FOREIGN KEY (facility_id) REFERENCES team8_facilities(id),
-    CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id)
-    -- CONSTRAINT fk_team8_reservations_delete_requester FOREIGN KEY (delete_requested_by) REFERENCES users(id)
+    CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_team8_reservations_cancel_requester FOREIGN KEY (cancellation_requested_by) REFERENCES users(id),
+    CONSTRAINT fk_team8_reservations_cancel_reviewer FOREIGN KEY (cancellation_reviewed_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_reservation_equipment (
@@ -182,10 +201,10 @@ CREATE TABLE team8_visitors (
     visitor_type            VARCHAR(100) NULL,
     contact                 VARCHAR(30) NULL,
     company                 VARCHAR(150) NULL,
-    person_to_visit         VARCHAR(150) NOT NULL,
+    person_to_visit         VARCHAR(150) NULL,
     purpose                 VARCHAR(255) NOT NULL,
     scheduled_date          DATETIME NOT NULL,
-    status                  VARCHAR(30) NOT NULL DEFAULT 'scheduled', -- scheduled | checked_in | checked_out | cancelled
+    status                  VARCHAR(30) NOT NULL DEFAULT 'scheduled', -- scheduled | checked_in | checked_out | cancelled | expired
     check_in_time           DATETIME NULL,
     check_out_time          DATETIME NULL,
     logged_by               INT NOT NULL,
@@ -209,14 +228,20 @@ CREATE TABLE team8_documents (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     category_id     INT NULL,
     document_type   VARCHAR(150) NULL,
+    department_id   INT NULL,
+    owner_id        INT NULL,
     uploaded_by     INT NOT NULL,
     title           VARCHAR(200) NOT NULL,
     file_path       VARCHAR(500) NOT NULL, -- path of CURRENT version
     current_version INT NOT NULL DEFAULT 1,
+    status          VARCHAR(30) NOT NULL DEFAULT 'pending', -- pending | approved | returned_for_revision
+    expiration_date DATE NULL,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at      DATETIME NULL,
     CONSTRAINT fk_team8_documents_category FOREIGN KEY (category_id) REFERENCES team8_document_categories(id),
+    CONSTRAINT fk_team8_documents_department FOREIGN KEY (department_id) REFERENCES departments(id),
+    CONSTRAINT fk_team8_documents_owner FOREIGN KEY (owner_id) REFERENCES users(id),
     CONSTRAINT fk_team8_documents_uploader FOREIGN KEY (uploaded_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
@@ -228,6 +253,8 @@ CREATE TABLE team8_document_versions (
     file_size   BIGINT NOT NULL DEFAULT 0,
     checksum    VARCHAR(128) NULL,
     uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_team8_docversions_version CHECK (version_no >= 1),
+    CONSTRAINT chk_team8_docversions_file_size CHECK (file_size >= 0),
     CONSTRAINT fk_team8_docversions_document FOREIGN KEY (document_id) REFERENCES team8_documents(id),
     -- QA FIX (M2): closes a race condition where two concurrent
     -- "upload new version" requests could both compute and insert the
@@ -245,6 +272,7 @@ CREATE TABLE team8_retention_schedules (
     record_type     VARCHAR(150) NOT NULL,
     retention_years INT NOT NULL,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_team8_retention_years CHECK (retention_years >= 1),
     -- QA FIX (L4): prevents duplicate schedules for the same record type.
     CONSTRAINT uq_team8_retention_record_type UNIQUE (record_type)
 ) ENGINE=InnoDB;
@@ -255,7 +283,11 @@ CREATE TABLE team8_records (
     schedule_id     INT NOT NULL,
     custodian_id    INT NOT NULL,
     disposition_date DATE NULL,
-    status          VARCHAR(30) NOT NULL DEFAULT 'active',
+    status          VARCHAR(30) NOT NULL DEFAULT 'active', -- active | archived | for_disposal | disposed
+    archived_at     DATETIME NULL,
+    archive_reason  VARCHAR(500) NULL,
+    disposed_at     DATETIME NULL,
+    disposal_reason VARCHAR(500) NULL,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at      DATETIME NULL,
@@ -286,12 +318,16 @@ CREATE TABLE team8_legal_cases (
     assigned_to INT NOT NULL,
     contract_id INT NULL, -- FK added after team8_contracts is created (see below)
     title       VARCHAR(200) NOT NULL,
+    subject     VARCHAR(200) NULL,
+    department_id INT NULL,
     status      VARCHAR(30) NOT NULL DEFAULT 'open',
     filed_date  DATE NOT NULL,
+    deadline    DATE NULL,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at  DATETIME NULL,
-    CONSTRAINT fk_team8_legalcases_assignee FOREIGN KEY (assigned_to) REFERENCES users(id)
+    CONSTRAINT fk_team8_legalcases_assignee FOREIGN KEY (assigned_to) REFERENCES users(id),
+    CONSTRAINT fk_team8_legalcases_department FOREIGN KEY (department_id) REFERENCES departments(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_legal_documents (
@@ -312,15 +348,19 @@ CREATE TABLE team8_legal_documents (
 CREATE TABLE team8_contracts (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     owner_id        INT NOT NULL,
+    department_id   INT NULL,
     renewed_from_id INT NULL,
     title           VARCHAR(200) NOT NULL,
     start_date      DATE NOT NULL,
     end_date        DATE NULL,
+    renewal_date    DATE NULL,
+    amount          DECIMAL(14,2) NULL,
     status          VARCHAR(30) NOT NULL DEFAULT 'draft',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at      DATETIME NULL,
     CONSTRAINT fk_team8_contracts_owner FOREIGN KEY (owner_id) REFERENCES users(id),
+    CONSTRAINT fk_team8_contracts_department FOREIGN KEY (department_id) REFERENCES departments(id),
     CONSTRAINT fk_team8_contracts_renewed FOREIGN KEY (renewed_from_id) REFERENCES team8_contracts(id)
 ) ENGINE=InnoDB;
 
@@ -351,6 +391,18 @@ CREATE TABLE team8_contract_documents (
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_team8_contractdocs_contract FOREIGN KEY (contract_id) REFERENCES team8_contracts(id),
     CONSTRAINT fk_team8_contractdocs_document FOREIGN KEY (document_id) REFERENCES team8_documents(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_contract_history (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    contract_id INT NOT NULL,
+    version_no  INT NOT NULL,
+    data_json   LONGTEXT NOT NULL,
+    changed_by  INT NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_team8_contract_history UNIQUE (contract_id, version_no),
+    CONSTRAINT fk_team8_contracthistory_contract FOREIGN KEY (contract_id) REFERENCES team8_contracts(id),
+    CONSTRAINT fk_team8_contracthistory_user FOREIGN KEY (changed_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_contract_obligations (
@@ -493,6 +545,7 @@ CREATE TABLE IF NOT EXISTS team8_hr_document_versions (
     data_json   TEXT NOT NULL,        -- full snapshot of the row before this edit
     created_by  INT NOT NULL,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_team8_hrver_version CHECK (version_no >= 1),
     CONSTRAINT fk_team8_hrver_creator FOREIGN KEY (created_by) REFERENCES users(id),
     CONSTRAINT uq_team8_hrver UNIQUE (doc_type, doc_id, version_no)
 ) ENGINE=InnoDB;
@@ -519,19 +572,36 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- INDEXES (beyond PK/FK auto-indexes) for common lookups
 -- =========================================================
 
+CREATE UNIQUE INDEX uq_user_roles_user_role ON user_roles(user_id, role_id);
+CREATE INDEX idx_notifications_user_status ON notifications(user_id, status, created_at);
 CREATE INDEX idx_team8_reservations_status ON team8_reservations(status);
 CREATE INDEX idx_team8_reservations_dates ON team8_reservations(start_time, end_time);
 CREATE INDEX idx_team8_reservations_deleted_at ON team8_reservations(deleted_at);
 CREATE INDEX idx_team8_reservations_archived_at ON team8_reservations(archived_at);
+CREATE INDEX idx_team8_reservations_cancellation_status ON team8_reservations(status, cancellation_requested_at);
 CREATE INDEX idx_team8_facilities_status ON team8_facilities(status);
+CREATE INDEX idx_team8_maintenance_facility_date ON team8_facility_maintenance_history(facility_id, maintenance_date);
+CREATE UNIQUE INDEX uq_team8_reservation_equipment ON team8_reservation_equipment(reservation_id, equipment_id);
+CREATE INDEX idx_team8_cancel_request_pending ON team8_reservation_cancellation_requests(status, requested_at);
 CREATE INDEX idx_team8_visitors_status ON team8_visitors(status);
+CREATE INDEX idx_team8_visitors_status_scheduled ON team8_visitors(status, scheduled_date);
 CREATE INDEX idx_team8_visitors_scheduled ON team8_visitors(scheduled_date);
 CREATE INDEX idx_team8_documents_title ON team8_documents(title);
+CREATE INDEX idx_team8_documents_status ON team8_documents(status);
+CREATE INDEX idx_team8_documents_expiration ON team8_documents(expiration_date);
 CREATE INDEX idx_team8_records_status ON team8_records(status);
-CREATE INDEX idx_team8_records_disposition ON team8_records(disposition_date);
+CREATE INDEX idx_team8_records_status_deleted ON team8_records(status, deleted_at);
+CREATE INDEX idx_team8_records_disposition_date ON team8_records(disposition_date);
 CREATE INDEX idx_team8_legalcases_status ON team8_legal_cases(status);
+CREATE INDEX idx_team8_legalcases_deleted_status ON team8_legal_cases(deleted_at, status);
+CREATE INDEX idx_team8_legal_cases_assignee ON team8_legal_cases(assigned_to, status);
 CREATE INDEX idx_team8_contracts_status ON team8_contracts(status);
+CREATE INDEX idx_team8_contracts_deleted_status ON team8_contracts(deleted_at, status);
 CREATE INDEX idx_team8_contracts_enddate ON team8_contracts(end_date);
+CREATE INDEX idx_team8_contracts_department ON team8_contracts(department_id, status);
 CREATE INDEX idx_team8_contractobl_duedate ON team8_contract_obligations(due_date);
+CREATE UNIQUE INDEX uq_team8_legal_documents_case_document ON team8_legal_documents(case_id, document_id);
+CREATE UNIQUE INDEX uq_team8_contract_documents_contract_document ON team8_contract_documents(contract_id, document_id);
+CREATE UNIQUE INDEX uq_team8_contract_parties_contract_party_role ON team8_contract_parties(contract_id, party_id, role_in_contract);
 
 SET FOREIGN_KEY_CHECKS = 1;

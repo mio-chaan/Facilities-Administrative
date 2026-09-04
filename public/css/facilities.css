@@ -1,0 +1,213 @@
+.t8-facilities-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px; }
+.t8-facilities-heading h1 { margin-bottom:2px; }
+.t8-facilities-heading .t8-help-text { margin:0; }
+.t8-facilities-count { color:#241111; font-size:.82rem; }
+.t8-facility-form { display:block; }
+.t8-facility-form-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px 20px; }
+.t8-facility-form .t8-field { margin-bottom:0; }
+.t8-facility-form .t8-form-span-2 { grid-column:1 / -1; }
+.t8-facility-form .t8-label { font-size:0.8rem; font-weight:500; margin-bottom:8px; }
+.t8-facility-form .t8-input, .t8-facility-form .t8-select, .t8-facility-form .t8-textarea { padding:11px 14px; font-size:0.9rem; }
+.t8-facility-form-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:20px; }
+.t8-facilities-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:16px; }
+.t8-facility-card { min-width:0; overflow:hidden; background:#fff; border:1px solid #ece4e2; border-radius:12px; box-shadow:0 6px 18px rgba(36,17,17,.07); }
+.t8-facility-card-photo { position:relative; height:128px; overflow:hidden; background:#e9e5e3; }
+.t8-facility-card-photo::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg, rgba(36,17,17,.03), rgba(36,17,17,.2)); pointer-events:none; }
+.t8-facility-card-photo > img { width:100%; height:100%; object-fit:cover; }
+.t8-facility-card-content { padding:12px; }
+.t8-facility-card-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+.t8-facility-card-heading h2 { margin:0; color:#241111; font-size:.94rem; line-height:1.25; }
+.t8-facility-status { position:absolute; top:8px; right:8px; display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border-radius:999px; background:#fff; color:#2e7d32; font-size:.67rem; font-weight:700; box-shadow:0 2px 8px rgba(0,0,0,.12); }
+.t8-facility-status i { width:7px; height:7px; border-radius:50%; background:#2eae58; }
+.t8-facility-status-available { color:#2e7d32; }.t8-facility-status-available i { background:#2eae58; }
+.t8-facility-status-reserved { color:#a35a0b; }.t8-facility-status-reserved i { background:#f2994a; }
+.t8-facility-status-maintenance, .t8-facility-status-under-maintenance { color:#a15a13; }.t8-facility-status-maintenance i, .t8-facility-status-under-maintenance i { background:#f2994a; }
+.t8-facility-status-inactive { color:#66717c; }.t8-facility-status-inactive i { background:#66717c; }
+.t8-facility-more { width: 34px; height: 34px; display: inline-grid; place-items: center; flex: 0 0 34px; border: 1px solid #ece4e2; border-radius: 10px; background: #fff; color: #8a7c7c; cursor: pointer; }
+.t8-facility-more:hover { color: #b22222; border-color: #b22222; background: #fff8f8; }
+.t8-facility-card-details { display:grid; gap:7px; margin:12px 0; padding:12px 0; border-top:1px solid #f0e9e7; border-bottom:1px solid #f0e9e7; color:#5f5151; font-size:.69rem; }
+.t8-facility-card-details span { display:grid; grid-template-columns:16px auto; column-gap:6px; line-height:1.25; }
+.t8-facility-card-details i { grid-row:span 2; width:16px; color:#241111; text-align:center; }
+.t8-facility-card-details b { color:#8a7c7c; font-size:.64rem; font-weight:500; }
+.t8-facility-card-actions { display: flex; align-items: center; gap: 8px; }
+.t8-facility-card-actions .t8-btn { min-height: 34px; flex:1; justify-content:center; padding:7px 8px; font-size:.72rem; }
+.t8-facility-more-bottom { margin-left: auto; }
+.t8-facility-card-actions form { display: contents; }
+.t8-facility-delete:hover { color: var(--t8-danger); border-color: var(--t8-danger); background: #fff3f3; }
+@media (min-width: 641px) and (max-width: 999px) { .t8-facilities-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .t8-facility-form-grid { grid-template-columns:1fr; } }
+@media (max-width: 640px) { .t8-facilities-heading { flex-direction:column; } .t8-facilities-grid { grid-template-columns:1fr; } .t8-facility-card-photo { height:190px; } .t8-facility-card-content { padding:16px; } .t8-facility-card-details { font-size:.78rem; gap:9px; } .t8-facility-card-details b { font-size:.7rem; } }
+
+/* =========================================================
+   Location dropdown (custom combobox)
+   Backs the "Location" field on the Add/Edit Facility form. Options
+   are rendered server-side from team8_facility_locations; "+ Add
+   Location" opens the modal dialog defined below (see
+   #t8LocationAddModal / .t8-location-modal-*), which appends a new
+   option live via facilities.js.
+   ========================================================= */
+.t8-location-dropdown { position: relative; }
+.t8-location-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 11px 14px;
+    border: 1.5px solid var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    background: var(--t8-secondary);
+    color: var(--t8-text);
+    font-family: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.t8-location-trigger:hover { border-color: var(--t8-primary); }
+.t8-location-trigger:focus-visible {
+    outline: none;
+    border-color: var(--t8-primary);
+    background: #fff;
+    box-shadow: 0 0 0 4px rgba(178, 34, 34, 0.12);
+}
+.t8-location-trigger i { color: var(--t8-text-muted); font-size: 0.78rem; transition: transform 0.15s ease; flex-shrink: 0; }
+.t8-location-trigger[aria-expanded="true"] i { transform: rotate(180deg); }
+
+.t8-location-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    background: #fff;
+    border: 1.5px solid var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    box-shadow: var(--t8-shadow-lift);
+    overflow: hidden;
+}
+.t8-location-options {
+    list-style: none;
+    margin: 0;
+    padding: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+.t8-location-option {
+    padding: 9px 12px;
+    border-radius: 6px;
+    font-size: 0.87rem;
+    color: var(--t8-text);
+    cursor: pointer;
+}
+.t8-location-option:hover { background: var(--t8-secondary); color: var(--t8-primary); }
+.t8-location-empty-msg { margin: 0; padding: 12px; font-size: 0.8rem; color: var(--t8-text-muted); text-align: center; }
+.t8-location-add {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border: none;
+    border-top: 1px solid var(--t8-border);
+    background: var(--t8-secondary);
+    color: var(--t8-primary);
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.t8-location-add:hover { background: #fff3f3; }
+
+.t8-facilities-error { margin-bottom: var(--t8-space-4); }
+
+/* =========================================================
+   "+ Add Location" modal
+   FIX: this used to be an inline panel nested inside the Location
+   dropdown, itself nested inside the main facility <form> — a real
+   <form> in there would have been invalid, nested HTML. It is now a
+   standalone <dialog> (#t8LocationAddModal in
+   modules/facilities/index.php), rendered as a SIBLING of the
+   facility form, with its own independent <form>. Sized and styled to
+   match this app's other <dialog> modals (.t8-cancellation-modal in
+   reservation.css, .t8-onsite-modal in visitor.css) so it feels
+   native to the rest of the system, and is fully responsive down to
+   small screens.
+   ========================================================= */
+.t8-location-modal {
+    width: min(420px, calc(100% - 32px));
+    border: 0;
+    border-radius: var(--t8-radius);
+    padding: 0;
+    box-shadow: var(--t8-shadow-lift);
+}
+.t8-location-modal::backdrop {
+    background: rgba(0, 0, 0, .45);
+}
+.t8-location-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: var(--t8-space-4) var(--t8-space-5);
+    border-bottom: 1px solid var(--t8-border);
+}
+.t8-location-modal-header strong {
+    font-size: 1.02rem;
+    color: var(--t8-ink);
+}
+.t8-location-modal-close {
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    color: var(--t8-text-muted);
+    cursor: pointer;
+    border-radius: var(--t8-radius-sm);
+    font-size: 1.05rem;
+    line-height: 1;
+}
+.t8-location-modal-close:hover {
+    background: var(--t8-secondary);
+    color: var(--t8-primary);
+}
+.t8-location-modal-body {
+    padding: var(--t8-space-4) var(--t8-space-5);
+}
+.t8-location-modal-error {
+    margin: 10px 0 0;
+    color: var(--t8-danger);
+    font-size: .82rem;
+}
+.t8-location-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 0 var(--t8-space-5) var(--t8-space-4);
+}
+@media (max-width: 480px) {
+    .t8-location-modal-footer {
+        flex-direction: column-reverse;
+    }
+    .t8-location-modal-footer .t8-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    .t8-location-modal-header,
+    .t8-location-modal-body {
+        padding-left: var(--t8-space-4);
+        padding-right: var(--t8-space-4);
+    }
+}
+
+.t8-location-option.selected {
+    background: var(--t8-secondary);
+    font-weight: 600;
+}
+.t8-location-option.selected::after {
+    content: "\2713";
+    float: right;
+    color: var(--t8-success);
+}

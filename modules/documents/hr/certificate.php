@@ -20,7 +20,7 @@ if ($action === 'certificate_new') {
     if (!array_key_exists($type, T8_CERTIFICATE_TYPES)) {
         ?>
         <div class="t8-card-header" style="margin-bottom: var(--t8-space-4);">
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'generate'])) ?>"><i class="fa-solid fa-arrow-left"></i> Back to Templates</a>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>"><i class="fa-solid fa-arrow-left"></i> Back to Document Management</a>
         </div>
         <div class="t8-card">
             <div class="t8-card-header"><h2 class="t8-card-title">Choose Certificate Type</h2></div>

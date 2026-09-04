@@ -10,12 +10,43 @@
     align-items: start;
 }
 
+#t8ReservationForm.t8-reservation-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 20px;
+}
+#t8ReservationForm.t8-reservation-form-grid > .t8-field {
+    margin-bottom: 0;
+}
+#t8ReservationForm.t8-reservation-form-grid > .t8-field:last-of-type,
+#t8ReservationForm.t8-reservation-form-grid > .t8-btn,
+#t8ReservationForm.t8-reservation-form-grid > a.t8-btn {
+    grid-column: 1 / -1;
+}
+#t8ReservationForm.t8-reservation-form-grid > .t8-reservation-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-start;
+    gap: 16px;
+}
+#t8ReservationForm.t8-reservation-form-grid > .t8-reservation-actions > .t8-btn {
+    width: 140px;
+}
+
 .t8-reservation-datetime {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--t8-space-4);
 }
 @media (max-width: 560px) {
+    #t8ReservationForm.t8-reservation-form-grid {
+        grid-template-columns: 1fr;
+    }
+    #t8ReservationForm.t8-reservation-form-grid > .t8-field:last-of-type,
+    #t8ReservationForm.t8-reservation-form-grid > .t8-btn,
+    #t8ReservationForm.t8-reservation-form-grid > a.t8-btn {
+        grid-column: auto;
+    }
     .t8-reservation-datetime { grid-template-columns: 1fr; }
 }
 
@@ -157,9 +188,39 @@
     font-weight: 700;
     white-space: nowrap;
 }
+.t8-conflict-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(230, 126, 34, 0.12);
+    border: 1px solid rgba(230, 126, 34, 0.35);
+    color: #d97706;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
 .t8-reservation-filters { display:flex; flex-wrap:wrap; gap:var(--t8-space-3); align-items:end; padding:0 var(--t8-space-4) var(--t8-space-3); }
 .t8-reservation-filters label { display:flex; flex-direction:column; gap:4px; font-size:.82rem; font-weight:700; color:var(--t8-text-muted); }
 .t8-reservation-filters .t8-select { min-width:150px; }
+
+@media (max-width: 640px) {
+    .t8-reservation-heading { flex-direction:column; }
+    .t8-reservation-heading-actions,.t8-reservation-heading-actions .t8-btn { width:100%; }
+    .t8-reservation-heading-actions .t8-btn { justify-content:center; }
+    .t8-reservation-kpi-grid,.t8-reservation-overview-grid { grid-template-columns:1fr; }
+    .t8-today-row { grid-template-columns:1fr 1fr; }
+    .t8-today-row .t8-badge { grid-column:2; }
+    .t8-reservation-filters { align-items: stretch; padding-left: 16px; padding-right: 16px; }
+    .t8-reservation-filters label,
+    .t8-reservation-filters .t8-select { width: 100%; min-width: 0; }
+    .t8-calendar-cell { min-height: 32px; padding: 4px; font-size: 0.72rem; }
+    .t8-calendar-count { right: 3px; bottom: 3px; min-width: 16px; height: 16px; padding: 0 3px; font-size: 0.6rem; }
+    .t8-calendar-weekday { font-size: 0.62rem; }
+    .t8-approval-actions form { width: 100%; flex-wrap: wrap; }
+    .t8-reject-form .t8-input-sm { width: 100%; }
+}
 
 /* ---- Cancellation-request modal (used by reservation/index.php's
    #t8CancellationRequestModal <dialog>, opened via reservation.js) ---- */
@@ -168,21 +229,315 @@
 .t8-cancellation-modal textarea { width:100%; resize:vertical; }
 .t8-error-text { display:block; margin-top:6px; color:#b91c1c; font-size:.82rem; }
 
-/* ---- Archive filters (Month/Year/Type/Facility/Status) ----
-   Same .t8-reservation-filters row above is reused as-is for the new
-   Type/Facility/Status selects added to the Staff/Admin Archive
-   views (see modules/reservation/index.php) - they wrap onto
-   additional lines on narrow screens via the existing flex-wrap, no
-   new class needed. This just gives each label/select a sane minimum
-   width now that there are up to five of them in a row. */
-.t8-reservation-filters label { min-width: 120px; }
+/* =========================================================
+   FILTER TOOLBAR v2 — "All Reservations" (admin)
+   Adds a keyword search, a Schedule quick filter, active-filter
+   chips (each individually removable) and a live result count on
+   top of the existing Facility/Type/Status dropdowns. Selects use
+   the same .t8-select focus treatment as the rest of the app
+   (components.css) — no permanent colored border on an idle field,
+   only on :focus, so it never reads as a validation error.
+   ========================================================= */
+.t8-reservation-toolbar {
+    padding: var(--t8-space-3) 0 var(--t8-space-3);
+    border-bottom: 1px solid var(--t8-border);
+    margin-bottom: var(--t8-space-3);
+}
+.t8-reservation-filters-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--t8-space-3);
+    align-items: flex-end;
+    padding: 0 var(--t8-space-4) var(--t8-space-3);
+}
+.t8-reservation-filters-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: .82rem;
+    font-weight: 700;
+    color: var(--t8-text-muted);
+}
+.t8-reservation-filters-row .t8-select { min-width: 150px; }
 
-/* ---- Live status polling (public/js/reservation.js) ----
-   DYNAMIC STATUS: a cancel/request-cancellation trigger button gets
-   disabled in place once its reservation flips to Ongoing (or
-   otherwise stops being Approved) between polls, instead of staying
-   clickable and stale until the next manual refresh. */
-[data-cancel-reservation-id][disabled] {
-    opacity: 0.55;
-    cursor: not-allowed;
+.t8-filter-search {
+    position: relative;
+    flex: 1 1 240px;
+    min-width: 220px;
+}
+.t8-filter-search i {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--t8-text-muted);
+    font-size: .8rem;
+    pointer-events: none;
+}
+.t8-filter-search input.t8-input {
+    padding-left: 34px;
+}
+
+.t8-reservation-filters-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 0 var(--t8-space-4);
+}
+.t8-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.t8-filter-empty-chips {
+    font-size: .78rem;
+    color: var(--t8-text-muted);
+    font-style: italic;
+}
+.t8-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #fff2f2;
+    border: 1px solid #f3d0d0;
+    color: var(--t8-primary-dark);
+    padding: 5px 6px 5px 12px;
+    border-radius: 999px;
+    font-size: .76rem;
+    font-weight: 600;
+}
+.t8-filter-chip button {
+    border: none;
+    background: rgba(178,34,34,.12);
+    color: var(--t8-primary-dark);
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: .65rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+.t8-filter-chip button:hover { background: rgba(178,34,34,.22); }
+.t8-filter-clear-all {
+    background: none;
+    border: none;
+    color: var(--t8-text-muted);
+    font-size: .78rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 0;
+}
+.t8-filter-clear-all:hover { color: var(--t8-primary); }
+.t8-filter-result-count {
+    font-size: .8rem;
+    color: var(--t8-text-muted);
+    white-space: nowrap;
+}
+.t8-filter-result-count strong { color: var(--t8-ink); }
+
+@media (max-width: 720px) {
+    .t8-reservation-filters-row { flex-direction: column; align-items: stretch; }
+    .t8-filter-search, .t8-reservation-filters-row .t8-select { width: 100%; min-width: 0; }
+    .t8-reservation-filters-meta { flex-direction: column; align-items: flex-start; }
+}
+
+#t8AllReservations td:last-child {
+    display: table-cell !important;
+    vertical-align: middle;
+    text-align: right;
+    white-space: nowrap;
+}
+#t8AllReservations td:last-child > * {
+    vertical-align: middle;
+}
+#t8AllReservations td:last-child > * + * {
+    margin-left: 8px;
+}
+
+/* =========================================================
+   ROW MEATBALL MENU — "All Reservations" (admin)
+   Portaled to <body> on open (see reservation.js), same pattern
+   already used for the visitor scheduled-visits menu, so it can
+   never be clipped by .t8-table-wrap's overflow-x: auto (that
+   single-axis overflow rule silently promotes overflow-y to auto
+   too — see public/css/visitor.css for the fuller writeup of this).
+   ========================================================= */
+.t8-res-menu { position: relative; display: inline-flex; }
+.t8-res-menu-trigger {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--t8-border);
+    background: #fff;
+    color: var(--t8-text-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .95rem;
+    flex-shrink: 0;
+    transition: all .15s ease;
+}
+.t8-res-menu-trigger:hover,
+.t8-res-menu-trigger.is-active {
+    background: var(--t8-secondary);
+    color: var(--t8-primary);
+    border-color: var(--t8-primary);
+}
+.t8-res-menu-panel {
+    display: none;
+    min-width: 220px;
+    padding: 6px;
+    border: 1px solid var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    background: #fff;
+    box-shadow: var(--t8-shadow-lift);
+    flex-direction: column;
+}
+.t8-res-menu-panel.t8-portal-open {
+    display: flex;
+    position: fixed;
+    z-index: 1000;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity .12s ease, transform .12s ease;
+}
+.t8-res-menu-panel.t8-portal-open.t8-portal-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+.t8-res-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: none;
+    background: none;
+    border-radius: 6px;
+    font-size: .84rem;
+    font-family: inherit;
+    color: var(--t8-ink);
+    cursor: pointer;
+    text-align: left;
+    text-decoration: none;
+}
+.t8-res-menu-item i { width: 16px; text-align: center; color: var(--t8-text-muted); font-size: .85rem; }
+.t8-res-menu-item:hover { background: var(--t8-secondary); }
+.t8-res-menu-item.t8-danger { color: var(--t8-danger); }
+.t8-res-menu-item.t8-danger i { color: var(--t8-danger); }
+.t8-res-menu-item.t8-danger:hover { background: #fdeceb; }
+.t8-res-menu-divider { height: 1px; background: var(--t8-border); margin: 6px 4px; }
+.t8-res-menu-panel form { margin: 0; }
+.t8-res-menu-panel form .t8-res-menu-item { width: 100%; }
+
+/* =========================================================
+   DETAIL MODAL — populated via JS from the clicked trigger's
+   data-* attributes (see t8_reservation_render_menu() in
+   modules/reservation/index.php + reservation.js).
+   ========================================================= */
+.t8-res-detail-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+    width: min(560px, calc(100% - 32px));
+    max-height: 88vh;
+    border: 0;
+    border-radius: var(--t8-radius);
+    padding: 0;
+    box-shadow: 0 24px 60px rgba(0,0,0,.28);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.t8-res-detail-modal:not([open]) { display: none; }
+.t8-res-detail-modal::backdrop { background: rgba(36,17,17,.45); }
+.t8-res-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--t8-border);
+}
+.t8-res-detail-header h2 { margin: 0 0 4px; font-size: 1.02rem; color: var(--t8-ink); }
+.t8-res-detail-ref { font-family: var(--t8-font-data); font-size: .72rem; color: var(--t8-text-muted); }
+.t8-res-detail-close {
+    background: none;
+    border: none;
+    font-size: 1.3rem;
+    line-height: 1;
+    color: var(--t8-text-muted);
+    cursor: pointer;
+    padding: 4px;
+}
+.t8-res-detail-body { padding: 18px 22px; overflow-y: auto; }
+.t8-res-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 18px;
+    margin-bottom: 16px;
+}
+.t8-res-detail-item { display: flex; flex-direction: column; gap: 2px; }
+.t8-res-detail-item span {
+    font-size: .66rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--t8-text-muted);
+    font-weight: 700;
+}
+.t8-res-detail-item strong { font-size: .86rem; color: var(--t8-ink); font-weight: 600; }
+.t8-res-detail-item.full { grid-column: 1 / -1; }
+.t8-res-detail-section {
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--t8-primary);
+    font-weight: 700;
+    margin: 16px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.t8-res-detail-notes {
+    background: var(--t8-secondary);
+    border: 1px dashed var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    padding: 12px 14px;
+    font-size: .85rem;
+    color: var(--t8-text);
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
+.t8-res-detail-notes.is-empty { color: var(--t8-text-muted); font-style: italic; }
+.t8-res-detail-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 14px 22px;
+    border-top: 1px solid var(--t8-border);
+}
+.t8-conflict-note {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    background: #fff4e5;
+    border: 1px solid #f3d9ae;
+    color: #8a5c10;
+    padding: 10px 12px;
+    border-radius: var(--t8-radius-sm);
+    font-size: .8rem;
+    margin-bottom: 16px;
+}
+@media (max-width: 480px) {
+    .t8-res-detail-grid { grid-template-columns: 1fr; }
 }

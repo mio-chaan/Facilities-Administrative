@@ -14,57 +14,65 @@ $recentDocuments = t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 8);
 ?>
 <div class="t8-docs-dashboard">
 
-    <div class="t8-docs-hero t8-card">
+    <div class="t8-docs-hero">
         <div class="t8-docs-hero-text">
             <h1>Document Management</h1>
-            <p class="t8-help-text">Upload and version traditional files, or generate HR documents — incident reports, notices to explain, memorandums, warning letters, and certificates — straight from templates.</p>
-        </div>
-        <div class="t8-docs-hero-actions">
-            <div class="t8-docs-search">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" id="t8DocsSearch" placeholder="Search recent documents…" autocomplete="off">
-            </div>
-            <div class="t8-docs-hero-buttons">
-                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'create'])) ?>">
-                    <i class="fa-solid fa-upload"></i> Upload Existing Document
-                </a>
-                <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'generate'])) ?>">
-                    <i class="fa-solid fa-wand-magic-sparkles"></i> Generate HR Document
-                </a>
-            </div>
+            <p class="t8-help-text">Upload, manage, version, approve, and archive documents.</p>
         </div>
     </div>
 
-    <div class="t8-docs-grid-2">
-        <div class="t8-card">
-            <div class="t8-card-header"><h2 class="t8-card-title">Quick Actions</h2></div>
-            <div class="t8-docs-quick-actions">
-                <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'create'])) ?>">
-                    <i class="fa-solid fa-upload"></i><span>Upload Existing File</span>
-                </a>
-                <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'incident_report_new'])) ?>">
-                    <i class="fa-solid fa-triangle-exclamation"></i><span>Incident Report</span>
-                </a>
-                <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'nte_new'])) ?>">
-                    <i class="fa-solid fa-file-circle-question"></i><span>Notice To Explain</span>
-                </a>
-                <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'memorandum_new'])) ?>">
-                    <i class="fa-solid fa-file-lines"></i><span>Memorandum</span>
-                </a>
-                <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'memorandum_new', 'kind' => 'warning_letter'])) ?>">
-                    <i class="fa-solid fa-circle-exclamation"></i><span>Warning Letter</span>
-                </a>
-                <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'certificate_new'])) ?>">
-                    <i class="fa-solid fa-certificate"></i><span>Certificate</span>
-                </a>
+    <div class="t8-docs-kpi-grid" aria-label="Document summary">
+        <div class="t8-docs-kpi t8-docs-kpi-red"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-file-lines"></i></div><div><span>Total Documents</span><strong><?= e((string) $hrStats['total_documents']) ?></strong><small>All active records</small></div></div>
+        <div class="t8-docs-kpi t8-docs-kpi-orange"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-clock"></i></div><div><span>Pending Actions</span><strong><?= e((string) ($hrStats['pending_incidents'] + $hrStats['pending_nte'] + $hrStats['pending_explanations'] + $hrStats['pending_approval'])) ?></strong><small>Needs attention</small></div></div>
+        <div class="t8-docs-kpi t8-docs-kpi-gray"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-box-archive"></i></div><div><span>Archived</span><strong><?= e((string) $hrStats['archived']) ?></strong><small>Retained records</small></div></div>
+        <div class="t8-docs-kpi t8-docs-kpi-purple"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-layer-group"></i></div><div><span>Templates</span><strong><?= e((string) $hrStats['templates']) ?></strong><small>Ready to generate</small></div></div>
+    </div>
+
+    <div class="t8-docs-layout">
+        <div class="t8-docs-stack">
+            <div class="t8-card">
+                <div class="t8-card-header"><h2 class="t8-card-title">Quick Actions</h2></div>
+                <div class="t8-docs-quick-actions">
+                    <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'create'])) ?>">
+                        <i class="fa-solid fa-upload"></i><span>Upload Existing File</span>
+                    </a>
+                    <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'incident_report_new'])) ?>">
+                        <i class="fa-solid fa-triangle-exclamation"></i><span>Incident Report</span>
+                    </a>
+                    <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'nte_new'])) ?>">
+                        <i class="fa-solid fa-file-circle-question"></i><span>Notice To Explain</span>
+                    </a>
+                    <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'memorandum_new'])) ?>">
+                        <i class="fa-solid fa-file-lines"></i><span>Memorandum</span>
+                    </a>
+                    <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'memorandum_new', 'kind' => 'warning_letter'])) ?>">
+                        <i class="fa-solid fa-circle-exclamation"></i><span>Warning Letter</span>
+                    </a>
+                    <a class="t8-docs-quick-action" href="<?= e(page_url('documents', ['action' => 'certificate_new'])) ?>">
+                        <i class="fa-solid fa-certificate"></i><span>Certificate</span>
+                    </a>
+                </div>
+            </div>
+
+            <div class="t8-card">
+                <div class="t8-card-header"><h2 class="t8-card-title">Pending Actions</h2></div>
+                <div class="t8-docs-stat-list">
+                    <a class="t8-docs-stat" href="<?= e(page_url('documents', ['action' => 'incident_report_new'])) ?>"><span><i class="fa-solid fa-triangle-exclamation"></i> Pending Incident Reports</span><strong><?= e((string) $hrStats['pending_incidents']) ?></strong></a>
+                    <a class="t8-docs-stat" href="<?= e(page_url('documents', ['action' => 'nte_new'])) ?>"><span><i class="fa-solid fa-file-circle-question"></i> Pending NTE</span><strong><?= e((string) $hrStats['pending_nte']) ?></strong></a>
+                    <a class="t8-docs-stat" href="<?= e(page_url('documents')) ?>"><span><i class="fa-solid fa-pen-to-square"></i> Pending Explanations</span><strong><?= e((string) $hrStats['pending_explanations']) ?></strong></a>
+                    <a class="t8-docs-stat" href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'pending'])) ?>"><span><i class="fa-solid fa-check"></i> Pending Approval</span><strong><?= e((string) $hrStats['pending_approval']) ?></strong></a>
+                </div>
             </div>
         </div>
 
         <div class="t8-card">
-            <div class="t8-card-header"><h2 class="t8-card-title">Recent Documents</h2></div>
+            <div class="t8-card-header">
+                <h2 class="t8-card-title">Recent Documents</h2>
+                <div class="t8-docs-search"><i class="fa-solid fa-magnifying-glass"></i><input type="search" id="t8DocsSearch" placeholder="Search documents..." autocomplete="off" aria-label="Search recent documents"></div>
+            </div>
             <div id="t8RecentDocsWrap">
                 <?php if ($recentDocuments === []): ?>
-                    <div class="t8-empty">No documents yet. Upload a file or generate your first HR document.</div>
+                    <div class="t8-docs-empty"><i class="fa-regular fa-folder-open"></i><strong>No documents yet</strong><span>Upload your first document to get started.</span><a class="t8-btn t8-btn-accent t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'create'])) ?>"><i class="fa-solid fa-upload"></i> Upload Document</a></div>
                 <?php else: ?>
                     <ul class="t8-docs-recent-list">
                         <?php foreach ($recentDocuments as $doc): ?>
@@ -79,28 +87,6 @@ $recentDocuments = t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 8);
                         <?php endforeach; ?>
                     </ul>
                 <?php endif; ?>
-            </div>
-        </div>
-    </div>
-
-    <div class="t8-docs-grid-2">
-        <div class="t8-card">
-            <div class="t8-card-header"><h2 class="t8-card-title">Document Statistics</h2></div>
-            <div class="t8-docs-stat-list">
-                <div class="t8-docs-stat"><span>Total Documents</span><strong><?= e((string) $hrStats['total_documents']) ?></strong></div>
-                <div class="t8-docs-stat"><span>Generated Documents</span><strong><?= e((string) $hrStats['generated_documents']) ?></strong></div>
-                <div class="t8-docs-stat"><span>Archived</span><strong><?= e((string) $hrStats['archived']) ?></strong></div>
-                <div class="t8-docs-stat"><span>Templates</span><strong><?= e((string) $hrStats['templates']) ?></strong></div>
-            </div>
-        </div>
-
-        <div class="t8-card">
-            <div class="t8-card-header"><h2 class="t8-card-title">Pending Actions</h2></div>
-            <div class="t8-docs-stat-list">
-                <div class="t8-docs-stat"><span>Pending Incident Reports</span><strong><?= e((string) $hrStats['pending_incidents']) ?></strong></div>
-                <div class="t8-docs-stat"><span>Pending NTE</span><strong><?= e((string) $hrStats['pending_nte']) ?></strong></div>
-                <div class="t8-docs-stat"><span>Pending Explanations</span><strong><?= e((string) $hrStats['pending_explanations']) ?></strong></div>
-                <div class="t8-docs-stat"><span>Pending Approval</span><strong><?= e((string) $hrStats['pending_approval']) ?></strong></div>
             </div>
         </div>
     </div>

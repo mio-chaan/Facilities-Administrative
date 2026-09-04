@@ -20,6 +20,28 @@
  */
 
 document.addEventListener('DOMContentLoaded', function () {
+    var insightButton = document.getElementById('t8GenerateReservationInsight');
+    var insightOutput = document.getElementById('t8ReservationInsight');
+    if (insightButton && insightOutput) {
+        insightButton.addEventListener('click', function () {
+            insightButton.disabled = true;
+            insightButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Analyzing';
+            fetch('reservation_insights.php', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (response) { return response.json(); })
+                .then(function (data) {
+                    insightOutput.textContent = data.insight || data.error || 'No insight available.';
+                    insightOutput.hidden = false;
+                })
+                .catch(function () {
+                    insightOutput.textContent = 'Reservation insights are temporarily unavailable.';
+                    insightOutput.hidden = false;
+                })
+                .finally(function () {
+                    insightButton.disabled = false;
+                    insightButton.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> Analyze';
+                });
+        });
+    }
     var canvas = document.getElementById('t8TrendChart');
     if (!canvas) {
         return; // not on the dashboard page

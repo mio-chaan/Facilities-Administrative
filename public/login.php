@@ -126,11 +126,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'SELECT r.role_name
                      FROM user_roles ur
                      JOIN roles r ON r.id = ur.role_id
-                     WHERE ur.user_id = :user_id
-                     LIMIT 1'
+                     WHERE ur.user_id = :user_id'
                 );
                 $roleStmt->execute(['user_id' => $user['id']]);
-                $role = $roleStmt->fetchColumn();
+                $roles = array_map('strval', $roleStmt->fetchAll(PDO::FETCH_COLUMN));
+                $priority = ['admin', 'facilities_staff', 'front_desk', 'records_officer', 'legal_officer', 'employee'];
+                $role = null;
+                foreach ($priority as $candidate) {
+                    if (in_array($candidate, $roles, true)) {
+                        $role = $candidate;
+                        break;
+                    }
+                }
+                if ($role === null && $roles !== []) {
+                    $role = $roles[0];
+                }
 
                 session_regenerate_id(true);
                 $_SESSION['user_id']       = (int) $user['id'];
