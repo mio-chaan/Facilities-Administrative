@@ -45,6 +45,10 @@ switch ($action) {
         require __DIR__ . '/print.php';
         break;
 
+    case 'hr_attachment_download':
+        require __DIR__ . '/attachment_download.php';
+        break;
+
     default:
         http_response_code(404);
         echo '<div class="t8-alert t8-alert-danger">404 — Unknown document action.</div>';

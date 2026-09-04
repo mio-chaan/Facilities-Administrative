@@ -10,6 +10,7 @@ require_once __DIR__ . '/../app/includes/permissions.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
+header('Cache-Control: no-store');
 
 $query = trim((string) ($_GET['q'] ?? ''));
 if ($query === '') {

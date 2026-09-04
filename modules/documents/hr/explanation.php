@@ -146,7 +146,7 @@ if ($action === 'explanation_view') {
 
         <?php if (!empty($explanation['attachment_path'])): ?>
             <div class="t8-field">
-                <a href="<?= e(asset('uploads/' . $explanation['attachment_path'])) ?>" target="_blank"><i class="fa-solid fa-paperclip"></i> View attachment</a>
+                <a href="<?= e(page_url('documents', ['action' => 'hr_attachment_download', 'type' => 'explanation', 'id' => $id])) ?>" target="_blank"><i class="fa-solid fa-paperclip"></i> View attachment</a>
             </div>
         <?php endif; ?>
 

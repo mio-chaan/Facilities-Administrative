@@ -73,7 +73,7 @@ function t8_ai_chat(array $messages, string $model = 'gemini-3.5-flash', float $
     }
 
     $url = 'https://generativelanguage.googleapis.com/v1beta/models/'
-        . rawurlencode($model) . ':generateContent?key=' . urlencode(GEMINI_API_KEY);
+        . rawurlencode($model) . ':generateContent';
 
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -81,6 +81,7 @@ function t8_ai_chat(array $messages, string $model = 'gemini-3.5-flash', float $
         CURLOPT_POST           => true,
         CURLOPT_HTTPHEADER     => [
             'Content-Type: application/json',
+            'x-goog-api-key: ' . GEMINI_API_KEY,
         ],
         CURLOPT_POSTFIELDS => json_encode($payload),
         CURLOPT_TIMEOUT    => 30,
@@ -93,14 +94,13 @@ function t8_ai_chat(array $messages, string $model = 'gemini-3.5-flash', float $
     }
 
     if ($response === false) {
-        throw new RuntimeException('Could not reach Gemini: ' . $curlError);
+        throw new RuntimeException('Could not reach the AI service.');
     }
 
     $data = json_decode($response, true);
 
     if ($httpCode !== 200) {
-        $apiMessage = $data['error']['message'] ?? 'Unknown error from Gemini.';
-        throw new RuntimeException('Gemini API error: ' . $apiMessage);
+        throw new RuntimeException('The AI service returned an error.');
     }
 
     $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? '';
@@ -109,7 +109,7 @@ function t8_ai_chat(array $messages, string $model = 'gemini-3.5-flash', float $
         // Most commonly a safety-filter block - candidates[0] exists but
         // has no parts. Surface something useful instead of a blank reply.
         $finishReason = $data['candidates'][0]['finishReason'] ?? 'unknown';
-        throw new RuntimeException('Gemini returned no content (finish reason: ' . $finishReason . ').');
+        throw new RuntimeException('The AI service returned no usable content.');
     }
 
     return trim((string) $text);

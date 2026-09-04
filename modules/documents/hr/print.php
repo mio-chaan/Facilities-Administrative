@@ -69,6 +69,10 @@ switch ($type) {
         break;
 
     case 'memorandum':
+        if (!$isAdmin) {
+            http_response_code(404);
+            exit('Document not found.');
+        }
         $row = t8_hr_memorandum_fetch($pdo, $id);
         if (!$row) {
             http_response_code(404);
@@ -89,6 +93,10 @@ switch ($type) {
         break;
 
     case 'certificate':
+        if (!$isAdmin) {
+            http_response_code(404);
+            exit('Document not found.');
+        }
         $row = t8_hr_certificate_fetch($pdo, $id);
         if (!$row) {
             http_response_code(404);

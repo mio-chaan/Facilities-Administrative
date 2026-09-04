@@ -16,5 +16,4 @@ node_modules/
 *.log
 # Local secret config
 app/config/config.local.php
-
 tests/
