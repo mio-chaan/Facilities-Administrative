@@ -120,6 +120,14 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
             $schedule = t8_reservation_schedule($r);
             $statusLabel = ucwords(str_replace('_', ' ', (string) ($r['status'] ?? 'Unknown')));
             
+            $actionHtml = '';
+            $rowIsOwn = $currentUserId !== null && (int) $r['user_id'] === $currentUserId;
+            if ($table_type === 'pending' && $isAdmin) {
+                $actionHtml = '<form method="post" action="' . e(page_url('reservation', ['action' => 'approve'])) . '">' . t8_csrf_field()
+                    . '<input type="hidden" name="id" value="' . e((string) $r['id']) . '"><button class="t8-btn t8-btn-sm t8-btn-success" type="submit">Approve</button></form>';
+            } elseif ($rowIsOwn && in_array($r['status'], ['pending', 'approved'], true)) {
+                $actionHtml = '<a class="t8-btn t8-btn-sm t8-btn-outline" href="' . e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) . '">Edit</a>';
+            }
             $html .= '<tr data-reservation-row>'
                 . '<td>' . e($r['facility_name']) . '</td>'
                 . '<td><span class="t8-type-pill">' . e((string) ($r['facility_type'] ?? 'Unknown')) . '</span></td>'
@@ -129,7 +137,7 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
                 . '<td>' . e($summary['category']) . ($summary['detail'] ? ' <small>' . e($summary['detail']) . '</small>' : '') . '</td>'
                 . '<td><strong>' . e($schedule['primary']) . '</strong><br><small>' . e($schedule['secondary']) . '</small></td>'
                 . '<td>' . e($statusLabel) . '</td>'
-                . '<td class="t8-table-actions"><!-- action links here --></td>'
+                . '<td class="t8-table-actions">' . $actionHtml . '</td>'
                 . '</tr>';
         }
     }

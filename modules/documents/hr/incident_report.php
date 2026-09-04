@@ -229,7 +229,7 @@ if ($action === 'incident_report_view') {
                     <th>Attachment</th>
                     <td>
                         <?php if (!empty($report['attachment_path'])): ?>
-                            <a href="<?= e(asset('uploads/' . $report['attachment_path'])) ?>" target="_blank"><i class="fa-solid fa-paperclip"></i> View attachment</a>
+                            <a href="<?= e(page_url('documents', ['action' => 'hr_attachment_download', 'type' => 'incident_report', 'id' => $id])) ?>" target="_blank"><i class="fa-solid fa-paperclip"></i> View attachment</a>
                         <?php else: ?>—<?php endif; ?>
                     </td>
                 </tr>

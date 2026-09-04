@@ -104,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare(
                 'SELECT id, full_name, password_hash, department_id
                  FROM users
-                 WHERE email = :email
+                 WHERE email = :email AND deleted_at IS NULL
                  LIMIT 1'
             );
             $stmt->execute(['email' => $emailValue]);

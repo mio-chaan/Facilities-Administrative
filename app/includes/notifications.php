@@ -34,9 +34,20 @@ if (!function_exists('t8_admin_notification_once_today')) {
         try {
             $admins = $pdo->query("SELECT ur.user_id FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.role_name = 'admin'")->fetchAll(PDO::FETCH_COLUMN);
             foreach ($admins as $adminId) {
-                $check = $pdo->prepare('SELECT id FROM notifications WHERE user_id = :user_id AND message = :message AND DATE(created_at) = CURDATE() LIMIT 1');
-                $check->execute(['user_id' => $adminId, 'message' => $message]);
-                if (!$check->fetchColumn()) { t8_notify_user($pdo, (int) $adminId, $message, $targetUrl); }
+                $lockName = 'team8_notification_' . sha1((string) $adminId . '|' . $message . '|' . date('Y-m-d'));
+                $lockStmt = $pdo->prepare('SELECT GET_LOCK(:lock_name, 5)');
+                $lockStmt->execute(['lock_name' => $lockName]);
+                if ((int) $lockStmt->fetchColumn() !== 1) {
+                    continue;
+                }
+                try {
+                    $check = $pdo->prepare('SELECT id FROM notifications WHERE user_id = :user_id AND message = :message AND DATE(created_at) = CURDATE() LIMIT 1');
+                    $check->execute(['user_id' => $adminId, 'message' => $message]);
+                    if (!$check->fetchColumn()) { t8_notify_user($pdo, (int) $adminId, $message, $targetUrl); }
+                } finally {
+                    $releaseStmt = $pdo->prepare('SELECT RELEASE_LOCK(:lock_name)');
+                    $releaseStmt->execute(['lock_name' => $lockName]);
+                }
             }
         } catch (PDOException $e) { /* optional alert generation */ }
     }
