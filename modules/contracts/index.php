@@ -91,6 +91,79 @@ function t8_contract_status_badge(string $status): string
     return $map[$status] ?? 't8-badge-pending';
 }
 
+/**
+ * Renders the meatball trigger + dropdown menu used by the "Contracts"
+ * list table, plus the data-* attributes consumed by the shared
+ * #t8ContractDetailModal (see row markup near the bottom of this file
+ * and public/js/row-menu.js). Same pattern as
+ * t8_reservation_render_menu() in modules/reservation/index.php.
+ */
+function t8_contract_render_menu(array $c, bool $isAdmin, bool $archivedFilter): void
+{
+    $id = (int) $c['id'];
+    $ref = 'CON-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+    ?>
+    <div class="t8-row-menu">
+        <button type="button" class="t8-row-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions"
+                data-detail-modal="t8ContractDetailModal"
+                data-ref="<?= e($ref) ?>"
+                data-title="<?= e((string) $c['title']) ?>"
+                data-department="<?= e((string) ($c['department_name'] ?? '—')) ?>"
+                data-owner="<?= e((string) $c['owner_name']) ?>"
+                data-status="<?= e(ucwords(str_replace('_', ' ', (string) $c['status']))) ?>"
+                data-start="<?= e(format_date((string) $c['start_date'], 'M d, Y')) ?>"
+                data-end="<?= e($c['end_date'] ? format_date((string) $c['end_date'], 'M d, Y') : '—') ?>"
+                data-renewal="<?= e((string) ($c['renewal_date'] ?? '') !== '' ? format_date((string) $c['renewal_date'], 'M d, Y') : '') ?>"
+                data-amount="<?= e($c['amount'] !== null ? number_format((float) $c['amount'], 2) : '') ?>"
+                data-renewed-from="<?= e((string) ($c['renewed_from_title'] ?? '')) ?>">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+        </button>
+        <div class="t8-row-menu-panel" role="menu">
+            <button type="button" class="t8-row-menu-item t8-row-view-details" role="menuitem">
+                <i class="fa-solid fa-eye"></i> View Details
+            </button>
+            <button type="button" class="t8-row-menu-item t8-row-copy-ref" role="menuitem" data-copy="<?= e($ref) ?>">
+                <i class="fa-solid fa-copy"></i> Copy Contract Ref
+            </button>
+            <div class="t8-row-menu-divider"></div>
+            <?php if ($isAdmin): ?>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('contracts', ['action' => 'parties', 'id' => $id])) ?>">
+                    <i class="fa-solid fa-users"></i> Parties
+                </a>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('contracts', ['action' => 'obligations', 'id' => $id])) ?>">
+                    <i class="fa-solid fa-list-check"></i> Obligations
+                </a>
+            <?php endif; ?>
+            <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('contracts', ['action' => 'documents', 'id' => $id])) ?>">
+                <i class="fa-solid fa-paperclip"></i> Documents
+            </a>
+            <?php if ($isAdmin && !$archivedFilter): ?>
+                <div class="t8-row-menu-divider"></div>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('contracts', ['action' => 'edit', 'id' => $id])) ?>">
+                    <i class="fa-solid fa-pen"></i> Edit
+                </a>
+                <form method="post" action="<?= e(page_url('contracts', ['action' => 'archive'])) ?>" onsubmit="return confirm('Archive this contract?');">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <button class="t8-row-menu-item t8-danger" type="submit" role="menuitem">
+                        <i class="fa-solid fa-box-archive"></i> Archive
+                    </button>
+                </form>
+            <?php elseif ($isAdmin): ?>
+                <div class="t8-row-menu-divider"></div>
+                <form method="post" action="<?= e(page_url('contracts', ['action' => 'restore'])) ?>">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <button class="t8-row-menu-item t8-success" type="submit" role="menuitem">
+                        <i class="fa-solid fa-rotate-left"></i> Restore
+                    </button>
+                </form>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}
+
 $owners = $pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC);
 $departments = $contractHasMetadata ? $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) : [];
 
@@ -841,24 +914,8 @@ if ($showList) {
                                 <?php if ($contractHasMetadata): ?><td><?= $c['renewal_date'] ? e(format_date($c['renewal_date'], 'M d, Y')) : '—' ?></td>
                                 <td><?= $c['amount'] !== null ? e(number_format((float) $c['amount'], 2)) : '—' ?></td><?php endif; ?>
                                 <td><span class="t8-badge <?= t8_contract_status_badge($c['status']) ?>"><?= e(ucwords(str_replace('_', ' ', $c['status']))) ?></span></td>
-                                <td style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <?php if ($isAdmin): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('contracts', ['action' => 'parties', 'id' => $c['id']])) ?>"><i class="fa-solid fa-users"></i> Parties</a>
-                                    <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('contracts', ['action' => 'obligations', 'id' => $c['id']])) ?>"><i class="fa-solid fa-list-check"></i> Obligations</a><?php endif; ?>
-                                    <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('contracts', ['action' => 'documents', 'id' => $c['id']])) ?>"><i class="fa-solid fa-paperclip"></i> Documents</a>
-                                    <?php if ($isAdmin && !$archivedFilter): ?>
-                                        <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('contracts', ['action' => 'edit', 'id' => $c['id']])) ?>"><i class="fa-solid fa-pen"></i> Edit</a>
-                                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'archive'])) ?>" onsubmit="return confirm('Archive this contract?');">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $c['id']) ?>">
-                                            <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit"><i class="fa-solid fa-box-archive"></i> Archive</button>
-                                        </form>
-                                    <?php elseif ($isAdmin): ?>
-                                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'restore'])) ?>">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $c['id']) ?>">
-                                            <button class="t8-btn t8-btn-success t8-btn-sm" type="submit"><i class="fa-solid fa-rotate-left"></i> Restore</button>
-                                        </form>
-                                    <?php endif; ?>
+                                <td style="text-align:right;">
+                                    <?php t8_contract_render_menu($c, $isAdmin, $archivedFilter); ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -867,5 +924,37 @@ if ($showList) {
             </div>
         <?php endif; ?>
     </div>
+
+    <!--
+        Shared View Details modal for the Contracts list table's
+        meatball menu (see t8_contract_render_menu() above). One
+        dialog, filled via JS from the clicked trigger's data-*
+        attributes (public/js/row-menu.js) - same pattern as
+        Facilities Reservation's #t8ReservationDetailModal.
+    -->
+    <dialog id="t8ContractDetailModal" class="t8-detail-modal">
+        <div class="t8-detail-header">
+            <div>
+                <h2 data-detail-field="title">Contract</h2>
+                <span class="t8-detail-ref" data-detail-field="ref"></span>
+            </div>
+            <button type="button" class="t8-detail-close" data-close-detail-modal aria-label="Close">&times;</button>
+        </div>
+        <div class="t8-detail-body">
+            <div class="t8-detail-grid">
+                <div class="t8-detail-item"><span>Status</span><strong data-detail-field="status">—</strong></div>
+                <div class="t8-detail-item"><span>Responsible Person</span><strong data-detail-field="owner">—</strong></div>
+                <div class="t8-detail-item"><span>Department</span><strong data-detail-field="department">—</strong></div>
+                <div class="t8-detail-item"><span>Start Date</span><strong data-detail-field="start">—</strong></div>
+                <div class="t8-detail-item"><span>End Date</span><strong data-detail-field="end">—</strong></div>
+                <div class="t8-detail-item" data-detail-wrap="renewal" hidden><span>Renewal Date</span><strong data-detail-field="renewal">—</strong></div>
+                <div class="t8-detail-item" data-detail-wrap="amount" hidden><span>Amount</span><strong data-detail-field="amount">—</strong></div>
+                <div class="t8-detail-item full" data-detail-wrap="renewedFrom" hidden><span>Renewed From</span><strong data-detail-field="renewedFrom">—</strong></div>
+            </div>
+        </div>
+        <div class="t8-detail-footer">
+            <button type="button" class="t8-btn t8-btn-outline" data-close-detail-modal>Close</button>
+        </div>
+    </dialog>
 
 <?php endif; ?>

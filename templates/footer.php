@@ -30,6 +30,12 @@ $page = $page ?? current_page();
 <?php if ($page === 'retention'): ?>
     <script src="<?= e(asset('js/retention.js')) ?>"></script>
 <?php endif; ?>
+<?php if (in_array($page, ['contracts', 'visitor', 'legal'], true)): ?>
+    <!-- Shared meatball-menu / View Details controller - see
+         public/js/row-menu.js. Loaded after visitor.js on the visitor
+         page so it can take over the Scheduled Visits row menu too. -->
+    <script src="<?= e(asset('js/row-menu.js')) ?>"></script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/ai_widget.php'; ?>
 </body>
