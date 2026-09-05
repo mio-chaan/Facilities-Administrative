@@ -533,7 +533,7 @@ CREATE TABLE IF NOT EXISTS team8_certificates (
 -- Editing a document that is already 'approved' must never overwrite
 -- the approved row in place — the controller snapshots the pre-edit
 -- row here first (see t8_hr_save_version() in
--- app/includes/hr_documents.php), THEN updates the row and bumps
+-- app/includes/hr_documents.php), then modifies the row and bumps
 -- current_version. Drafts/pending rows are simply updated in place
 -- (no snapshot needed until something has actually been approved).
 -- ---------------------------------------------------------

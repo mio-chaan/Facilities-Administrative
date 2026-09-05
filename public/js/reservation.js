@@ -134,6 +134,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 .then(function (response) { return response.json(); })
                 .then(function (data) {
                     if (tableBody && typeof data.html !== 'undefined') {
+                        closeOpenMenu();
                         tableBody.innerHTML = data.html;
                     }
                     if (resultCountEl && typeof data.total !== 'undefined' && typeof data.count !== 'undefined') {

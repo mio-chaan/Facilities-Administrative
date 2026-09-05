@@ -4,12 +4,6 @@
  *
  * White sticky top bar with search, notifications, and avatar controls.
  *
- * DASHBOARD UPDATE: the notification bell used to be a plain link to
- * the dashboard's #notifications anchor. It now toggles an anchored
- * popover (list + "Mark all as read" + "View all notifications"),
- * populated from $t8RecentNotifications (set in public/index.php via
- * t8_recent_notifications()). Falls back to an empty list gracefully
- * if that variable wasn't set for some reason, so this template still
  * degrades safely.
  */
 declare(strict_types=1);

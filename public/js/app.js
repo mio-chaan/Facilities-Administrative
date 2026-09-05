@@ -11,10 +11,6 @@
  * (.t8-sidebar-collapsed on .t8-shell) and does not modify or
  * interfere with the mobile toggle logic above it.
  *
- * DASHBOARD UPDATE: a third block adds the notification bell popover
- * (templates/navbar.php, #t8NotifBell / #t8NotifPopover). It's here
- * (not dashboard.js) because the navbar/bell render on every page,
- * not just the dashboard.
  */
 
 document.addEventListener("DOMContentLoaded", function () {

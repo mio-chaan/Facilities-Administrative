@@ -1,12 +1,6 @@
 <?php
 /**
  * notifications_action.php
- * DASHBOARD UPDATE: small AJAX-only endpoint behind the bell popover
- * (templates/navbar.php + public/js/dashboard.js). Handles two POST
- * actions:
- *   action=mark_read  &id=123   -> marks one notification read (owner-scoped)
- *   action=mark_all             -> marks every unread notification read
- *
  * Follows the same bootstrap order as public/logout.php and returns
  * JSON, same shape as modules/assistant/index.php's endpoint.
  */

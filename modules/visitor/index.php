@@ -37,25 +37,6 @@
  *     reschedule, and the full visitor log/stats. There is
  *     intentionally no staff-vs-admin distinction left in this file.
  *
- * UI UPDATE (meatball menu + View Details, shared with Contract and
- * Legal Management - see public/css/row-menu.css and
- * public/js/row-menu.js):
- *   - Every row action list (Scheduled / Currently On-Site / Visitor
- *     Logs) now uses the same portal-based meatball menu already
- *     used by Facilities Reservation's "All Reservations" table,
- *     instead of the visitor-specific `.t8-visitor-menu-*` markup
- *     this file used to render inline. The old per-page JS for that
- *     menu (in public/js/visitor.js) has been removed since
- *     row-menu.js now owns it.
- *   - Visitor ID is no longer shown as its own column in any of the
- *     three tables - it's still generated the same way
- *     (t8_visitor_id_label()), but is now surfaced only inside the
- *     shared "View Details" modal, to keep the tables focused on the
- *     information staff scan most often.
- *   - The "Currently On-Site" table's Check-In Time column now shows
- *     the time only (e.g. "3:23 PM"); the full check-in date and time
- *     moved into View Details alongside every other field.
- *
  * Status lifecycle: scheduled -> checked_in -> checked_out
  *                              \-> cancelled
  *

@@ -80,12 +80,6 @@ if (!function_exists('t8_unread_notification_count')) {
 }
 
 if (!function_exists('t8_recent_notifications')) {
-    /**
-     * DASHBOARD UPDATE: powers the new bell popover (templates/navbar.php).
-     * Newest-first, capped at $limit. Fails soft (empty array) so a
-     * missing/incomplete shared `notifications` table never breaks the
-     * navbar, matching t8_unread_notification_count()'s behavior.
-     */
     function t8_recent_notifications(PDO $pdo, ?int $userId, int $limit = 8): array
     {
         if ($userId === null) {

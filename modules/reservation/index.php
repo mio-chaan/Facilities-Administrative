@@ -544,6 +544,34 @@ function t8_reservation_schedule(array $reservation): array
     return ['primary' => 'N/A', 'secondary' => ''];
 }
 
+/** Return the compact schedule range used by the reservation detail modal. */
+function t8_reservation_schedule_detail(array $reservation): string
+{
+    $start = (string) ($reservation['start_time'] ?? '');
+    $end = (string) ($reservation['end_time'] ?? '');
+    $startTimestamp = $start !== '' ? strtotime($start) : false;
+    $endTimestamp = $end !== '' ? strtotime($end) : false;
+
+    if ($startTimestamp !== false && $endTimestamp !== false) {
+        $startDate = date('M d, Y', $startTimestamp);
+        $endDate = date('M d, Y', $endTimestamp);
+        $startTime = date('g:i A', $startTimestamp);
+        $endTime = date('g:i A', $endTimestamp);
+
+        return date('Y-m-d', $startTimestamp) === date('Y-m-d', $endTimestamp)
+            ? $startDate . ' · ' . $startTime . ' – ' . $endTime
+            : $startDate . ', ' . $startTime . ' – ' . $endDate . ', ' . $endTime;
+    }
+
+    $schedule = (string) ($reservation['schedule'] ?? '');
+    if ($schedule !== '') {
+        return format_date($schedule, 'M d, Y · g:i A');
+    }
+
+    $returnDate = (string) ($reservation['expected_return_date'] ?? '');
+    return $returnDate !== '' ? 'Return by ' . format_date($returnDate, 'M d, Y') : 'N/A';
+}
+
 /** Date used by the client-side month/year reservation filters. */
 function t8_reservation_filter_date(array $reservation): string
 {
@@ -971,17 +999,6 @@ if (!$showForm) {
     // expected_return_date is now included in the COALESCE chain
     // everywhere a completion/active-window comparison happens below.
     //
-    // DASHBOARD UPDATE: this used to be a single bulk UPDATE with no
-    // audit trail, so "how many reservations were completed this
-    // month" had no source of truth for the new Reservation Activity
-    // card on the dashboard. It now fetches the affected ids first,
-    // writes one 'completed' audit_logs entry per reservation, then
-    // performs the same bulk UPDATE. Known limitation: this only runs
-    // when someone views the Reservation module, so a reservation
-    // "completes" (for activity-counting purposes) at the next visit
-    // to this page after its end time passes, not the instant it
-    // passes — acceptable for a dashboard trend, flagged here rather
-    // than silently assumed.
     $justCompletedIds = $pdo->query(
         "SELECT id FROM team8_reservations
           WHERE status = 'approved'
@@ -1191,6 +1208,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                 data-status="<?= e((string) $r['status']) ?>"
                 data-schedule-primary="<?= e($schedule['primary']) ?>"
                 data-schedule-secondary="<?= e($schedule['secondary']) ?>"
+                data-schedule-detail="<?= e(t8_reservation_schedule_detail($r)) ?>"
                 data-participants="<?= e((string) ($r['expected_participants'] ?? '')) ?>"
                 data-quantity="<?= e((string) ($r['quantity'] ?? '')) ?>"
                 data-return-date="<?= e(!empty($r['expected_return_date']) ? format_date((string) $r['expected_return_date'], 'M d, Y') : '') ?>"

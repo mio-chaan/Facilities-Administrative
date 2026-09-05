@@ -11,12 +11,6 @@
  * Falls back to a plain "no data" message if Chart.js or the data
  * global didn't load, instead of throwing.
  *
- * DASHBOARD UPDATE: a second, independent block below adds the
- * Recent Activities meatballs menu (#t8ActivityMenuBtn) and the
- * Activity History modal (#t8ActivityHistoryModal) — search box,
- * activity-type filter, and a "Load more" reveal over the
- * server-rendered (already capped) history rows. None of this touches
- * the Chart.js block above it.
  */
 
 document.addEventListener('DOMContentLoaded', function () {

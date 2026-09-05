@@ -1,31 +1,4 @@
 <?php
-/**
- * modules/dashboard/index.php
- *
- * DASHBOARD UPDATE — see docs of the requesting spec for full context.
- * Summary of what changed vs. the previous version:
- *   - Reservation Trend header: title left, Month/Year filter
- *     upper-right; "X Today" is now plain informational text (no red
- *     dot/badge styling).
- *   - The same $trendMonth/$trendYear selection now also drives the
- *     Reservation Activity card (previously all-time, current-status
- *     based) — both cards stay in sync because both read from the
- *     same GET params via one full-page reload on filter change.
- *   - "Reservation Status" -> "Reservation Activity": counts EVENTS
- *     (approve / reject / cancel / complete) that happened during the
- *     selected month, from audit_logs — not current reservation
- *     status. A reservation approved then later cancelled contributes
- *     to both Approved and Cancelled, per spec. Pending/Ongoing are
- *     no longer shown here.
- *   - "AI Insights" -> "Quick Insights" (label only — these were
- *     always plain dashboard metrics).
- *   - Recent Activities: capped to the 5 latest MEANINGFUL business
- *     events (login/logout/403 excluded), plus a meatballs menu ->
- *     "View Activity History" modal with the fuller list, a text
- *     search, an activity-type filter, and a "load more" button
- *     instead of an internal scrollbar.
- */
-
 declare(strict_types=1);
 
 if (!t8_has_role('admin')) {
@@ -148,6 +121,8 @@ try {
     $dbError ??= 'Could not load all dashboard information - has database/schema.sql been imported yet?';
 }
 
+$t8UnreadNotifications = t8_unread_notification_count($pdo, t8_current_user_id());
+
 $activityIcons = [
     'login'      => 'fa-right-to-bracket',
     'logout'     => 'fa-right-from-bracket',
@@ -241,14 +216,10 @@ while ($cur <= $trendMonthEnd) {
 // ---------------------------------------------------------------
 // Rest of dashboard data
 // ---------------------------------------------------------------
-// DASHBOARD UPDATE: Reservation Activity now counts EVENTS from
-// audit_logs for the selected month, not current reservation status.
-// Approved / Rejected / Cancelled / Completed only — Pending and
-// Ongoing removed per spec (this card is an activity/history view,
-// not a live status snapshot).
 $activityCounts = ['approved' => 0, 'rejected' => 0, 'cancelled' => 0, 'completed' => 0];
 $facilityUsage       = [];
-$docCategories       = [];
+$expiringContractRows      = [];
+$openLegalCasesNearDeadline = 0;
 
 try {
     $actStmt = $pdo->prepare(
@@ -313,6 +284,46 @@ try {
         }
     }
 
+    try {
+        $expContractsStmt = $pdo->query(
+            "SELECT c.id, c.title, c.end_date,
+                    (SELECT p.name
+                     FROM team8_contract_parties cp
+                     JOIN team8_parties p ON p.id = cp.party_id
+                     WHERE cp.contract_id = c.id
+                     ORDER BY cp.id ASC
+                     LIMIT 1) AS counterparty
+             FROM team8_contracts c
+             WHERE c.deleted_at IS NULL
+               AND c.end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+             ORDER BY c.end_date ASC
+             LIMIT 5"
+        );
+        $today = new DateTimeImmutable('today');
+        foreach ($expContractsStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $endDate = new DateTimeImmutable((string) $row['end_date']);
+            $expiringContractRows[] = [
+                'id'           => (int) $row['id'],
+                'title'        => (string) $row['title'],
+                'counterparty' => $row['counterparty'] !== null ? (string) $row['counterparty'] : null,
+                'days_left'    => (int) $today->diff($endDate)->format('%r%a'),
+            ];
+        }
+    } catch (PDOException $e) {
+        $expiringContractRows = [];
+    }
+
+    try {
+        $openLegalCasesNearDeadline = (int) $pdo->query(
+            "SELECT COUNT(*) FROM team8_legal_cases
+             WHERE deleted_at IS NULL
+               AND status = 'open'
+               AND deadline BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 14 DAY)"
+        )->fetchColumn();
+    } catch (PDOException $e) {
+        $openLegalCasesNearDeadline = 0;
+    }
+
     // ---------------------------------------------------------------
     // Monthly Reservation Trend — what this chart is actually answering:
     //   "On which dates do we have reservations, and how many are
@@ -353,8 +364,6 @@ function pctWidth(int $value, int $max): string {
 
 $facilityMax = 0;
 foreach ($facilityUsage as $f) { $facilityMax = max($facilityMax, (int) $f['count']); }
-$docMax = 0;
-foreach ($docCategories as $d) { $docMax = max($docMax, (int) $d['count']); }
 
 // ---------------------------------------------------------------
 // Build flat arrays for Chart.js.
@@ -480,13 +489,35 @@ $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
             </button>
         </div>
         <div class="t8-card-body">
-            <ul class="t8-ai-list">
-                <li>Pending reservations: <strong><?= e((string) $stats['Pending Reservations']) ?></strong></li>
-                <li>Visitors today: <strong><?= e((string) $stats['Visitors Today']) ?></strong></li>
-                <li>Active contracts: <strong><?= e((string) $stats['Active Contracts']) ?></strong></li>
-                <li>Contracts expiring within 30 days: <strong><?= e((string) $expiringContracts) ?></strong></li>
-                <li>Top facility: <strong><?= e($facilityUsage[0]['label'] ?? '—') ?></strong></li>
-                <li>Unread notifications: <strong><?= e((string) $t8UnreadNotifications) ?></strong></li>
+            <ul class="t8-insight-list">
+                <li class="t8-insight-item">
+                    <span>Contracts expiring within 30 days: <strong><?= e((string) $expiringContracts) ?></strong></span>
+                    <?php if ($expiringContracts > 0): ?>
+                        <span class="t8-tag t8-tag-review">Review</span>
+                    <?php else: ?>
+                        <span class="t8-tag t8-tag-clear">Clear</span>
+                    <?php endif; ?>
+                </li>
+                <li class="t8-insight-item">
+                    <span>Legal cases nearing deadline: <strong><?= e((string) $openLegalCasesNearDeadline) ?></strong></span>
+                    <?php if ($openLegalCasesNearDeadline > 0): ?>
+                        <span class="t8-tag t8-tag-review">Review</span>
+                    <?php else: ?>
+                        <span class="t8-tag t8-tag-clear">Clear</span>
+                    <?php endif; ?>
+                </li>
+                <li class="t8-insight-item">
+                    <span>Top facility: <strong><?= e($facilityUsage[0]['label'] ?? '—') ?></strong></span>
+                    <span class="t8-tag t8-tag-info">Info</span>
+                </li>
+                <li class="t8-insight-item">
+                    <span>Unread notifications: <strong><?= e((string) $t8UnreadNotifications) ?></strong></span>
+                    <?php if ($t8UnreadNotifications > 0): ?>
+                        <span class="t8-tag t8-tag-review">Review</span>
+                    <?php else: ?>
+                        <span class="t8-tag t8-tag-info">Info</span>
+                    <?php endif; ?>
+                </li>
             </ul>
             <p id="t8ReservationInsight" class="t8-help-text" role="status" aria-live="polite" hidden></p>
         </div>
@@ -514,30 +545,39 @@ $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
     </div>
 
     <!-- ============================================================
-         DOCUMENT CATEGORIES
+         CONTRACTS EXPIRING SOON (was: Document Categories)
          ============================================================ -->
-    <div class="t8-card t8-doc-categories">
-        <div class="t8-card-header"><h2 class="t8-card-title">Document Categories</h2></div>
-        <div class="t8-card-body t8-bars">
-            <?php if (empty($docCategories)): ?>
-                <div class="t8-empty">No documents data.</div>
+    <div class="t8-card t8-expiring-contracts">
+        <div class="t8-card-header"><h2 class="t8-card-title">Contracts Expiring Soon</h2></div>
+        <div class="t8-card-body">
+            <?php if (empty($expiringContractRows)): ?>
+                <div class="t8-empty">No contracts expiring in the next 30 days.</div>
             <?php else: ?>
-                <?php foreach ($docCategories as $d): ?>
-                    <?php $w = pctWidth((int) $d['count'], $docMax); ?>
-                    <div class="t8-bar-row">
-                        <span><?= e($d['label']) ?></span>
-                        <div class="t8-bar"><div style="width:<?= e($w) ?>"></div></div>
-                        <span class="t8-bar-percent"><?= e((string) $d['count']) ?></span>
-                    </div>
-                <?php endforeach; ?>
+                <div class="t8-expiring-list">
+                    <?php foreach ($expiringContractRows as $row): ?>
+                        <a class="t8-expiring-row <?= $row['days_left'] <= 7 ? 't8-expiring-urgent' : '' ?>"
+                           href="<?= e(page_url('contracts', ['action' => 'edit', 'id' => $row['id']])) ?>">
+                            <div>
+                                <div class="t8-expiring-name"><?= e($row['title']) ?></div>
+                                <?php if ($row['counterparty'] !== null): ?>
+                                    <div class="t8-expiring-party"><?= e($row['counterparty']) ?></div>
+                                <?php endif; ?>
+                            </div>
+                            <div class="t8-expiring-days">
+                                <?= $row['days_left'] <= 0 ? 'Due today' : e((string) $row['days_left']) . ' day' . ($row['days_left'] === 1 ? '' : 's') ?>
+                            </div>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+                <?php if ($expiringContracts > count($expiringContractRows)): ?>
+                    <a class="t8-help-text" href="<?= e(page_url('contracts')) ?>">View all (<?= e((string) $expiringContracts) ?>) &rarr;</a>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
     </div>
 
     <!-- ============================================================
          RECENT ACTIVITIES
-         DASHBOARD UPDATE: capped at 5 meaningful events + a meatballs
-         menu opening the full Activity History modal below.
          ============================================================ -->
     <div class="t8-card t8-activity-timeline">
         <div class="t8-card-header">
