@@ -1039,8 +1039,12 @@ if (!$showForm) {
             $allParams['filter_status'] = $reservationStatusFilter;
         }
         if ($reservationSearchFilter !== '') {
-            $allWhere[] = '(u.full_name LIKE :filter_search OR r.department LIKE :filter_search OR r.key_person LIKE :filter_search)';
-            $allParams['filter_search'] = '%' . $reservationSearchFilter . '%';
+            $searchTerm = '%' . $reservationSearchFilter . '%';
+            $allWhere[] = '(u.full_name LIKE :all_search_user OR r.department LIKE :all_search_department OR r.key_person LIKE :all_search_key_person OR f.name LIKE :all_search_facility)';
+            $allParams['all_search_user'] = $searchTerm;
+            $allParams['all_search_department'] = $searchTerm;
+            $allParams['all_search_key_person'] = $searchTerm;
+            $allParams['all_search_facility'] = $searchTerm;
         }
         if ($reservationRangeFilter !== '') {
             $rangeCondition = t8_reservation_range_condition($reservationRangeFilter);
@@ -1152,6 +1156,14 @@ if (!$showForm) {
         if ($reservationStatusFilter !== '' && in_array($reservationStatusFilter, T8_RESERVATION_STATUSES, true)) {
             $myWhere[] = 'r.status = :filter_status';
             $myParams['filter_status'] = $reservationStatusFilter;
+        }
+        if ($reservationSearchFilter !== '') {
+            $searchTerm = '%' . $reservationSearchFilter . '%';
+            $myWhere[] = '(u.full_name LIKE :my_search_user OR r.department LIKE :my_search_department OR r.key_person LIKE :my_search_key_person OR f.name LIKE :my_search_facility)';
+            $myParams['my_search_user'] = $searchTerm;
+            $myParams['my_search_department'] = $searchTerm;
+            $myParams['my_search_key_person'] = $searchTerm;
+            $myParams['my_search_facility'] = $searchTerm;
         }
         $myWhereSql = implode(' AND ', $myWhere);
         $myCountStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_reservations r JOIN team8_facilities f ON f.id = r.facility_id WHERE {$myWhereSql}");

@@ -235,8 +235,12 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
         $params['filter_status'] = $statusFilter;
     }
     if ($searchFilter !== '') {
-        $where[] = '(u.full_name LIKE :filter_search OR r.department LIKE :filter_search OR r.key_person LIKE :filter_search OR f.name LIKE :filter_search)';
-        $params['filter_search'] = '%' . $searchFilter . '%';
+        $searchTerm = '%' . $searchFilter . '%';
+        $where[] = '(u.full_name LIKE :search_user OR r.department LIKE :search_department OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility)';
+        $params['search_user'] = $searchTerm;
+        $params['search_department'] = $searchTerm;
+        $params['search_key_person'] = $searchTerm;
+        $params['search_facility'] = $searchTerm;
     }
     if ($rangeFilter !== '') {
         $rangeSql = match ($rangeFilter) {
