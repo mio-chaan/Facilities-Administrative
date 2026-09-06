@@ -90,10 +90,17 @@ CREATE TABLE team8_facilities (
     description   TEXT NULL,
     equipment_notes TEXT NULL,
     maintenance_status VARCHAR(30) NOT NULL DEFAULT 'operational',
+    next_maintenance_date DATE NULL,
     status        ENUM('active','archived') NOT NULL DEFAULT 'active',
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT chk_team8_facilities_capacity CHECK (capacity >= 1)
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_facility_locations (
+    id         INT AUTO_INCREMENT PRIMARY KEY,
+    name       VARCHAR(150) NOT NULL UNIQUE,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_facility_maintenance_history (

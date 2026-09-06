@@ -194,7 +194,7 @@ switch ($action) {
                 if (!$errors) {
                     $stmt = $pdo->prepare(
                         'INSERT INTO team8_facilities (name, location, facility_type, capacity, next_maintenance_date, status)
-                         VALUES (:name, :location, :facility_type, :capacity, :next_maintenance_date, "active")'
+                         VALUES (:name, :location, :facility_type, :capacity, :next_maintenance_date, :status)'
                     );
                     $stmt->execute([
                         'name'          => $facility['name'],
@@ -202,6 +202,7 @@ switch ($action) {
                         'facility_type' => $facility['facility_type'],
                         'capacity'      => $capacityInt,
                         'next_maintenance_date' => $facility['next_maintenance_date'] !== '' ? $facility['next_maintenance_date'] : null,
+                        'status'        => 'active',
                     ]);
                     $newId = (int) $pdo->lastInsertId();
                     t8_audit_log($pdo, $currentUserId, 'facility', $newId, 'create', null, $facility['name']);
