@@ -213,16 +213,16 @@ function t8_refresh_reservation_booking_statuses(PDO $pdo, int $actorId): void
 {
         $expiredRows = $pdo->query(
                 "SELECT id, status FROM team8_reservations
-          WHERE status IN ('pending', 'cancellation_pending')
-            AND COALESCE(start_time, schedule, expected_return_date) IS NOT NULL
-            AND COALESCE(start_time, schedule, expected_return_date) < NOW()"
+                    WHERE status IN ('pending', 'cancellation_pending')
+                        AND ((COALESCE(start_time, schedule) IS NOT NULL AND COALESCE(start_time, schedule) < NOW())
+                            OR (start_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
         )->fetchAll(PDO::FETCH_ASSOC);
     if ($expiredRows !== []) {
         $pdo->query(
             "UPDATE team8_reservations SET status = 'expired', archived_at = COALESCE(archived_at, NOW())
-              WHERE status IN ('pending', 'cancellation_pending')
-                AND COALESCE(start_time, schedule, expected_return_date) IS NOT NULL
-                AND COALESCE(start_time, schedule, expected_return_date) < NOW()"
+                            WHERE status IN ('pending', 'cancellation_pending')
+                                AND ((COALESCE(start_time, schedule) IS NOT NULL AND COALESCE(start_time, schedule) < NOW())
+                                    OR (start_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
         );
         foreach ($expiredRows as $row) {
             t8_audit_log($pdo, $actorId, 'reservation', (int) $row['id'], 'expired', (string) $row['status'], 'scheduled date/time passed');
@@ -231,16 +231,16 @@ function t8_refresh_reservation_booking_statuses(PDO $pdo, int $actorId): void
 
     $completedIds = $pdo->query(
         "SELECT id FROM team8_reservations
-          WHERE status = 'approved'
-            AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
-            AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
+                    WHERE status = 'approved'
+                        AND ((COALESCE(end_time, schedule) IS NOT NULL AND COALESCE(end_time, schedule) < NOW())
+                            OR (end_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
     )->fetchAll(PDO::FETCH_COLUMN);
     if ($completedIds !== []) {
         $pdo->query(
             "UPDATE team8_reservations SET status = 'completed', archived_at = COALESCE(archived_at, NOW())
-              WHERE status = 'approved'
-                AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
-                AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
+                            WHERE status = 'approved'
+                                AND ((COALESCE(end_time, schedule) IS NOT NULL AND COALESCE(end_time, schedule) < NOW())
+                                    OR (end_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
         );
         foreach ($completedIds as $id) {
             t8_audit_log($pdo, $actorId, 'reservation', (int) $id, 'completed', 'approved', 'scheduled end passed');
@@ -1001,9 +1001,9 @@ if (!$showForm) {
     //
     $justCompletedIds = $pdo->query(
         "SELECT id FROM team8_reservations
-          WHERE status = 'approved'
-            AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
-            AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
+                    WHERE status = 'approved'
+                        AND ((COALESCE(end_time, schedule) IS NOT NULL AND COALESCE(end_time, schedule) < NOW())
+                            OR (end_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
     )->fetchAll(PDO::FETCH_COLUMN);
 
     if ($justCompletedIds !== []) {
@@ -1013,9 +1013,9 @@ if (!$showForm) {
         $pdo->query(
             "UPDATE team8_reservations
               SET status = 'completed', archived_at = COALESCE(archived_at, NOW())
-             WHERE status = 'approved'
-               AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
-               AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
+                         WHERE status = 'approved'
+                             AND ((COALESCE(end_time, schedule) IS NOT NULL AND COALESCE(end_time, schedule) < NOW())
+                                 OR (end_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
         );
     }
 
@@ -1023,7 +1023,7 @@ if (!$showForm) {
         $allWhere = [
             "r.status IN ('approved', 'cancellation_pending')",
             'r.archived_at IS NULL',
-            'COALESCE(r.end_time, r.schedule, r.expected_return_date) >= NOW()',
+            '(COALESCE(r.end_time, r.schedule) >= NOW() OR (r.end_time IS NULL AND r.schedule IS NULL AND r.expected_return_date >= CURDATE()))',
         ];
         $allParams = [];
         if ($reservationFacilityFilter > 0) {
@@ -1111,7 +1111,7 @@ if (!$showForm) {
         $allWhere = [
             "r.status = 'approved'",
             'r.archived_at IS NULL',
-            'COALESCE(r.end_time, r.schedule, r.expected_return_date) >= NOW()',
+            '(COALESCE(r.end_time, r.schedule) >= NOW() OR (r.end_time IS NULL AND r.schedule IS NULL AND r.expected_return_date >= CURDATE()))',
         ];
         $allParams = [];
         if ($reservationFacilityFilter > 0) {

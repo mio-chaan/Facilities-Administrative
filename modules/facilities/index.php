@@ -60,7 +60,9 @@ function t8_facility_validate(string $name, string $location, string $facilityTy
         $errors[] = 'Please select a facility type.';
     }
     if ($capacity < 1) {
-        $errors[] = 'Capacity must be at least 1.';
+        $errors[] = in_array($facilityType, ['Equipment', 'Asset', 'Utility'], true)
+            ? 'Quantity must be at least 1.'
+            : 'Capacity must be at least 1.';
     }
     return $errors;
 }
