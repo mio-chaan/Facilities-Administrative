@@ -139,19 +139,23 @@ function t8_document_validate_upload(array $file): string
     if (!in_array($ext, T8_DOC_ALLOWED_EXT, true)) {
         return 'File type not allowed. Allowed: ' . implode(', ', T8_DOC_ALLOWED_EXT) . '.';
     }
-    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
-    $allowedMimes = [
-        'pdf' => ['application/pdf'], 'txt' => ['text/plain'],
-        'png' => ['image/png'], 'jpg' => ['image/jpeg'], 'jpeg' => ['image/jpeg'],
-        'doc' => ['application/msword', 'application/octet-stream'],
-        'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
-        'xls' => ['application/vnd.ms-excel', 'application/octet-stream'],
-        'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip'],
-        'ppt' => ['application/vnd.ms-powerpoint', 'application/octet-stream'],
-        'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/zip'],
-    ];
-    if ($mime === false || !in_array($mime, $allowedMimes[$ext] ?? [], true)) {
-        return 'The file contents do not match the selected file type.';
+    
+    // MIME type validation (optional if fileinfo is not available)
+    if (extension_loaded('fileinfo')) {
+        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+        $allowedMimes = [
+            'pdf' => ['application/pdf'], 'txt' => ['text/plain'],
+            'png' => ['image/png'], 'jpg' => ['image/jpeg'], 'jpeg' => ['image/jpeg'],
+            'doc' => ['application/msword', 'application/octet-stream'],
+            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
+            'xls' => ['application/vnd.ms-excel', 'application/octet-stream'],
+            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip'],
+            'ppt' => ['application/vnd.ms-powerpoint', 'application/octet-stream'],
+            'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/zip'],
+        ];
+        if ($mime === false || !in_array($mime, $allowedMimes[$ext] ?? [], true)) {
+            return 'The file contents do not match the selected file type.';
+        }
     }
     return '';
 }
@@ -177,9 +181,15 @@ function t8_document_store_upload(array $file, string $title, int $versionNo): a
     ];
 }
 
-$categories = $pdo->query('SELECT id, name FROM team8_document_categories ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
-$departments = $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
-$owners = $isAdmin ? $pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC) : [];
+$categories = $pdo->query('SELECT id, name FROM team8_document_categories ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) ?? [];
+$departments = $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) ?? [];
+$owners = $isAdmin ? ($pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC) ?? []) : [];
+
+// If no categories exist, provide a friendly message
+if (empty($categories)) {
+    $errors[] = 'Warning: No document categories found. Please run database/seed_account.sql to populate categories.';
+}
+
 $categoryTypeTemplates = [
     'Administrative'   => ['Meeting Minutes', 'Forms', 'General Correspondence'],
     'Contracts'        => ['Supplier Contract', 'Lease Agreement', 'Service Agreement'],
@@ -747,10 +757,10 @@ function t8_render_camera_capture(): void
         <div class="t8-card-header">
             <h2 class="t8-card-title">Upload New Document</h2>
         </div>
-        <form method="post" action="<?= e(page_url('documents', ['action' => 'create'])) ?>" enctype="multipart/form-data" novalidate>
+        <form method="post" action="<?= e(page_url('documents', ['action' => 'create'])) ?>" enctype="multipart/form-data" novalidate class="t8-document-form-grid">
             <?= t8_csrf_field() ?>
 
-            <div class="t8-field">
+            <div class="t8-field t8-form-span-full">
                 <label class="t8-label" for="title">Title</label>
                 <input class="t8-input" type="text" id="title" name="title"
                        value="<?= e((string) ($_POST['title'] ?? '')) ?>" required>
@@ -800,7 +810,7 @@ function t8_render_camera_capture(): void
                        value="<?= e((string) ($_POST['expiration_date'] ?? '')) ?>">
             </div>
 
-            <div class="t8-field">
+            <div class="t8-field t8-form-span-full">
                 <label class="t8-label" for="file">File</label>
                 <input class="t8-input" type="file" id="file" name="file" required>
                 <span class="t8-help-text">
