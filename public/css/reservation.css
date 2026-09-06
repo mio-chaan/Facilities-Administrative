@@ -354,6 +354,18 @@
     text-align: right;
     white-space: nowrap;
 }
+#t8AllReservations th:nth-child(1),
+#t8AllReservations td:nth-child(1) { width: 20%; }
+#t8AllReservations th:nth-child(2),
+#t8AllReservations td:nth-child(2) { width: 15%; }
+#t8AllReservations th:nth-child(3),
+#t8AllReservations td:nth-child(3) { width: 21%; }
+#t8AllReservations th:nth-child(4),
+#t8AllReservations td:nth-child(4) { width: 20%; }
+#t8AllReservations th:nth-child(5),
+#t8AllReservations td:nth-child(5) { width: 10%; }
+#t8AllReservations th:nth-child(6),
+#t8AllReservations td:nth-child(6) { width: 14%; }
 #t8AllReservations td:last-child > * {
     vertical-align: middle;
 }

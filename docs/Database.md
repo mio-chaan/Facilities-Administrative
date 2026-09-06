@@ -31,5 +31,6 @@
 
 ```bash
 mysql -u root -p < database/schema.sql
-mysql -u root -p < database/seed.sql   # optional
+mysql -u root -p < database/seed_account.sql       # optional
+mysql -u root -p < database/seed_dummy_data.sql     # optional
 ```

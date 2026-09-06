@@ -8,13 +8,6 @@
    PHP templates depend on (#t8SidebarToggle, #t8Sidebar,
    .t8-flash-stack, .t8-alert, .t8-sidebar-open) are unchanged.
 
-   DASHBOARD UPDATE (toast fix): .t8-flash-stack used to be
-   `position: sticky`, which pushed itself into normal document flow
-   right under the navbar — on pages with little content (like right
-   after a login redirect) it visually overlapped the page heading.
-   It is now `position: fixed`, floating above the page instead of
-   occupying space in the layout. Markup, class names, and the
-   auto-dismiss timer in public/js/app.js are unchanged.
    ========================================================= */
 
 :root {
@@ -250,10 +243,7 @@ code { font-family: var(--t8-font-data); }
 
 .t8-navbar-user { display: flex; align-items: center; gap: var(--t8-space-4); flex-shrink: 0; }
 
-/* ---- Notification bell + popover (DASHBOARD UPDATE) ----
-   The bell no longer links straight to the dashboard; it toggles an
-   anchored popover (see templates/navbar.php). Kept as a positioning
-   context (position: relative) for the popover below. */
+/* ---- Notification bell + popover ---- */
 .t8-notif-wrap { position: relative; }
 .t8-navbar-bell {
     position: relative;
@@ -512,11 +502,7 @@ code { font-family: var(--t8-font-data); }
 }
 .t8-footer p { margin: 0; }
 
-/* ---- Flash "toast" stack (DASHBOARD UPDATE) ----
-   Fixed overlay, floats above content instead of taking up layout
-   space. Individual .t8-alert items are still auto-dismissed by the
-   existing timer in public/js/app.js — nothing there needed to
-   change. */
+/* ---- Flash "toast" stack ---- */
 .t8-flash-stack {
     position: fixed;
     top: calc(var(--t8-navbar-height) + 12px);

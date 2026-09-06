@@ -29,97 +29,312 @@ require_once __DIR__ . '/../app/includes/notifications.php';
 // Handle AJAX filter requests before output buffering
 if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
     header('Content-Type: application/json');
-    
+
+    require_once __DIR__ . '/../app/includes/reservation_helpers.php';
+
     $table_type = (string) ($_GET['table'] ?? 'all');
     $facilityFilter = (int) ($_GET['facility'] ?? 0);
     $typeFilter = trim((string) ($_GET['type'] ?? ''));
     $statusFilter = trim((string) ($_GET['status'] ?? ''));
-    
+    $searchFilter = trim((string) ($_GET['search'] ?? ''));
+    $rangeFilter = trim((string) ($_GET['range'] ?? ''));
+    $monthFilter = (int) ($_GET['month'] ?? 0);
+    $yearFilter = (int) ($_GET['year'] ?? 0);
+    $departmentFilter = trim((string) ($_GET['department'] ?? ''));
+
     $currentUserId = t8_current_user_id();
     $isAdmin = t8_has_role('admin');
-    
-    // Helper functions for rendering
-    require_once __DIR__ . '/../app/config/routes.php';
-    
-    function t8_reservation_summary($reservation) {
+
+    function t8_ajax_reservation_summary(array $reservation): array
+    {
         $category = trim((string) ($reservation['event_category'] ?? ''));
         $type = trim((string) ($reservation['facility_type'] ?? ''));
         $detail = '';
         if (in_array($type, ['Equipment', 'Asset'], true) && !empty($reservation['quantity'])) {
             $detail = 'Qty: ' . (int) $reservation['quantity'];
+        } elseif (isset($reservation['facility_capacity']) && $reservation['facility_capacity'] !== '') {
+            $detail = 'Cap: ' . (int) $reservation['facility_capacity'];
         }
         return ['category' => $category !== '' ? $category : 'Reservation', 'detail' => $detail];
     }
-    
-    function t8_reservation_schedule($reservation) {
+
+    function t8_ajax_reservation_schedule(array $reservation): array
+    {
         $start = (string) ($reservation['start_time'] ?? '');
         $end = (string) ($reservation['end_time'] ?? '');
         if ($start !== '' && $end !== '') {
+            $sameDay = date('Y-m-d', strtotime($start)) === date('Y-m-d', strtotime($end));
             return [
-                'primary' => date('M d, Y', strtotime($start)),
-                'secondary' => date('g:i A', strtotime($start)) . ' – ' . date('g:i A', strtotime($end)),
+                'primary' => format_date($start, 'M d, Y'),
+                'secondary' => $sameDay
+                    ? format_date($start, 'g:i A') . ' – ' . format_date($end, 'g:i A')
+                    : format_date($start, 'M d, Y g:i A') . ' – ' . format_date($end, 'M d, Y g:i A'),
             ];
         }
+
         $schedule = (string) ($reservation['schedule'] ?? '');
         if ($schedule !== '') {
-            return ['primary' => date('M d, Y', strtotime($schedule)), 'secondary' => date('g:i A', strtotime($schedule))];
+            return ['primary' => format_date($schedule, 'M d, Y'), 'secondary' => format_date($schedule, 'g:i A')];
         }
+
         $returnDate = (string) ($reservation['expected_return_date'] ?? '');
         if ($returnDate !== '') {
-            return ['primary' => 'Return by ' . date('M d, Y', strtotime($returnDate)), 'secondary' => ''];
+            return ['primary' => 'Return by ' . format_date($returnDate, 'M d, Y'), 'secondary' => ''];
         }
+
         return ['primary' => 'N/A', 'secondary' => ''];
     }
-    
-    // Build base query based on table type
-    $baseQuery = "SELECT r.*, f.name AS facility_name, f.location AS facility_location, f.facility_type, u.full_name AS requester_name
-                  FROM team8_reservations r
-                  JOIN team8_facilities f ON f.id = r.facility_id
-                  JOIN users u ON u.id = r.user_id
-                  WHERE 1=1";
-    $params = [];
-    
-    // Apply table type filters
-    if ($table_type === 'pending' && $isAdmin) {
-        $baseQuery .= " AND r.status = 'pending'";
-    } elseif ($table_type === 'my') {
-        $baseQuery .= " AND r.user_id = :user_id AND r.status = 'approved'";
-        $params['user_id'] = $currentUserId;
-    } else { // all
-        $baseQuery .= " AND r.status IN ('approved', 'cancellation_pending')";
+
+    function t8_ajax_reservation_schedule_detail(array $reservation): string
+    {
+        $start = (string) ($reservation['start_time'] ?? '');
+        $end = (string) ($reservation['end_time'] ?? '');
+        $startTimestamp = $start !== '' ? strtotime($start) : false;
+        $endTimestamp = $end !== '' ? strtotime($end) : false;
+
+        if ($startTimestamp !== false && $endTimestamp !== false) {
+            $startDate = date('M d, Y', $startTimestamp);
+            $endDate = date('M d, Y', $endTimestamp);
+            $startTime = date('g:i A', $startTimestamp);
+            $endTime = date('g:i A', $endTimestamp);
+
+            return date('Y-m-d', $startTimestamp) === date('Y-m-d', $endTimestamp)
+                ? $startDate . ' · ' . $startTime . ' – ' . $endTime
+                : $startDate . ', ' . $startTime . ' – ' . $endDate . ', ' . $endTime;
+        }
+
+        $schedule = (string) ($reservation['schedule'] ?? '');
+        if ($schedule !== '') {
+            return format_date($schedule, 'M d, Y · g:i A');
+        }
+
+        $returnDate = (string) ($reservation['expected_return_date'] ?? '');
+        return $returnDate !== '' ? 'Return by ' . format_date($returnDate, 'M d, Y') : 'N/A';
     }
-    
-    // Apply filter conditions
+
+    function t8_ajax_extract_notes(string $description): string
+    {
+        $description = trim($description);
+        if (preg_match('/^Remarks:\s*(.+)$/i', $description)) {
+            return '';
+        }
+        if (preg_match('/\bNotes:\s*(.+)$/i', $description, $matches)) {
+            return trim($matches[1]);
+        }
+        return trim((string) preg_replace('/\s*Return Date:\s*\d{4}-\d{2}-\d{2}\s*/i', '', $description));
+    }
+
+    function t8_ajax_extract_remarks(string $description): string
+    {
+        $description = trim($description);
+        if (preg_match('/^Remarks:\s*(.+)$/i', $description, $matches)) {
+            return trim($matches[1]);
+        }
+        if (preg_match('/\bRemarks:\s*(.+)$/i', $description, $matches)) {
+            return trim($matches[1]);
+        }
+        return '';
+    }
+
+    function t8_ajax_render_menu(array $r, bool $isAdmin, ?int $currentUserId): string
+    {
+        $id = (int) $r['id'];
+        $notes = t8_ajax_extract_notes((string) ($r['description'] ?? ''));
+        $remarks = (string) ($r['remarks'] ?? '') !== '' ? (string) $r['remarks'] : t8_ajax_extract_remarks((string) ($r['description'] ?? ''));
+        $schedule = t8_ajax_reservation_schedule($r);
+        $summary = t8_ajax_reservation_summary($r);
+        $ref = 'RES-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+        $isOwnRow = $currentUserId !== null && (int) ($r['user_id'] ?? 0) === $currentUserId;
+        $canReschedule = $r['status'] === 'approved' && ($isAdmin || $isOwnRow);
+        $canCancel = in_array($r['status'], ['approved', 'pending'], true) && ($isAdmin || $isOwnRow);
+
+        ob_start();
+        ?>
+        <div class="t8-res-menu">
+            <button type="button" class="t8-res-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions"
+                    data-ref="<?= e($ref) ?>"
+                    data-facility="<?= e((string) ($r['facility_name'] ?? '')) ?>"
+                    data-facility-type="<?= e((string) ($r['facility_type'] ?? 'Unknown')) ?>"
+                    data-facility-location="<?= e((string) ($r['facility_location'] ?? '—')) ?>"
+                    data-requester="<?= e((string) ($r['requester_name'] ?? '—')) ?>"
+                    data-department="<?= e((string) ($r['department'] ?? '—')) ?>"
+                    data-key-person="<?= e((string) ($r['key_person'] ?? '—')) ?>"
+                    data-category="<?= e($summary['category']) ?>"
+                    data-status="<?= e((string) $r['status']) ?>"
+                    data-schedule-primary="<?= e($schedule['primary']) ?>"
+                    data-schedule-secondary="<?= e($schedule['secondary']) ?>"
+                    data-schedule-detail="<?= e(t8_ajax_reservation_schedule_detail($r)) ?>"
+                    data-participants="<?= e((string) ($r['expected_participants'] ?? '')) ?>"
+                    data-quantity="<?= e((string) ($r['quantity'] ?? '')) ?>"
+                    data-return-date="<?= e(!empty($r['expected_return_date']) ? format_date((string) $r['expected_return_date'], 'M d, Y') : '') ?>"
+                    data-notes="<?= e($notes) ?>"
+                    data-remarks="<?= e($remarks) ?>"
+                    data-requirements="<?= e((string) ($r['requirements'] ?? '')) ?>"
+                    data-created="<?= e(!empty($r['created_at']) ? format_date((string) $r['created_at'], 'M d, Y g:i A') : '') ?>"
+                    data-updated="<?= e(!empty($r['updated_at']) ? format_date((string) $r['updated_at'], 'M d, Y g:i A') : '') ?>"
+                    data-conflict="<?= !empty($r['has_conflict']) ? '1' : '0' ?>">
+                <i class="fa-solid fa-ellipsis-vertical"></i>
+            </button>
+            <div class="t8-res-menu-panel" role="menu">
+                <button type="button" class="t8-res-menu-item t8-res-view-details" role="menuitem">
+                    <i class="fa-solid fa-eye"></i> View Details
+                </button>
+                <button type="button" class="t8-res-menu-item t8-res-copy-ref" role="menuitem" data-copy="<?= e($ref) ?>">
+                    <i class="fa-solid fa-copy"></i> Copy Reservation Ref
+                </button>
+                <?php if ($canReschedule || $canCancel): ?>
+                    <div class="t8-res-menu-divider"></div>
+                <?php endif; ?>
+                <?php if ($canReschedule): ?>
+                    <a class="t8-res-menu-item" role="menuitem" href="<?= e(page_url('reservation', ['action' => 'edit', 'id' => $id])) ?>">
+                        <i class="fa-solid fa-calendar-pen"></i> Reschedule
+                    </a>
+                <?php endif; ?>
+                <?php if ($canCancel): ?>
+                    <?php if ($isAdmin || $r['status'] === 'pending'): ?>
+                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'cancel'])) ?>" onsubmit="return confirm('Cancel this reservation?');">
+                            <?= t8_csrf_field() ?>
+                            <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                            <button class="t8-res-menu-item t8-danger" type="submit" role="menuitem">
+                                <i class="fa-solid fa-xmark"></i> Cancel Reservation
+                            </button>
+                        </form>
+                    <?php elseif (!t8_reservation_has_started($r)): ?>
+                        <button type="button" class="t8-res-menu-item t8-danger" role="menuitem" data-cancel-reservation-id="<?= e((string) $id) ?>">
+                            <i class="fa-solid fa-xmark"></i> Request Cancellation
+                        </button>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php
+        return (string) ob_get_clean();
+    }
+
+    $where = ['1=1'];
+    $params = [];
+
+    if ($table_type === 'archive') {
+        if (!$isAdmin) {
+            http_response_code(403);
+            echo json_encode(['error' => 'Forbidden']);
+            exit;
+        }
+        $where[] = 'r.archived_at IS NOT NULL';
+    } elseif ($table_type === 'pending' && $isAdmin) {
+        $where[] = "r.status = 'pending'";
+    } elseif ($table_type === 'my') {
+        $where[] = 'r.user_id = :user_id';
+        $where[] = "r.status = 'approved'";
+        $params['user_id'] = $currentUserId;
+    } else {
+        $where[] = $isAdmin ? "r.status IN ('approved', 'cancellation_pending')" : "r.status = 'approved'";
+        $where[] = 'r.archived_at IS NULL';
+    }
+
     if ($facilityFilter > 0) {
-        $baseQuery .= " AND r.facility_id = :filter_facility";
+        $where[] = 'r.facility_id = :filter_facility';
         $params['filter_facility'] = $facilityFilter;
     }
-    
     if ($typeFilter !== '') {
-        $baseQuery .= " AND f.facility_type = :filter_type";
+        $where[] = 'f.facility_type = :filter_type';
         $params['filter_type'] = $typeFilter;
     }
-    
     if ($statusFilter !== '' && in_array($statusFilter, ['approved', 'cancellation_pending'], true)) {
-        $baseQuery .= " AND r.status = :filter_status";
+        $where[] = 'r.status = :filter_status';
         $params['filter_status'] = $statusFilter;
     }
-    
-    $baseQuery .= " ORDER BY COALESCE(r.start_time, r.schedule, r.expected_return_date) DESC LIMIT 100";
-    
-    $stmt = $pdo->prepare($baseQuery);
+    if ($searchFilter !== '') {
+        $searchTerm = '%' . $searchFilter . '%';
+        $where[] = $table_type === 'archive'
+            ? '(u.full_name LIKE :search_user OR r.department LIKE :search_department OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility OR r.event_category LIKE :search_category OR r.description LIKE :search_description)'
+            : '(u.full_name LIKE :search_user OR r.department LIKE :search_department OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility)';
+        $params['search_user'] = $searchTerm;
+        $params['search_department'] = $searchTerm;
+        $params['search_key_person'] = $searchTerm;
+        $params['search_facility'] = $searchTerm;
+        if ($table_type === 'archive') {
+            $params['search_category'] = $searchTerm;
+            $params['search_description'] = $searchTerm;
+        }
+    }
+    if ($table_type === 'archive') {
+        $archiveDateSql = 'COALESCE(r.start_time, r.schedule, r.expected_return_date, r.archived_at)';
+        if ($monthFilter >= 1 && $monthFilter <= 12) {
+            $where[] = "MONTH({$archiveDateSql}) = :filter_month";
+            $params['filter_month'] = $monthFilter;
+        }
+        if ($yearFilter > 0) {
+            $where[] = "YEAR({$archiveDateSql}) = :filter_year";
+            $params['filter_year'] = $yearFilter;
+        }
+        if ($departmentFilter !== '') {
+            $where[] = 'r.department = :filter_department';
+            $params['filter_department'] = $departmentFilter;
+        }
+    }
+    if ($rangeFilter !== '') {
+        $rangeSql = match ($rangeFilter) {
+            'today' => 'DATE(COALESCE(r.start_time, r.schedule, r.expected_return_date)) = CURDATE()',
+            'week' => "COALESCE(r.start_time, r.schedule, r.expected_return_date) BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)",
+            'month' => "COALESCE(r.start_time, r.schedule, r.expected_return_date) BETWEEN CURDATE() AND LAST_DAY(CURDATE())",
+            default => null,
+        };
+        if ($rangeSql !== null) {
+            $where[] = $rangeSql;
+        }
+    }
+
+    $whereSql = implode(' AND ', $where);
+
+    $countStmt = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM team8_reservations r
+         JOIN team8_facilities f ON f.id = r.facility_id
+         JOIN users u ON u.id = r.user_id
+         WHERE {$whereSql}"
+    );
+    $countStmt->execute($params);
+    $totalCount = (int) $countStmt->fetchColumn();
+
+    $stmt = $pdo->prepare(
+        "SELECT r.*, f.name AS facility_name, f.location AS facility_location, f.facility_type, f.capacity AS facility_capacity, u.full_name AS requester_name
+         FROM team8_reservations r
+         JOIN team8_facilities f ON f.id = r.facility_id
+         JOIN users u ON u.id = r.user_id
+         WHERE {$whereSql}
+         ORDER BY COALESCE(r.end_time, r.schedule, r.expected_return_date, r.archived_at, r.created_at) DESC
+         LIMIT 100"
+    );
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
+    if ($table_type !== 'archive') {
+        $rows = t8_reservations_annotate_conflicts($pdo, $rows);
+    }
+
     $html = '';
     if (empty($rows)) {
-        $html = '<tr><td colspan="10" class="t8-table-empty-row">No reservations match your filters.</td></tr>';
+        $emptyMessage = $searchFilter !== '' ? 'No results found.' : 'No reservations match your filters.';
+        $html = '<tr class="t8-filter-empty"><td colspan="' . ($table_type === 'archive' ? '9' : '6') . '" class="t8-table-empty-row">' . e($emptyMessage) . '</td></tr>';
     } else {
         foreach ($rows as $r) {
-            $summary = t8_reservation_summary($r);
-            $schedule = t8_reservation_schedule($r);
-            $statusLabel = ucwords(str_replace('_', ' ', (string) ($r['status'] ?? 'Unknown')));
-            
+            $summary = t8_ajax_reservation_summary($r);
+            $schedule = t8_ajax_reservation_schedule($r);
+            if ($table_type === 'archive') {
+                $html .= '<tr data-reservation-row>'
+                    . '<td>' . e($r['facility_name']) . '</td>'
+                    . '<td><span class="t8-type-pill">' . e((string) ($r['facility_type'] ?? 'Unknown')) . '</span></td>'
+                    . '<td>' . e($r['requester_name']) . '</td>'
+                    . '<td>' . e((string) ($r['department'] ?? '-')) . '</td>'
+                    . '<td>' . e((string) ($r['key_person'] ?? '-')) . '</td>'
+                    . '<td><strong>' . e($summary['category']) . '</strong>' . ($summary['detail'] !== '' ? '<span class="t8-table-subtext">• ' . e($summary['detail']) . '</span>' : '') . '</td>'
+                    . '<td>' . e($schedule['primary']) . '</td>'
+                    . '<td><span class="t8-badge t8-badge-' . e((string) $r['status']) . '">' . e(ucfirst((string) $r['status'])) . '</span></td>'
+                    . '<td>' . e(format_date((string) $r['archived_at'], 'M d, Y g:i A')) . '</td>'
+                    . '</tr>';
+                continue;
+            }
+            $statusLabel = $r['status'] === 'cancellation_pending' ? 'Pending' : ucfirst((string) $r['status']);
             $actionHtml = '';
             $rowIsOwn = $currentUserId !== null && (int) $r['user_id'] === $currentUserId;
             if ($table_type === 'pending' && $isAdmin) {
@@ -128,21 +343,19 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
             } elseif ($rowIsOwn && in_array($r['status'], ['pending', 'approved'], true)) {
                 $actionHtml = '<a class="t8-btn t8-btn-sm t8-btn-outline" href="' . e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) . '">Edit</a>';
             }
-            $html .= '<tr data-reservation-row>'
+
+            $html .= '<tr data-reservation-row' . (!empty($r['has_conflict']) ? ' style="background: rgba(230,126,34,0.14);"' : '') . '>'
                 . '<td>' . e($r['facility_name']) . '</td>'
-                . '<td><span class="t8-type-pill">' . e((string) ($r['facility_type'] ?? 'Unknown')) . '</span></td>'
-                . '<td>' . e($r['requester_name']) . '</td>'
-                . '<td>' . e((string) ($r['department'] ?? 'N/A')) . '</td>'
                 . '<td>' . e((string) ($r['key_person'] ?? 'N/A')) . '</td>'
-                . '<td>' . e($summary['category']) . ($summary['detail'] ? ' <small>' . e($summary['detail']) . '</small>' : '') . '</td>'
-                . '<td><strong>' . e($schedule['primary']) . '</strong><br><small>' . e($schedule['secondary']) . '</small></td>'
-                . '<td>' . e($statusLabel) . '</td>'
-                . '<td class="t8-table-actions">' . $actionHtml . '</td>'
+                . '<td><strong>' . e($summary['category']) . '</strong>' . ($summary['detail'] !== '' ? '<span class="t8-table-subtext">• ' . e($summary['detail']) . '</span>' : '') . '</td>'
+                . '<td><strong>' . e($schedule['primary']) . '</strong>' . ($schedule['secondary'] !== '' ? '<span class="t8-table-subtext">' . e($schedule['secondary']) . '</span>' : '') . '</td>'
+                . '<td><span class="t8-badge t8-badge-' . e((string) $r['status']) . '">' . e($statusLabel) . '</span></td>'
+                . '<td class="t8-table-actions">' . $actionHtml . t8_ajax_render_menu($r, $isAdmin, $currentUserId) . '</td>'
                 . '</tr>';
         }
     }
-    
-    echo json_encode(['html' => $html]);
+
+    echo json_encode(['html' => $html, 'total' => $totalCount, 'count' => count($rows)]);
     exit;
 }
 
@@ -244,7 +457,6 @@ $routes = require __DIR__ . '/../app/config/routes.php';
 
 $page = $_GET['page'] ?? 'dashboard';
 $t8UnreadNotifications = t8_unread_notification_count($pdo, t8_current_user_id());
-// DASHBOARD UPDATE: feeds the navbar bell popover (templates/navbar.php).
 $t8RecentNotifications = t8_recent_notifications($pdo, t8_current_user_id(), 8);
 
 $moduleFile = array_key_exists($page, $routes)

@@ -30,7 +30,8 @@ framework — routing is a small hand-rolled front controller
    ```bash
    mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS capstone_shared_db"
    mysql -u root -p capstone_shared_db < database/schema.sql
-   mysql -u root -p capstone_shared_db < database/seed.sql   # optional
+  mysql -u root -p capstone_shared_db < database/seed_account.sql       # optional
+  mysql -u root -p capstone_shared_db < database/seed_dummy_data.sql     # optional
    ```
 4. Start PHP's built-in dev server from the project root:
    ```bash
@@ -45,7 +46,7 @@ framework — routing is a small hand-rolled front controller
   - OPEN PHPMYADMIN
   - CLICK DATABASE & CREATE 1
   - NAME IT "capstone_shared_db"
-  - IMPORT SQL "schema" | "seed.sql" [OPTIONAL]
+  - IMPORT SQL "schema" | "seed_account.sql" | "seed_dummy_data.sql" [OPTIONAL]
   - START LOCAL HOST "php -S localhost:8000"
 
 > **Note:** PHP's built-in dev server (`php -S`) does **not** read

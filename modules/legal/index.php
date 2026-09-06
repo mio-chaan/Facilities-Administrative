@@ -284,6 +284,68 @@ function t8_legal_status_badge(string $status): string
     ];
     return $map[$status] ?? 't8-badge-pending';
 }
+
+/**
+ * Renders the meatball trigger + dropdown menu for the "Legal Cases"
+ * list table, plus the data-* attributes consumed by the shared
+ * #t8LegalDetailModal. Same pattern as
+ * t8_reservation_render_menu() in modules/reservation/index.php.
+ */
+function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, bool $legalHasCaseMetadata): void
+{
+    $id = (int) $c['id'];
+    $ref = 'CASE-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+    ?>
+    <div class="t8-row-menu">
+        <button type="button" class="t8-row-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions"
+                data-detail-modal="t8LegalDetailModal"
+                data-ref="<?= e($ref) ?>"
+                data-title="<?= e((string) $c['title']) ?>"
+                data-subject="<?= e((string) ($c['subject'] ?? '')) ?>"
+                data-department="<?= e((string) ($c['department_name'] ?? '')) ?>"
+                data-status="<?= e(ucwords(str_replace('_', ' ', (string) $c['status']))) ?>"
+                data-filed="<?= e(format_date((string) $c['filed_date'], 'M d, Y')) ?>"
+                data-deadline="<?= e($legalHasCaseMetadata && !empty($c['deadline']) ? format_date((string) $c['deadline'], 'M d, Y') : '') ?>"
+                data-assigned-to="<?= e((string) $c['assigned_to_name']) ?>">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+        </button>
+        <div class="t8-row-menu-panel" role="menu">
+            <button type="button" class="t8-row-menu-item t8-row-view-details" role="menuitem">
+                <i class="fa-solid fa-eye"></i> View Details
+            </button>
+            <button type="button" class="t8-row-menu-item t8-row-copy-ref" role="menuitem" data-copy="<?= e($ref) ?>">
+                <i class="fa-solid fa-copy"></i> Copy Case Ref
+            </button>
+            <div class="t8-row-menu-divider"></div>
+            <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $id])) ?>">
+                <i class="fa-solid fa-paperclip"></i> Documents
+            </a>
+            <?php if ($isAdmin && !$archivedFilter): ?>
+                <div class="t8-row-menu-divider"></div>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('legal', ['action' => 'edit', 'id' => $id])) ?>">
+                    <i class="fa-solid fa-pen"></i> Edit
+                </a>
+                <form method="post" action="<?= e(page_url('legal', ['action' => 'archive'])) ?>" onsubmit="return confirm('Archive this case?');">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <button class="t8-row-menu-item t8-danger" type="submit" role="menuitem">
+                        <i class="fa-solid fa-box-archive"></i> Archive
+                    </button>
+                </form>
+            <?php elseif ($isAdmin): ?>
+                <div class="t8-row-menu-divider"></div>
+                <form method="post" action="<?= e(page_url('legal', ['action' => 'restore'])) ?>">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <button class="t8-row-menu-item t8-success" type="submit" role="menuitem">
+                        <i class="fa-solid fa-rotate-left"></i> Restore
+                    </button>
+                </form>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}
 ?>
 <h1>Legal Management</h1>
 <p class="t8-help-text"><?= $isAdmin ? 'Track legal cases and their supporting documents.' : 'View legal cases assigned to you.' ?></p>
@@ -488,31 +550,8 @@ function t8_legal_status_badge(string $status): string
                                 <td><?= e(format_date($c['filed_date'], 'M d, Y')) ?></td>
                                 <?php if ($legalHasCaseMetadata): ?><td><?= $c['deadline'] ? e(format_date($c['deadline'], 'M d, Y')) : '—' ?></td><?php endif; ?>
                                 <td><?= e($c['assigned_to_name']) ?></td>
-                                <td style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $c['id']])) ?>">
-                                        <i class="fa-solid fa-paperclip"></i> Documents
-                                    </a>
-                                    <?php if ($isAdmin && !$archivedFilter): ?>
-                                        <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('legal', ['action' => 'edit', 'id' => $c['id']])) ?>">
-                                            <i class="fa-solid fa-pen"></i> Edit
-                                        </a>
-                                        <form method="post" action="<?= e(page_url('legal', ['action' => 'archive'])) ?>"
-                                              onsubmit="return confirm('Archive this case?');">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $c['id']) ?>">
-                                            <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                <i class="fa-solid fa-box-archive"></i> Archive
-                                            </button>
-                                        </form>
-                                    <?php elseif ($isAdmin): ?>
-                                        <form method="post" action="<?= e(page_url('legal', ['action' => 'restore'])) ?>">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $c['id']) ?>">
-                                            <button class="t8-btn t8-btn-success t8-btn-sm" type="submit">
-                                                <i class="fa-solid fa-rotate-left"></i> Restore
-                                            </button>
-                                        </form>
-                                    <?php endif; ?>
+                                <td style="text-align:right;">
+                                    <?php t8_legal_render_menu($c, $isAdmin, $archivedFilter, $legalHasCaseMetadata); ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -521,5 +560,35 @@ function t8_legal_status_badge(string $status): string
             </div>
         <?php endif; ?>
     </div>
+
+    <!--
+        Shared View Details modal for the Legal Cases list table's
+        meatball menu (see t8_legal_render_menu() above).
+    -->
+    <dialog id="t8LegalDetailModal" class="t8-detail-modal">
+        <div class="t8-detail-header">
+            <div>
+                <h2 data-detail-field="title">Legal Case</h2>
+                <span class="t8-detail-ref" data-detail-field="ref"></span>
+            </div>
+            <button type="button" class="t8-detail-close" data-close-detail-modal aria-label="Close">&times;</button>
+        </div>
+        <div class="t8-detail-body">
+            <div class="t8-detail-grid">
+                <div class="t8-detail-item"><span>Status</span><strong data-detail-field="status">—</strong></div>
+                <div class="t8-detail-item"><span>Assigned To</span><strong data-detail-field="assignedTo">—</strong></div>
+                <div class="t8-detail-item" data-detail-wrap="department" hidden><span>Department</span><strong data-detail-field="department">—</strong></div>
+                <div class="t8-detail-item"><span>Filed Date</span><strong data-detail-field="filed">—</strong></div>
+                <div class="t8-detail-item" data-detail-wrap="deadline" hidden><span>Deadline</span><strong data-detail-field="deadline">—</strong></div>
+            </div>
+            <div id="t8LegalDetailSubjectWrap" data-detail-wrap="subject" hidden>
+                <div class="t8-detail-section"><i class="fa-solid fa-file-lines"></i> Subject</div>
+                <div class="t8-detail-notes" data-detail-field="subject"></div>
+            </div>
+        </div>
+        <div class="t8-detail-footer">
+            <button type="button" class="t8-btn t8-btn-outline" data-close-detail-modal>Close</button>
+        </div>
+    </dialog>
 
 <?php endif; ?>

@@ -1,10 +1,6 @@
 <?php
 /**
  * modules/notifications/index.php
- * DASHBOARD UPDATE: dedicated "View all notifications" page linked
- * from the navbar bell popover. Read-only list (marking read happens
- * from the popover itself, or by visiting this page — see below).
- * Not in the sidebar (routes.php marks it hidden).
  */
 
 declare(strict_types=1);

@@ -247,34 +247,35 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-/**
- * Facility Type Change Handler
- * Updates the capacity/quality label and unit when facility type changes.
- * - Room, Area → "Capacity" (people)
- * - Equipment, Asset, Utility → "Quality" (rating)
- */
 document.addEventListener('DOMContentLoaded', () => {
     const facilityTypeSelect = document.getElementById('facility_type');
-    const capacityLabel = document.getElementById('capacityLabel');
-    const capacityUnit = document.getElementById('capacityUnit');
+    const capacityInput = document.getElementById('capacity');
+    const capacityLabel = document.querySelector('label[for="capacity"]');
 
-    if (!facilityTypeSelect || !capacityLabel || !capacityUnit) {
+    if (!facilityTypeSelect || !capacityInput || !capacityLabel) {
         return;
     }
 
-    function updateCapacityLabel() {
+    function updateCapacityField() {
         const facilityType = facilityTypeSelect.value;
-        const capacityTypes = ['Room', 'Area'];
-        
-        if (capacityTypes.includes(facilityType)) {
-            capacityLabel.textContent = 'Capacity';
-            capacityUnit.textContent = 'Unit: people';
-        } else {
-            capacityLabel.textContent = 'Quality';
-            capacityUnit.textContent = 'Unit: rating';
+        const isCapacityType = facilityType === '' || ['Room', 'Area'].includes(facilityType);
+        const maxValue = isCapacityType ? 100 : 200;
+
+        capacityLabel.textContent = isCapacityType ? 'Capacity' : 'Quantity';
+        capacityInput.setAttribute('aria-label', isCapacityType ? 'Capacity' : 'Quantity');
+        capacityInput.title = isCapacityType ? 'Capacity' : 'Quantity';
+        capacityInput.placeholder = isCapacityType ? 'Enter capacity' : 'Enter quantity';
+        capacityInput.max = String(maxValue);
+
+        if (capacityInput.value !== '' && Number(capacityInput.value) > maxValue) {
+            capacityInput.value = String(maxValue);
         }
     }
 
-    facilityTypeSelect.addEventListener('change', updateCapacityLabel);
+    updateCapacityField();
+    facilityTypeSelect.addEventListener('change', updateCapacityField);
+    capacityInput.addEventListener('input', updateCapacityField);
+    capacityInput.addEventListener('change', updateCapacityField);
 });
+
 

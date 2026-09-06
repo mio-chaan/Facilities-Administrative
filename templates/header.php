@@ -49,6 +49,15 @@ $page      = $page ?? current_page();
     <?php if ($page === 'retention'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/retention.css')) ?>">
     <?php endif; ?>
+    <?php if (in_array($page, ['contracts', 'visitor', 'legal'], true)): ?>
+        <!-- Row meatball-menu + View Details modal system, shared by
+             Contract Management, Visitor Management, and Legal
+             Management (see docs at the top of public/css/row-menu.css
+             and public/js/row-menu.js for the pattern this mirrors -
+             the same one already used in Facilities Reservation's
+             "All Reservations" table). -->
+        <link rel="stylesheet" href="<?= e(asset('css/row-menu.css')) ?>">
+    <?php endif; ?>
 </head>
 <body>
 <?php $flashes = t8_flash_get(); ?>

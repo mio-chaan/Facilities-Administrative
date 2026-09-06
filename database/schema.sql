@@ -97,6 +97,7 @@ CREATE TABLE team8_facilities (
     description   TEXT NULL,
     equipment_notes TEXT NULL,
     maintenance_status VARCHAR(30) NOT NULL DEFAULT 'operational',
+    next_maintenance_date DATE NULL,
     status        ENUM('active','archived') NOT NULL DEFAULT 'active',
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -546,7 +547,7 @@ CREATE TABLE IF NOT EXISTS team8_certificates (
 -- Editing a document that is already 'approved' must never overwrite
 -- the approved row in place — the controller snapshots the pre-edit
 -- row here first (see t8_hr_save_version() in
--- app/includes/hr_documents.php), THEN updates the row and bumps
+-- app/includes/hr_documents.php), then modifies the row and bumps
 -- current_version. Drafts/pending rows are simply updated in place
 -- (no snapshot needed until something has actually been approved).
 -- ---------------------------------------------------------

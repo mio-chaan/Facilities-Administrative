@@ -37,19 +37,6 @@
  *     reschedule, and the full visitor log/stats. There is
  *     intentionally no staff-vs-admin distinction left in this file.
  *
- * UI FIX (Scheduled / Upcoming Visits table):
- *   - The meatball ("more actions") control per row used to be a
- *     native <details>/<summary> disclosure with an absolutely
- *     positioned panel. It got clipped by the table wrap's overflow
- *     and forced a vertical scrollbar (root cause was in
- *     public/css/visitor.css — see that file's notes). It's now a
- *     plain <button class="t8-visitor-menu-trigger"> + a
- *     <div class="t8-visitor-menu-panel">, with public/js/visitor.js
- *     portaling the panel to <body> and positioning it with
- *     `position: fixed` on open, so it can never be clipped again.
- *     The forms inside (reschedule / cancel) and their CSRF fields
- *     are completely unchanged.
- *
  * Status lifecycle: scheduled -> checked_in -> checked_out
  *                              \-> cancelled
  *
@@ -186,6 +173,73 @@ function t8_visitor_status_badge(string $status): string
         'expired'     => 't8-badge-rejected',
     ];
     return $map[$status] ?? 't8-badge-pending';
+}
+
+/**
+ * Renders the meatball trigger + dropdown menu shared by all three
+ * visitor tables (Scheduled / Currently On-Site / Visitor Logs), plus
+ * the data-* attributes consumed by the shared #t8VisitorDetailModal
+ * (see public/js/row-menu.js). $context controls which extra menu
+ * items appear beyond the always-present "View Details":
+ *   'scheduled' -> Reschedule + Cancel Visit
+ *   'onsite'    -> View Details only (Check Out stays a quick button
+ *                  next to the menu, not inside it)
+ *   'log'       -> View Details only (read-only history row)
+ */
+function t8_visitor_render_menu(array $v, string $context): void
+{
+    $id = (int) $v['id'];
+    $visitorIdLabel = t8_visitor_id_label($id);
+    $scheduledFull = !empty($v['scheduled_date']) ? format_date((string) $v['scheduled_date'], 'M d, Y g:i A') : '';
+    $checkInFull = !empty($v['check_in_time']) ? format_date((string) $v['check_in_time'], 'M d, Y g:i A') : '';
+    $checkOutFull = !empty($v['check_out_time']) ? format_date((string) $v['check_out_time'], 'M d, Y g:i A') : '';
+    ?>
+    <div class="t8-row-menu">
+        <button type="button" class="t8-row-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions"
+                data-detail-modal="t8VisitorDetailModal"
+                data-visitor-id="<?= e($visitorIdLabel) ?>"
+                data-full-name="<?= e((string) $v['full_name']) ?>"
+                data-visitor-type="<?= e((string) ($v['visitor_type'] ?? '—')) ?>"
+                data-contact="<?= e((string) ($v['contact'] ?? '')) ?>"
+                data-purpose="<?= e((string) $v['purpose']) ?>"
+                data-scheduled-date="<?= e($scheduledFull) ?>"
+                data-check-in-time="<?= e($checkInFull) ?>"
+                data-check-out-time="<?= e($checkOutFull) ?>"
+                data-status="<?= e(ucwords(str_replace('_', ' ', (string) $v['status']))) ?>"
+                data-logged-by="<?= e((string) $v['logged_by_name']) ?>">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+        </button>
+        <div class="t8-row-menu-panel" role="menu">
+            <button type="button" class="t8-row-menu-item t8-row-view-details" role="menuitem">
+                <i class="fa-solid fa-eye"></i> View Details
+            </button>
+            <?php if ($context === 'scheduled'): ?>
+                <div class="t8-row-menu-divider"></div>
+                <form method="post" action="<?= e(page_url('visitor', ['action' => 'reschedule'])) ?>">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <label class="t8-help-text" style="display:block; padding:6px 12px 4px;" for="reschedule-<?= e((string) $id) ?>">New schedule</label>
+                    <div style="padding: 0 8px 8px;">
+                        <input id="reschedule-<?= e((string) $id) ?>" class="t8-input" type="datetime-local" name="scheduled_date"
+                               min="<?= e(date('Y-m-d\TH:i')) ?>"
+                               value="<?= e(str_replace(' ', 'T', substr((string) $v['scheduled_date'], 0, 16))) ?>" required>
+                    </div>
+                    <button class="t8-row-menu-item" type="submit" role="menuitem">
+                        <i class="fa-solid fa-calendar-pen"></i> Change Schedule
+                    </button>
+                </form>
+                <form method="post" action="<?= e(page_url('visitor', ['action' => 'cancel'])) ?>"
+                      onsubmit="return confirm('Cancel this scheduled visit?');">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <button class="t8-row-menu-item t8-danger" type="submit" role="menuitem">
+                        <i class="fa-solid fa-xmark"></i> Cancel Visit
+                    </button>
+                </form>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
 }
 
 $formValues = [
@@ -621,7 +675,6 @@ if (!$showForm) {
             <table class="t8-table">
                 <thead>
                     <tr>
-                        <th>Visitor ID</th>
                         <th>Visitor</th>
                         <th>Type</th>
                         <th>Purpose</th>
@@ -632,18 +685,17 @@ if (!$showForm) {
                 <tbody>
                     <?php if ($scheduledVisits === []): ?>
                         <tr class="t8-table-empty-row">
-                            <td colspan="6">No visits are currently scheduled.</td>
+                            <td colspan="5">No visits are currently scheduled.</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($scheduledVisits as $v): ?>
                             <tr>
-                                <td class="t8-table-ref"><?= e(t8_visitor_id_label((int) $v['id'])) ?></td>
                                 <td><?= e($v['full_name']) ?></td>
                                 <td><?= e((string) ($v['visitor_type'] ?? '—')) ?></td>
                                 <td><?= e($v['purpose']) ?></td>
                                 <td><?= e(format_date($v['scheduled_date'], 'M d, Y g:i A')) ?></td>
                                 <td>
-                                    <div class="t8-visitor-inline-actions">
+                                    <div class="t8-row-actions">
                                         <form method="post" action="<?= e(page_url('visitor', ['action' => 'checkin'])) ?>">
                                             <?= t8_csrf_field() ?>
                                             <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
@@ -651,42 +703,7 @@ if (!$showForm) {
                                                 <i class="fa-solid fa-right-to-bracket"></i> Check In
                                             </button>
                                         </form>
-
-                                        <!--
-                                            UI FIX: was <details class="t8-visitor-menu"><summary>...
-                                            Now a plain button + div so public/js/visitor.js can portal
-                                            the panel to <body> on open (position: fixed) instead of it
-                                            being absolutely positioned inside a clipped table cell.
-                                            The forms below (reschedule / cancel), including their CSRF
-                                            fields, are byte-for-byte unchanged.
-                                        -->
-                                        <div class="t8-visitor-menu">
-                                            <button type="button" class="t8-btn t8-btn-outline t8-btn-sm t8-visitor-menu-trigger" aria-label="More actions">
-                                                <i class="fa-solid fa-ellipsis-vertical"></i>
-                                            </button>
-                                            <div class="t8-visitor-menu-panel">
-                                                <form method="post" action="<?= e(page_url('visitor', ['action' => 'reschedule'])) ?>">
-                                                    <?= t8_csrf_field() ?>
-                                                    <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
-                                                    <label class="t8-help-text" for="reschedule-<?= e((string) $v['id']) ?>">New schedule</label>
-                                                    <input id="reschedule-<?= e((string) $v['id']) ?>" class="t8-input" type="datetime-local" name="scheduled_date"
-                                                           min="<?= e(date('Y-m-d\TH:i')) ?>"
-                                                           value="<?= e(str_replace(' ', 'T', substr((string) $v['scheduled_date'], 0, 16))) ?>" required>
-                                                    <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">
-                                                        <i class="fa-solid fa-calendar-pen"></i> Change Schedule
-                                                    </button>
-                                                </form>
-
-                                                <form method="post" action="<?= e(page_url('visitor', ['action' => 'cancel'])) ?>"
-                                                      onsubmit="return confirm('Cancel this scheduled visit?');">
-                                                    <?= t8_csrf_field() ?>
-                                                    <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
-                                                    <button class="t8-btn t8-btn-danger t8-btn-sm t8-visitor-menu-cancel" type="submit">
-                                                        <i class="fa-solid fa-xmark"></i> Cancel Visit
-                                                    </button>
-                                                </form>
-                                            </div>
-                                        </div>
+                                        <?php t8_visitor_render_menu($v, 'scheduled'); ?>
                                     </div>
                                 </td>
                             </tr>
@@ -709,7 +726,6 @@ if (!$showForm) {
             <table class="t8-table">
                 <thead>
                     <tr>
-                        <th>Visitor ID</th>
                         <th>Visitor</th>
                         <th>Type</th>
                         <th>Purpose</th>
@@ -721,26 +737,28 @@ if (!$showForm) {
                 <tbody>
                     <?php if ($currentlyIn === []): ?>
                         <tr class="t8-table-empty-row">
-                            <td colspan="7">No visitors currently checked in.</td>
+                            <td colspan="6">No visitors currently checked in.</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($currentlyIn as $v): ?>
                             <tr>
-                                <td class="t8-table-ref"><?= e(t8_visitor_id_label((int) $v['id'])) ?></td>
                                 <td><?= e($v['full_name']) ?></td>
                                 <td><?= e((string) ($v['visitor_type'] ?? '—')) ?></td>
                                 <td><?= e($v['purpose']) ?></td>
-                                <td><?= e(format_date($v['check_in_time'], 'M d, Y g:i A')) ?></td>
+                                <td><?= e(format_date($v['check_in_time'], 'g:i A')) ?></td>
                                 <td><?= e($v['logged_by_name']) ?></td>
                                 <td>
-                                    <form method="post" action="<?= e(page_url('visitor', ['action' => 'checkout'])) ?>"
-                                          onsubmit="return confirm('Check out this visitor?');">
-                                        <?= t8_csrf_field() ?>
-                                        <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
-                                        <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                            <i class="fa-solid fa-right-from-bracket"></i> Check Out
-                                        </button>
-                                    </form>
+                                    <div class="t8-row-actions">
+                                        <form method="post" action="<?= e(page_url('visitor', ['action' => 'checkout'])) ?>"
+                                              onsubmit="return confirm('Check out this visitor?');">
+                                            <?= t8_csrf_field() ?>
+                                            <input type="hidden" name="id" value="<?= e((string) $v['id']) ?>">
+                                            <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
+                                                <i class="fa-solid fa-right-from-bracket"></i> Check Out
+                                            </button>
+                                        </form>
+                                        <?php t8_visitor_render_menu($v, 'onsite'); ?>
+                                    </div>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -759,7 +777,6 @@ if (!$showForm) {
             <table class="t8-table">
                 <thead>
                     <tr>
-                        <th>Visitor ID</th>
                         <th>Visitor</th>
                         <th>Type</th>
                         <th>Purpose</th>
@@ -768,6 +785,7 @@ if (!$showForm) {
                         <th>Check-Out</th>
                         <th>Status</th>
                         <th>Logged By</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -778,7 +796,6 @@ if (!$showForm) {
                     <?php else: ?>
                         <?php foreach ($allVisitors as $v): ?>
                             <tr>
-                                <td class="t8-table-ref"><?= e(t8_visitor_id_label((int) $v['id'])) ?></td>
                                 <td><?= e($v['full_name']) ?></td>
                                 <td><?= e((string) ($v['visitor_type'] ?? '—')) ?></td>
                                 <td><?= e($v['purpose']) ?></td>
@@ -791,6 +808,9 @@ if (!$showForm) {
                                     </span>
                                 </td>
                                 <td><?= e($v['logged_by_name']) ?></td>
+                                <td style="text-align:right;">
+                                    <?php t8_visitor_render_menu($v, 'log'); ?>
+                                </td>
                             </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -799,5 +819,37 @@ if (!$showForm) {
         </div>
             <?php t8_visitor_pagination($allVisitorsPage, $allVisitorsTotalPages, 'log_page'); ?>
     </div>
+
+    <!--
+        Shared View Details modal for all three tables above (see
+        t8_visitor_render_menu() and public/js/row-menu.js). This is
+        the only place the Visitor ID and full check-in/check-out
+        dates now appear - the tables themselves stay clean.
+    -->
+    <dialog id="t8VisitorDetailModal" class="t8-detail-modal">
+        <div class="t8-detail-header">
+            <div>
+                <h2 data-detail-field="fullName">Visitor</h2>
+                <span class="t8-detail-ref" data-detail-field="visitorId"></span>
+            </div>
+            <button type="button" class="t8-detail-close" data-close-detail-modal aria-label="Close">&times;</button>
+        </div>
+        <div class="t8-detail-body">
+            <div class="t8-detail-grid">
+                <div class="t8-detail-item"><span>Status</span><strong data-detail-field="status">—</strong></div>
+                <div class="t8-detail-item"><span>Visitor Type</span><strong data-detail-field="visitorType">—</strong></div>
+                <div class="t8-detail-item" data-detail-wrap="contact" hidden><span>Contact Number</span><strong data-detail-field="contact">—</strong></div>
+                <div class="t8-detail-item"><span>Logged By</span><strong data-detail-field="loggedBy">—</strong></div>
+                <div class="t8-detail-item" data-detail-wrap="scheduledDate" hidden><span>Scheduled For</span><strong data-detail-field="scheduledDate">—</strong></div>
+                <div class="t8-detail-item" data-detail-wrap="checkInTime" hidden><span>Check-In</span><strong data-detail-field="checkInTime">—</strong></div>
+                <div class="t8-detail-item" data-detail-wrap="checkOutTime" hidden><span>Check-Out</span><strong data-detail-field="checkOutTime">—</strong></div>
+            </div>
+            <div class="t8-detail-section"><i class="fa-solid fa-note-sticky"></i> Purpose of Visit</div>
+            <div class="t8-detail-notes" data-detail-field="purpose">—</div>
+        </div>
+        <div class="t8-detail-footer">
+            <button type="button" class="t8-btn t8-btn-outline" data-close-detail-modal>Close</button>
+        </div>
+    </dialog>
 
 <?php endif; ?>

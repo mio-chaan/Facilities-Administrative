@@ -200,7 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <p class="t8-help-text t8-auth-hint">
             Local dev seed account: <code>dev.tester@example.local</code> /
-            <code>Password123!</code> (see <code>database/seed.sql</code>).
+            <code>Password123!</code> (see <code>database/seed_account.sql</code>).
         </p>
     </div>
 </div>
