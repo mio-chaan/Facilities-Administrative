@@ -38,6 +38,9 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
     $statusFilter = trim((string) ($_GET['status'] ?? ''));
     $searchFilter = trim((string) ($_GET['search'] ?? ''));
     $rangeFilter = trim((string) ($_GET['range'] ?? ''));
+    $monthFilter = (int) ($_GET['month'] ?? 0);
+    $yearFilter = (int) ($_GET['year'] ?? 0);
+    $departmentFilter = trim((string) ($_GET['department'] ?? ''));
 
     $currentUserId = t8_current_user_id();
     $isAdmin = t8_has_role('admin');
@@ -211,7 +214,14 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
     $where = ['1=1'];
     $params = [];
 
-    if ($table_type === 'pending' && $isAdmin) {
+    if ($table_type === 'archive') {
+        if (!$isAdmin) {
+            http_response_code(403);
+            echo json_encode(['error' => 'Forbidden']);
+            exit;
+        }
+        $where[] = 'r.archived_at IS NOT NULL';
+    } elseif ($table_type === 'pending' && $isAdmin) {
         $where[] = "r.status = 'pending'";
     } elseif ($table_type === 'my') {
         $where[] = 'r.user_id = :user_id';
@@ -236,11 +246,32 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
     }
     if ($searchFilter !== '') {
         $searchTerm = '%' . $searchFilter . '%';
-        $where[] = '(u.full_name LIKE :search_user OR r.department LIKE :search_department OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility)';
+        $where[] = $table_type === 'archive'
+            ? '(u.full_name LIKE :search_user OR r.department LIKE :search_department OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility OR r.event_category LIKE :search_category OR r.description LIKE :search_description)'
+            : '(u.full_name LIKE :search_user OR r.department LIKE :search_department OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility)';
         $params['search_user'] = $searchTerm;
         $params['search_department'] = $searchTerm;
         $params['search_key_person'] = $searchTerm;
         $params['search_facility'] = $searchTerm;
+        if ($table_type === 'archive') {
+            $params['search_category'] = $searchTerm;
+            $params['search_description'] = $searchTerm;
+        }
+    }
+    if ($table_type === 'archive') {
+        $archiveDateSql = 'COALESCE(r.start_time, r.schedule, r.expected_return_date, r.archived_at)';
+        if ($monthFilter >= 1 && $monthFilter <= 12) {
+            $where[] = "MONTH({$archiveDateSql}) = :filter_month";
+            $params['filter_month'] = $monthFilter;
+        }
+        if ($yearFilter > 0) {
+            $where[] = "YEAR({$archiveDateSql}) = :filter_year";
+            $params['filter_year'] = $yearFilter;
+        }
+        if ($departmentFilter !== '') {
+            $where[] = 'r.department = :filter_department';
+            $params['filter_department'] = $departmentFilter;
+        }
     }
     if ($rangeFilter !== '') {
         $rangeSql = match ($rangeFilter) {
@@ -272,21 +303,37 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
          JOIN team8_facilities f ON f.id = r.facility_id
          JOIN users u ON u.id = r.user_id
          WHERE {$whereSql}
-         ORDER BY COALESCE(r.start_time, r.schedule, r.created_at) DESC
+         ORDER BY COALESCE(r.end_time, r.schedule, r.expected_return_date, r.archived_at, r.created_at) DESC
          LIMIT 100"
     );
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $rows = t8_reservations_annotate_conflicts($pdo, $rows);
+    if ($table_type !== 'archive') {
+        $rows = t8_reservations_annotate_conflicts($pdo, $rows);
+    }
 
     $html = '';
     if (empty($rows)) {
         $emptyMessage = $searchFilter !== '' ? 'No results found.' : 'No reservations match your filters.';
-        $html = '<tr class="t8-filter-empty"><td colspan="6" class="t8-table-empty-row">' . e($emptyMessage) . '</td></tr>';
+        $html = '<tr class="t8-filter-empty"><td colspan="' . ($table_type === 'archive' ? '9' : '6') . '" class="t8-table-empty-row">' . e($emptyMessage) . '</td></tr>';
     } else {
         foreach ($rows as $r) {
             $summary = t8_ajax_reservation_summary($r);
             $schedule = t8_ajax_reservation_schedule($r);
+            if ($table_type === 'archive') {
+                $html .= '<tr data-reservation-row>'
+                    . '<td>' . e($r['facility_name']) . '</td>'
+                    . '<td><span class="t8-type-pill">' . e((string) ($r['facility_type'] ?? 'Unknown')) . '</span></td>'
+                    . '<td>' . e($r['requester_name']) . '</td>'
+                    . '<td>' . e((string) ($r['department'] ?? '-')) . '</td>'
+                    . '<td>' . e((string) ($r['key_person'] ?? '-')) . '</td>'
+                    . '<td><strong>' . e($summary['category']) . '</strong>' . ($summary['detail'] !== '' ? '<span class="t8-table-subtext">• ' . e($summary['detail']) . '</span>' : '') . '</td>'
+                    . '<td>' . e($schedule['primary']) . '</td>'
+                    . '<td><span class="t8-badge t8-badge-' . e((string) $r['status']) . '">' . e(ucfirst((string) $r['status'])) . '</span></td>'
+                    . '<td>' . e(format_date((string) $r['archived_at'], 'M d, Y g:i A')) . '</td>'
+                    . '</tr>';
+                continue;
+            }
             $statusLabel = $r['status'] === 'cancellation_pending' ? 'Pending' : ucfirst((string) $r['status']);
 
             $html .= '<tr data-reservation-row' . (!empty($r['has_conflict']) ? ' style="background: rgba(230,126,34,0.14);"' : '') . '>'

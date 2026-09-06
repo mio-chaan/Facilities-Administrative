@@ -38,6 +38,9 @@ document.addEventListener('DOMContentLoaded', function () {
         var statusSelect = filters.querySelector('[data-filter-status]');
         var searchInput = filters.querySelector('[data-filter-search]');
         var rangeSelect = filters.querySelector('[data-filter-range]');
+        var monthSelect = filters.querySelector('[data-filter-month]');
+        var yearSelect = filters.querySelector('[data-filter-year]');
+        var departmentSelect = filters.querySelector('[data-filter-department]');
         var chipsEl = filters.querySelector('[data-filter-chips]');
         var resultCountEl = filters.querySelector('[data-filter-result-count]');
         var tableBody = table.querySelector('tbody');
@@ -56,6 +59,9 @@ document.addEventListener('DOMContentLoaded', function () {
             if (statusSelect && statusSelect.value) params.append('status', statusSelect.value);
             if (searchInput && searchInput.value.trim()) params.append('search', searchInput.value.trim());
             if (rangeSelect && rangeSelect.value) params.append('range', rangeSelect.value);
+            if (monthSelect && monthSelect.value) params.append('month', monthSelect.value);
+            if (yearSelect && yearSelect.value) params.append('year', yearSelect.value);
+            if (departmentSelect && departmentSelect.value) params.append('department', departmentSelect.value);
             return params;
         }
 
@@ -92,6 +98,15 @@ document.addEventListener('DOMContentLoaded', function () {
                     clear: function () { rangeSelect.value = ''; }
                 });
             }
+            if (monthSelect && monthSelect.value) {
+                chips.push({ label: 'Month: ' + monthSelect.options[monthSelect.selectedIndex].text, clear: function () { monthSelect.value = ''; } });
+            }
+            if (yearSelect && yearSelect.value) {
+                chips.push({ label: 'Year: ' + yearSelect.value, clear: function () { yearSelect.value = ''; } });
+            }
+            if (departmentSelect && departmentSelect.value) {
+                chips.push({ label: 'Department: ' + departmentSelect.options[departmentSelect.selectedIndex].text, clear: function () { departmentSelect.value = ''; } });
+            }
 
             chipsEl.innerHTML = '';
             if (!chips.length) {
@@ -123,6 +138,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (statusSelect) statusSelect.value = '';
                 if (searchInput) searchInput.value = '';
                 if (rangeSelect) rangeSelect.value = '';
+                if (monthSelect) monthSelect.value = '';
+                if (yearSelect) yearSelect.value = '';
+                if (departmentSelect) departmentSelect.value = '';
                 applyAjaxFilters();
             });
             chipsEl.appendChild(clearAll);
@@ -150,6 +168,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (typeSelect) typeSelect.addEventListener('change', applyAjaxFilters);
         if (statusSelect) statusSelect.addEventListener('change', applyAjaxFilters);
         if (rangeSelect) rangeSelect.addEventListener('change', applyAjaxFilters);
+        if (monthSelect) monthSelect.addEventListener('change', applyAjaxFilters);
+        if (yearSelect) yearSelect.addEventListener('change', applyAjaxFilters);
+        if (departmentSelect) departmentSelect.addEventListener('change', applyAjaxFilters);
         if (searchInput) {
             searchInput.addEventListener('input', function () {
                 clearTimeout(searchTimer);
@@ -162,7 +183,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // way as the JS-rendered ones above so removing a chip doesn't
         // require a full reload once JS is available.
         if (chipsEl) {
-            var controlsByKey = { facility: facilitySelect, type: typeSelect, status: statusSelect, search: searchInput, range: rangeSelect };
+            var controlsByKey = { facility: facilitySelect, type: typeSelect, status: statusSelect, search: searchInput, range: rangeSelect, month: monthSelect, year: yearSelect, department: departmentSelect };
             chipsEl.querySelectorAll('[data-remove-filter]').forEach(function (btn) {
                 btn.addEventListener('click', function () {
                     var control = controlsByKey[btn.getAttribute('data-remove-filter')];
@@ -180,28 +201,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 });
             }
         }
-    });
-
-    document.querySelectorAll('[data-reservation-filters]').forEach(function (filters) {
-        var table = document.getElementById(filters.getAttribute('data-filter-table'));
-        if (!table) return;
-        var month = filters.querySelector('[data-filter-month]');
-        var year = filters.querySelector('[data-filter-year]');
-        if (!month || !year) return;
-        var rows = Array.prototype.slice.call(table.querySelectorAll('[data-reservation-row]'));
-        var years = {};
-        rows.forEach(function (row) { var date = row.getAttribute('data-reservation-date') || ''; if (date) years[date.slice(0, 4)] = true; });
-        Object.keys(years).sort().reverse().forEach(function (value) { var option = document.createElement('option'); option.value = value; option.textContent = value; year.appendChild(option); });
-        function applyFilters() {
-            rows.forEach(function (row) {
-                var date = row.getAttribute('data-reservation-date') || '';
-                var matchesMonth = !month.value || Number(date.slice(5, 7)) === Number(month.value);
-                var matchesYear = !year.value || date.slice(0, 4) === year.value;
-                row.hidden = !(matchesMonth && matchesYear);
-            });
-        }
-        month.addEventListener('change', applyFilters);
-        year.addEventListener('change', applyFilters);
     });
 
     // ===================================================================

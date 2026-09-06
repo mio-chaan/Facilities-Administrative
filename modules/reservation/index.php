@@ -213,16 +213,16 @@ function t8_refresh_reservation_booking_statuses(PDO $pdo, int $actorId): void
 {
         $expiredRows = $pdo->query(
                 "SELECT id, status FROM team8_reservations
-                    WHERE status IN ('pending', 'cancellation_pending')
-                        AND ((COALESCE(start_time, schedule) IS NOT NULL AND COALESCE(start_time, schedule) < NOW())
-                            OR (start_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
+          WHERE status IN ('pending', 'cancellation_pending')
+            AND COALESCE(start_time, schedule, expected_return_date) IS NOT NULL
+            AND COALESCE(start_time, schedule, expected_return_date) < NOW()"
         )->fetchAll(PDO::FETCH_ASSOC);
     if ($expiredRows !== []) {
         $pdo->query(
             "UPDATE team8_reservations SET status = 'expired', archived_at = COALESCE(archived_at, NOW())
-                            WHERE status IN ('pending', 'cancellation_pending')
-                                AND ((COALESCE(start_time, schedule) IS NOT NULL AND COALESCE(start_time, schedule) < NOW())
-                                    OR (start_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
+              WHERE status IN ('pending', 'cancellation_pending')
+                AND COALESCE(start_time, schedule, expected_return_date) IS NOT NULL
+                AND COALESCE(start_time, schedule, expected_return_date) < NOW()"
         );
         foreach ($expiredRows as $row) {
             t8_audit_log($pdo, $actorId, 'reservation', (int) $row['id'], 'expired', (string) $row['status'], 'scheduled date/time passed');
@@ -231,16 +231,16 @@ function t8_refresh_reservation_booking_statuses(PDO $pdo, int $actorId): void
 
     $completedIds = $pdo->query(
         "SELECT id FROM team8_reservations
-                    WHERE status = 'approved'
-                        AND ((COALESCE(end_time, schedule) IS NOT NULL AND COALESCE(end_time, schedule) < NOW())
-                            OR (end_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
+          WHERE status = 'approved'
+            AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
+            AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
     )->fetchAll(PDO::FETCH_COLUMN);
     if ($completedIds !== []) {
         $pdo->query(
             "UPDATE team8_reservations SET status = 'completed', archived_at = COALESCE(archived_at, NOW())
-                            WHERE status = 'approved'
-                                AND ((COALESCE(end_time, schedule) IS NOT NULL AND COALESCE(end_time, schedule) < NOW())
-                                    OR (end_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
+              WHERE status = 'approved'
+                AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
+                AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
         );
         foreach ($completedIds as $id) {
             t8_audit_log($pdo, $actorId, 'reservation', (int) $id, 'completed', 'approved', 'scheduled end passed');
@@ -960,12 +960,18 @@ if (!$showForm) {
     $reservationStatusFilter = trim((string) ($_GET['status'] ?? ''));
     $reservationSearchFilter = trim((string) ($_GET['search'] ?? ''));
     $reservationRangeFilter = trim((string) ($_GET['range'] ?? ''));
+    $reservationMonthFilter = (int) ($_GET['month'] ?? 0);
+    $reservationYearFilter = (int) ($_GET['year'] ?? 0);
+    $reservationDepartmentFilter = trim((string) ($_GET['department'] ?? ''));
     $reservationFilters = [
         'facility' => $reservationFacilityFilter > 0 ? $reservationFacilityFilter : '',
         'type' => $reservationTypeFilter,
         'status' => $reservationStatusFilter,
         'search' => $reservationSearchFilter,
         'range' => $reservationRangeFilter,
+        'month' => $reservationMonthFilter > 0 ? $reservationMonthFilter : '',
+        'year' => $reservationYearFilter > 0 ? $reservationYearFilter : '',
+        'department' => $reservationDepartmentFilter,
     ];
 
     /** Reusable SQL fragment for the "Schedule" quick filter (today / this week / this month). */
@@ -1001,9 +1007,9 @@ if (!$showForm) {
     //
     $justCompletedIds = $pdo->query(
         "SELECT id FROM team8_reservations
-                    WHERE status = 'approved'
-                        AND ((COALESCE(end_time, schedule) IS NOT NULL AND COALESCE(end_time, schedule) < NOW())
-                            OR (end_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
+          WHERE status = 'approved'
+            AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
+            AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
     )->fetchAll(PDO::FETCH_COLUMN);
 
     if ($justCompletedIds !== []) {
@@ -1013,9 +1019,9 @@ if (!$showForm) {
         $pdo->query(
             "UPDATE team8_reservations
               SET status = 'completed', archived_at = COALESCE(archived_at, NOW())
-                         WHERE status = 'approved'
-                             AND ((COALESCE(end_time, schedule) IS NOT NULL AND COALESCE(end_time, schedule) < NOW())
-                                 OR (end_time IS NULL AND schedule IS NULL AND expected_return_date < CURDATE()))"
+             WHERE status = 'approved'
+               AND COALESCE(end_time, schedule, expected_return_date) IS NOT NULL
+               AND COALESCE(end_time, schedule, expected_return_date) < NOW()"
         );
     }
 
@@ -1023,7 +1029,7 @@ if (!$showForm) {
         $allWhere = [
             "r.status IN ('approved', 'cancellation_pending')",
             'r.archived_at IS NULL',
-            '(COALESCE(r.end_time, r.schedule) >= NOW() OR (r.end_time IS NULL AND r.schedule IS NULL AND r.expected_return_date >= CURDATE()))',
+            'COALESCE(r.end_time, r.schedule, r.expected_return_date) >= NOW()',
         ];
         $allParams = [];
         if ($reservationFacilityFilter > 0) {
@@ -1078,14 +1084,50 @@ if (!$showForm) {
         $allReservations = $allStmt->fetchAll(PDO::FETCH_ASSOC);
         $allReservations = t8_reservations_annotate_conflicts($pdo, $allReservations);
 
-        $archivedReservations = $pdo->query(
+        $archiveWhere = ['r.archived_at IS NOT NULL'];
+        $archiveParams = [];
+        $archiveDateSql = 'COALESCE(r.start_time, r.schedule, r.expected_return_date, r.archived_at)';
+        if ($reservationFacilityFilter > 0) {
+            $archiveWhere[] = 'r.facility_id = :archive_facility';
+            $archiveParams['archive_facility'] = $reservationFacilityFilter;
+        }
+        if ($reservationSearchFilter !== '') {
+            $searchTerm = '%' . $reservationSearchFilter . '%';
+            $archiveWhere[] = '(f.name LIKE :archive_search_facility OR u.full_name LIKE :archive_search_user OR r.department LIKE :archive_search_department OR r.key_person LIKE :archive_search_key_person OR r.event_category LIKE :archive_search_category OR r.description LIKE :archive_search_description)';
+            $archiveParams['archive_search_facility'] = $searchTerm;
+            $archiveParams['archive_search_user'] = $searchTerm;
+            $archiveParams['archive_search_department'] = $searchTerm;
+            $archiveParams['archive_search_key_person'] = $searchTerm;
+            $archiveParams['archive_search_category'] = $searchTerm;
+            $archiveParams['archive_search_description'] = $searchTerm;
+        }
+        if ($reservationMonthFilter > 0 && $reservationMonthFilter <= 12) {
+            $archiveWhere[] = "MONTH({$archiveDateSql}) = :archive_month";
+            $archiveParams['archive_month'] = $reservationMonthFilter;
+        }
+        if ($reservationYearFilter > 0) {
+            $archiveWhere[] = "YEAR({$archiveDateSql}) = :archive_year";
+            $archiveParams['archive_year'] = $reservationYearFilter;
+        }
+        if ($reservationDepartmentFilter !== '') {
+            $archiveWhere[] = 'r.department = :archive_department';
+            $archiveParams['archive_department'] = $reservationDepartmentFilter;
+        }
+        $archiveWhereSql = implode(' AND ', $archiveWhere);
+        $archivedCountStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_reservations r JOIN team8_facilities f ON f.id = r.facility_id JOIN users u ON u.id = r.user_id WHERE {$archiveWhereSql}");
+        $archivedCountStmt->execute($archiveParams);
+        $archivedTotal = (int) $archivedCountStmt->fetchColumn();
+        $archivedReservationsStmt = $pdo->prepare(
             "SELECT r.*, f.name AS facility_name, f.facility_type, f.capacity AS facility_capacity, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
-             WHERE r.archived_at IS NOT NULL
-             ORDER BY COALESCE(r.end_time, r.schedule, r.expected_return_date) DESC"
-        )->fetchAll(PDO::FETCH_ASSOC);
+             WHERE {$archiveWhereSql}
+             ORDER BY COALESCE(r.end_time, r.schedule, r.expected_return_date, r.archived_at) DESC"
+        );
+        $archivedReservationsStmt->execute($archiveParams);
+        $archivedReservations = $archivedReservationsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $archivedYears = $pdo->query("SELECT DISTINCT YEAR({$archiveDateSql}) AS archive_year FROM team8_reservations r WHERE r.archived_at IS NOT NULL ORDER BY archive_year DESC")->fetchAll(PDO::FETCH_COLUMN);
 
         // Lists EVERY reservation currently awaiting approval - nothing
         // filters this further, so it's always the complete pending set.
@@ -1111,7 +1153,7 @@ if (!$showForm) {
         $allWhere = [
             "r.status = 'approved'",
             'r.archived_at IS NULL',
-            '(COALESCE(r.end_time, r.schedule) >= NOW() OR (r.end_time IS NULL AND r.schedule IS NULL AND r.expected_return_date >= CURDATE()))',
+            'COALESCE(r.end_time, r.schedule, r.expected_return_date) >= NOW()',
         ];
         $allParams = [];
         if ($reservationFacilityFilter > 0) {
@@ -1474,9 +1516,38 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                 <h2 class="t8-card-title">Archived Reservations</h2>
                 <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('reservation')) ?>">Back to Reservations</a>
             </div>
-            <div class="t8-reservation-filters" data-reservation-filters data-filter-table="t8ArchiveReservations">
-                <label>Month <select class="t8-select" data-filter-month><option value="">All months</option><?php foreach (range(1, 12) as $month): ?><option value="<?= e((string) $month) ?>"><?= e(date('F', mktime(0, 0, 0, $month, 1))) ?></option><?php endforeach; ?></select></label>
-                <label>Year <select class="t8-select" data-filter-year><option value="">All years</option></select></label>
+            <div class="t8-reservation-toolbar" data-filter-table="t8ArchiveReservations" data-filter-type="archive">
+                <div class="t8-reservation-filters-row">
+                    <div class="t8-filter-search">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" class="t8-input" data-filter-search placeholder="Search by facility, requester, department..." value="<?= e($reservationFilters['search']) ?>">
+                    </div>
+                    <label>Month <select class="t8-select" data-filter-month><option value="">All months</option><?php foreach (range(1, 12) as $month): ?><option value="<?= e((string) $month) ?>" <?= $reservationFilters['month'] === $month ? 'selected' : '' ?>><?= e(date('F', mktime(0, 0, 0, $month, 1))) ?></option><?php endforeach; ?></select></label>
+                    <label>Year <select class="t8-select" data-filter-year><option value="">All years</option><?php foreach ($archivedYears as $archiveYear): ?><option value="<?= e((string) $archiveYear) ?>" <?= $reservationFilters['year'] === (int) $archiveYear ? 'selected' : '' ?>><?= e((string) $archiveYear) ?></option><?php endforeach; ?></select></label>
+                    <label>Facility <select class="t8-select" data-filter-facility><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
+                    <label>Department <select class="t8-select" data-filter-department><option value="">All departments</option><?php foreach (T8_DEPARTMENTS as $department): ?><option value="<?= e($department) ?>" <?= $reservationFilters['department'] === $department ? 'selected' : '' ?>><?= e($department) ?></option><?php endforeach; ?></select></label>
+                </div>
+                <div class="t8-reservation-filters-meta">
+                    <div class="t8-filter-chips" data-filter-chips>
+                        <?php
+                        $archiveChips = [];
+                        if ($reservationFilters['search'] !== '') { $archiveChips['search'] = 'Search: "' . $reservationFilters['search'] . '"'; }
+                        if ($reservationFilters['month'] !== '') { $archiveChips['month'] = 'Month: ' . date('F', mktime(0, 0, 0, (int) $reservationFilters['month'], 1)); }
+                        if ($reservationFilters['year'] !== '') { $archiveChips['year'] = 'Year: ' . $reservationFilters['year']; }
+                        if ($reservationFilters['facility'] !== '') {
+                            foreach ($activeFacilities as $facilityOption) { if ((int) $facilityOption['id'] === (int) $reservationFilters['facility']) { $archiveChips['facility'] = 'Facility: ' . $facilityOption['name']; break; } }
+                        }
+                        if ($reservationFilters['department'] !== '') { $archiveChips['department'] = 'Department: ' . $reservationFilters['department']; }
+                        ?>
+                        <?php if ($archiveChips === []): ?>
+                            <span class="t8-filter-empty-chips">No filters applied</span>
+                        <?php else: ?>
+                            <?php foreach ($archiveChips as $chipKey => $chipLabel): ?><span class="t8-filter-chip"><?= e($chipLabel) ?> <button type="button" data-remove-filter="<?= e($chipKey) ?>" aria-label="Remove filter">&times;</button></span><?php endforeach; ?>
+                            <button type="button" class="t8-filter-clear-all">Clear all filters</button>
+                        <?php endif; ?>
+                    </div>
+                    <div class="t8-filter-result-count" data-filter-result-count>Showing <strong><?= e((string) count($archivedReservations)) ?></strong> of <strong><?= e((string) $archivedTotal) ?></strong> reservations</div>
+                </div>
             </div>
             <?php /* FIX (Type + Status columns): archived rows previously had
                      no facility-Type column and no Status column, so it was
@@ -1485,7 +1556,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                      rows had no visible "Qty" context. Both are added below. */ ?>
             <div class="t8-table-wrap"><table class="t8-table" id="t8ArchiveReservations"><thead><tr><th>Facility</th><th>Type</th><th>Requested By</th><th>Department</th><th>Key Person</th><th>Reservation</th><th>Schedule</th><th>Status</th><th>Archived</th></tr></thead><tbody>
                 <?php if ($archivedReservations === []): ?>
-                    <tr class="t8-filter-empty"><td colspan="9" class="t8-table-empty-row">No completed reservations have been archived yet.</td></tr>
+                    <tr class="t8-filter-empty"><td colspan="9" class="t8-table-empty-row">No reservations match your filters.</td></tr>
                 <?php else: ?>
                     <?php foreach ($archivedReservations as $r): ?>
                         <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
