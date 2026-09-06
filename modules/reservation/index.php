@@ -1507,19 +1507,17 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                     <thead>
                         <tr>
                             <th>Facility</th>
-                            <th>Type</th>
-                            <th>Requested By</th>
-                            <th>Department</th>
                             <th>Key Person</th>
                             <th>Reservation</th>
                             <th>Schedule</th>
+                            <th>Status</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if ($pendingReservations === []): ?>
                             <tr>
-                                <td colspan="9" class="t8-table-empty-row">
+                                <td colspan="6" class="t8-table-empty-row">
                                     No reservation requests are waiting for approval yet.
                                     Once a request is submitted, it will appear here.
                                 </td>
@@ -1529,12 +1527,10 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                                 <?php $summary = t8_reservation_summary($p); $schedule = t8_reservation_schedule($p); ?>
                                 <tr <?= $p['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($p['facility_name']) ?></td>
-                                    <td><span class="t8-type-pill"><?= e((string) ($p['facility_type'] ?? 'Unknown')) ?></span></td>
-                                    <td><?= e($p['requester_name']) ?></td>
-                                    <td><?= e((string) ($p['department'] ?? '-')) ?></td>
                                     <td><?= e((string) ($p['key_person'] ?? '-')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
+                                    <td><span class="t8-badge t8-badge-pending">Pending</span></td>
                                     <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
                                         <?php if ($p['has_conflict']): ?>
                                             <span class="t8-conflict-indicator" title="Time Conflict">
@@ -1631,9 +1627,6 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                     <thead>
                         <tr>
                             <th>Facility</th>
-                            <th>Type</th>
-                            <th>Requested By</th>
-                            <th>Department</th>
                             <th>Key Person</th>
                             <th>Reservation</th>
                             <th>Schedule</th>
@@ -1644,7 +1637,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                     <tbody>
                         <?php if ($allReservations === []): ?>
                             <tr>
-                                <td colspan="10" class="t8-table-empty-row">
+                                <td colspan="6" class="t8-table-empty-row">
                                     No reservations match your filters.
                                 </td>
                             </tr>
@@ -1653,9 +1646,6 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                                 <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
                                 <tr data-reservation-row data-reservation-date="<?= e(t8_reservation_filter_date($r)) ?>" <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
-                                    <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
-                                    <td><?= e($r['requester_name']) ?></td>
-                                    <td><?= e((string) ($r['department'] ?? '-')) ?></td>
                                     <td><?= e((string) ($r['key_person'] ?? '-')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
@@ -1696,7 +1686,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                     <thead>
                         <tr>
                             <th>Facility</th>
-                            <th>Type</th>
+                            <th>Key Person</th>
                             <th>Reservation</th>
                             <th>Schedule</th>
                             <th>Status</th>
@@ -1706,7 +1696,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                     <tbody>
                         <?php if ($myReservations === []): ?>
                             <tr>
-                                <td colspan="7" class="t8-table-empty-row">
+                                <td colspan="6" class="t8-table-empty-row">
                                     You haven't made any reservations yet.
                                     Create one to see it listed here.
                                 </td>
@@ -1716,7 +1706,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                                 <?php $summary = t8_reservation_summary($r); $schedule = t8_reservation_schedule($r); ?>
                                 <tr <?= $r['has_conflict'] ? 'style="background: rgba(230,126,34,0.14);"' : '' ?>>
                                     <td><?= e($r['facility_name']) ?></td>
-                                    <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
+                                    <td><?= e((string) ($r['key_person'] ?? '-')) ?></td>
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-<?= e($r['status']) ?>"><?= e($r['status'] === 'cancellation_pending' ? 'Pending' : ucfirst($r['status'])) ?></span></td>

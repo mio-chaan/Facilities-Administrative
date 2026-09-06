@@ -350,7 +350,7 @@ document.addEventListener('DOMContentLoaded', function () {
         setText('t8ResDetailDepartment', d.department || '—');
         setText('t8ResDetailKeyPerson', d.keyPerson || '—');
         setText('t8ResDetailCategory', d.category || '—');
-        setText('t8ResDetailSchedule', (d.schedulePrimary || '—') + (d.scheduleSecondary ? ' · ' + d.scheduleSecondary : ''));
+        setText('t8ResDetailSchedule', d.scheduleDetail || d.schedulePrimary || '—');
         setText('t8ResDetailLocation', d.facilityLocation || '—');
         setText('t8ResDetailCreated', d.created ? 'Created ' + d.created : '');
         setText('t8ResDetailUpdated', d.updated ? 'Last updated ' + d.updated : '');
