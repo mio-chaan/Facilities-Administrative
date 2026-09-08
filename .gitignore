@@ -19,5 +19,7 @@ node_modules/
 app/config/config.local.php
 storage/
 tests/
+scripts/
+
 
 

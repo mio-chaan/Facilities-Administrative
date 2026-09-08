@@ -504,13 +504,12 @@ if ($action === 'create' && $_SERVER['REQUEST_METHOD'] !== 'POST' && isset($_GET
 function t8_reservation_summary(array $reservation): array
 {
     $category = trim((string) ($reservation['event_category'] ?? ''));
-    $type = trim((string) ($reservation['facility_type'] ?? ''));
     $detail = '';
 
-    if (in_array($type, ['Equipment', 'Asset'], true) && !empty($reservation['quantity'])) {
+    if (!empty($reservation['expected_participants'])) {
+        $detail = 'Participants: ' . (int) $reservation['expected_participants'];
+    } elseif (!empty($reservation['quantity'])) {
         $detail = 'Qty: ' . (int) $reservation['quantity'];
-    } elseif (isset($reservation['facility_capacity']) && $reservation['facility_capacity'] !== '') {
-        $detail = 'Cap: ' . (int) $reservation['facility_capacity'];
     }
 
     return [
