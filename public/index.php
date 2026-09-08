@@ -335,6 +335,14 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
                 continue;
             }
             $statusLabel = $r['status'] === 'cancellation_pending' ? 'Pending' : ucfirst((string) $r['status']);
+            $actionHtml = '';
+            $rowIsOwn = $currentUserId !== null && (int) $r['user_id'] === $currentUserId;
+            if ($table_type === 'pending' && $isAdmin) {
+                $actionHtml = '<form method="post" action="' . e(page_url('reservation', ['action' => 'approve'])) . '">' . t8_csrf_field()
+                    . '<input type="hidden" name="id" value="' . e((string) $r['id']) . '"><button class="t8-btn t8-btn-sm t8-btn-success" type="submit">Approve</button></form>';
+            } elseif ($rowIsOwn && in_array($r['status'], ['pending', 'approved'], true)) {
+                $actionHtml = '<a class="t8-btn t8-btn-sm t8-btn-outline" href="' . e(page_url('reservation', ['action' => 'edit', 'id' => $r['id']])) . '">Edit</a>';
+            }
 
             $html .= '<tr data-reservation-row' . (!empty($r['has_conflict']) ? ' style="background: rgba(230,126,34,0.14);"' : '') . '>'
                 . '<td>' . e($r['facility_name']) . '</td>'
@@ -342,7 +350,7 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
                 . '<td><strong>' . e($summary['category']) . '</strong>' . ($summary['detail'] !== '' ? '<span class="t8-table-subtext">• ' . e($summary['detail']) . '</span>' : '') . '</td>'
                 . '<td><strong>' . e($schedule['primary']) . '</strong>' . ($schedule['secondary'] !== '' ? '<span class="t8-table-subtext">' . e($schedule['secondary']) . '</span>' : '') . '</td>'
                 . '<td><span class="t8-badge t8-badge-' . e((string) $r['status']) . '">' . e($statusLabel) . '</span></td>'
-                . '<td class="t8-table-actions">' . t8_ajax_render_menu($r, $isAdmin, $currentUserId) . '</td>'
+                . '<td class="t8-table-actions">' . $actionHtml . t8_ajax_render_menu($r, $isAdmin, $currentUserId) . '</td>'
                 . '</tr>';
         }
     }

@@ -4,8 +4,8 @@
  *
  * Shared reservation logic used by BOTH modules/reservation/index.php
  * (the page module) and the small JSON endpoints added alongside it:
- *   - public/reservation_status_poll.php  (live status/conflict polling)
- *   - public/facility_availability.php    (live quantity/capacity check)
+ *   - public/api/reservation_status_poll.php  (live status/conflict polling)
+ *   - public/api/facility_availability.php    (live quantity/capacity check)
  *
  * These functions used to live only inside modules/reservation/index.php,
  * which meant the new endpoints had no safe way to reuse them (that
@@ -59,7 +59,7 @@ if (!function_exists('t8_reservation_committed_quantity')) {
     /**
      * Sum of quantity currently committed (pending or approved, not yet
      * returned) against a facility, so Equipment/Asset quantity checks
-     * (both server-side validation AND the live facility_availability.php
+    * (both server-side validation AND the live public/api/facility_availability.php
      * endpoint used by the "capacity" JS enhancement) always compare
      * against what is actually still AVAILABLE, not just total capacity.
      */

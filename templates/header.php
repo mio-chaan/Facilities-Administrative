@@ -45,6 +45,7 @@ $page      = $page ?? current_page();
         <!-- HR Document Automation extension (dashboard, template picker,
              generated-document forms). See public/css/documents.css. -->
         <link rel="stylesheet" href="<?= e(asset('css/documents.css')) ?>">
+        <link rel="stylesheet" href="<?= e(asset('css/row-menu.css')) ?>">
     <?php endif; ?>
     <?php if ($page === 'retention'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/retention.css')) ?>">

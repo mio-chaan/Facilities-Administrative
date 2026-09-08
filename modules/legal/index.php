@@ -362,10 +362,11 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
         </div>
         <form method="post"
               action="<?= e(page_url('legal', array_filter(['action' => $action, 'id' => $_GET['id'] ?? null]))) ?>"
+              class="t8-legal-form-grid"
               novalidate>
             <?= t8_csrf_field() ?>
 
-            <div class="t8-field">
+            <div class="t8-field t8-form-span-2">
                 <label class="t8-label" for="title">Case Title</label>
                 <input class="t8-input" type="text" id="title" name="title"
                        value="<?= e($formValues['title']) ?>" required>
@@ -415,10 +416,12 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 </select>
             </div>
 
-            <button class="t8-btn t8-btn-accent" type="submit">
-                <i class="fa-solid fa-check"></i> <?= $action === 'edit' ? 'Save Changes' : 'Create Case' ?>
-            </button>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Cancel</a>
+            <div class="t8-form-actions t8-legal-form-actions">
+                <button class="t8-btn t8-btn-accent" type="submit">
+                    <i class="fa-solid fa-check"></i> <?= $action === 'edit' ? 'Save Changes' : 'Create Case' ?>
+                </button>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Cancel</a>
+            </div>
         </form>
     </div>
 

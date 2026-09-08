@@ -102,7 +102,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var markAllBtn = document.getElementById("t8NotifMarkAll");
     var bellDot = document.getElementById("t8NotifBellDot");
     var csrfInput = popover.querySelector('input[name="csrf_token"]');
-    var actionUrl = popover.getAttribute("data-action-url") || "notifications_action.php";
+    var actionUrl = popover.getAttribute("data-action-url") || "api/notifications_action.php";
 
     function csrfToken() {
         return csrfInput ? csrfInput.value : "";

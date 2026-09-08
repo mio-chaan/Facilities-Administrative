@@ -61,9 +61,22 @@
     /* Allow normal 2-column layout for these fields */
 }
 .t8-document-form-grid > .t8-field.t8-form-span-full,
-.t8-document-form-grid > .t8-btn,
-.t8-document-form-grid > a.t8-btn {
+.t8-document-form-grid > .t8-form-actions {
     grid-column: 1 / -1;
+}
+
+.t8-document-form-grid > .t8-form-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 16px;
+    margin-top: 4px;
+}
+
+.t8-document-form-grid > .t8-form-actions .t8-btn {
+    width: 140px;
+    justify-content: center;
 }
 
 @media (max-width: 768px) {
@@ -71,9 +84,15 @@
         grid-template-columns: 1fr;
     }
     .t8-document-form-grid > .t8-field.t8-form-span-full,
-    .t8-document-form-grid > .t8-btn,
-    .t8-document-form-grid > a.t8-btn {
+    .t8-document-form-grid > .t8-form-actions {
         grid-column: auto;
+    }
+    .t8-document-form-grid > .t8-form-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .t8-document-form-grid > .t8-form-actions .t8-btn {
+        width: 100%;
     }
 }
 

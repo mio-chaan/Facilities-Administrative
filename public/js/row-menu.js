@@ -138,14 +138,22 @@
 
     // ---- "View Details" -> auto-fill the target <dialog> from the
     //      active trigger's data-* attributes ----
+    function toDetailKey(key) {
+        return String(key)
+            .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+            .replace(/_/g, '-')
+            .toLowerCase();
+    }
+
     function fillDetailModal(modal, trigger) {
         var data = trigger.dataset;
         Object.keys(data).forEach(function (key) {
             if (key === 'detailModal' || key === 't8RowMenuBound') return;
             var value = data[key];
-            var field = modal.querySelector('[data-detail-field="' + key + '"]');
+            var normalizedKey = toDetailKey(key);
+            var field = modal.querySelector('[data-detail-field="' + normalizedKey + '"]');
             if (field) field.textContent = value && value !== '' ? value : '—';
-            var wrap = modal.querySelector('[data-detail-wrap="' + key + '"]');
+            var wrap = modal.querySelector('[data-detail-wrap="' + normalizedKey + '"]');
             if (wrap) wrap.hidden = !value;
         });
     }

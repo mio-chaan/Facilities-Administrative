@@ -596,10 +596,11 @@ if ($showList) {
         </div>
         <form method="post"
               action="<?= e(page_url('contracts', array_filter(['action' => $action, 'id' => $_GET['id'] ?? null]))) ?>"
+              class="t8-contract-form-grid"
               novalidate>
             <?= t8_csrf_field() ?>
 
-            <div class="t8-field">
+            <div class="t8-field t8-form-span-2">
                 <label class="t8-label" for="title">Contract Title</label>
                 <input class="t8-input" type="text" id="title" name="title" value="<?= e($formValues['title']) ?>" required>
             </div>
@@ -653,10 +654,12 @@ if ($showList) {
                 </select>
             </div>
 
-            <button class="t8-btn t8-btn-accent" type="submit">
-                <i class="fa-solid fa-check"></i> <?= $action === 'edit' ? 'Save Changes' : 'Create Contract' ?>
-            </button>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('contracts')) ?>">Cancel</a>
+            <div class="t8-form-actions t8-contract-form-actions">
+                <button class="t8-btn t8-btn-accent" type="submit">
+                    <i class="fa-solid fa-check"></i> <?= $action === 'edit' ? 'Save Changes' : 'Create Contract' ?>
+                </button>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('contracts')) ?>">Cancel</a>
+            </div>
         </form>
     </div>
 

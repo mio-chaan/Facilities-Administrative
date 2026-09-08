@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', function () {
         insightButton.addEventListener('click', function () {
             insightButton.disabled = true;
             insightButton.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Analyzing';
-            fetch('reservation_insights.php', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+            fetch('api/reservation_insights.php', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (response) { return response.json(); })
                 .then(function (data) {
                     insightOutput.textContent = data.insight || data.error || 'No insight available.';

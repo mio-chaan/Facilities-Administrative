@@ -106,6 +106,83 @@ function t8_document_status_badge(string $status): string
     };
 }
 
+function t8_document_render_menu(array $doc, bool $isAdmin, string $statusFilter): void
+{
+    $id = (int) $doc['id'];
+    $title = (string) ($doc['title'] ?? '');
+    $statusLabel = ucwords(str_replace('_', ' ', (string) ($doc['status'] ?? 'pending')));
+    $expiration = $doc['expiration_date'] ? format_date((string) $doc['expiration_date'], 'M d, Y') : '—';
+    $updatedAt = format_date((string) ($doc['updated_at'] ?? ''), 'M d, Y g:i A');
+    $uploadedBy = (string) ($doc['uploaded_by_name'] ?? '—');
+    $department = (string) ($doc['department_name'] ?? '—');
+    $owner = (string) ($doc['owner_name'] ?? '—');
+    $category = (string) ($doc['category_name'] ?? '—');
+    ?>
+    <div class="t8-row-menu">
+        <button type="button" class="t8-row-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions"
+                data-detail-modal="t8DocumentDetailModal"
+                data-title="<?= e($title) ?>"
+                data-document-type="<?= e((string) ($doc['document_type'] ?? '—')) ?>"
+                data-version="v<?= e((string) ($doc['current_version'] ?? 1)) ?>"
+                data-status="<?= e($statusLabel) ?>"
+                data-expiration="<?= e($expiration) ?>"
+                data-department="<?= e($department) ?>"
+                data-owner="<?= e($owner) ?>"
+                data-category="<?= e($category) ?>"
+                data-last-updated="<?= e($updatedAt) ?>"
+                data-uploaded-by="<?= e($uploadedBy) ?>">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+        </button>
+        <div class="t8-row-menu-panel" role="menu">
+            <button type="button" class="t8-row-menu-item t8-row-view-details" role="menuitem">
+                <i class="fa-solid fa-eye"></i> View Details
+            </button>
+            <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $id])) ?>">
+                <i class="fa-solid fa-file-lines"></i> View / Versions
+            </a>
+            <?php if ($isAdmin && $statusFilter === 'active' && $doc['status'] === 'pending'): ?>
+                <div class="t8-row-menu-divider"></div>
+                <form method="post" action="<?= e(page_url('documents', ['action' => 'set_status'])) ?>">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <input type="hidden" name="status" value="approved">
+                    <button class="t8-row-menu-item t8-success" type="submit" role="menuitem">
+                        <i class="fa-solid fa-check"></i> Approve
+                    </button>
+                </form>
+                <form method="post" action="<?= e(page_url('documents', ['action' => 'set_status'])) ?>">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <input type="hidden" name="status" value="returned_for_revision">
+                    <button class="t8-row-menu-item t8-danger" type="submit" role="menuitem">
+                        <i class="fa-solid fa-rotate-left"></i> Return
+                    </button>
+                </form>
+            <?php endif; ?>
+            <?php if ($isAdmin && $statusFilter === 'active'): ?>
+                <div class="t8-row-menu-divider"></div>
+                <form method="post" action="<?= e(page_url('documents', ['action' => 'archive'])) ?>" onsubmit="return confirm('Archive this document?');">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <button class="t8-row-menu-item t8-danger" type="submit" role="menuitem">
+                        <i class="fa-solid fa-box-archive"></i> Archive
+                    </button>
+                </form>
+            <?php elseif ($isAdmin): ?>
+                <div class="t8-row-menu-divider"></div>
+                <form method="post" action="<?= e(page_url('documents', ['action' => 'restore'])) ?>">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                    <button class="t8-row-menu-item t8-success" type="submit" role="menuitem">
+                        <i class="fa-solid fa-rotate-left"></i> Restore
+                    </button>
+                </form>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}
+
 /** Admins may access all documents; staff may access only their own uploads. */
 function t8_document_is_authorized(?array $document, int $userId, bool $isAdmin): bool
 {
@@ -819,10 +896,12 @@ function t8_render_camera_capture(): void
                 <?php t8_render_camera_capture(); ?>
             </div>
 
-            <button class="t8-btn t8-btn-accent" type="submit">
-                <i class="fa-solid fa-upload"></i> Upload
-            </button>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">Cancel</a>
+            <div class="t8-form-actions">
+                <button class="t8-btn t8-btn-accent" type="submit">
+                    <i class="fa-solid fa-upload"></i> Upload
+                </button>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">Cancel</a>
+            </div>
         </form>
     </div>
 
@@ -883,10 +962,12 @@ function t8_render_camera_capture(): void
                 <?php t8_render_camera_capture(); ?>
             </div>
 
-            <button class="t8-btn t8-btn-accent" type="submit">
-                <i class="fa-solid fa-upload"></i> Upload Version
-            </button>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $document['id']])) ?>">Cancel</a>
+            <div class="t8-form-actions">
+                <button class="t8-btn t8-btn-accent" type="submit">
+                    <i class="fa-solid fa-upload"></i> Upload Version
+                </button>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $document['id']])) ?>">Cancel</a>
+            </div>
         </form>
     </div>
 
@@ -1001,15 +1082,10 @@ function t8_render_camera_capture(): void
                     <thead>
                         <tr>
                             <th>Title</th>
-                            <th>Department</th>
-                            <th>Owner</th>
-                            <th>Category</th>
                             <th>Document Type</th>
-                            <th>Current Version</th>
+                            <th>Version</th>
                             <th>Status</th>
                             <th>Expiration</th>
-                            <th>Last Updated</th>
-                            <th>Uploaded By</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -1017,41 +1093,12 @@ function t8_render_camera_capture(): void
                         <?php foreach ($documents as $doc): ?>
                             <tr>
                                 <td><?= e($doc['title']) ?></td>
-                                <td><?= e($doc['department_name'] ?? '—') ?></td>
-                                <td><?= e($doc['owner_name'] ?? '—') ?></td>
-                                <td><?= e($doc['category_name'] ?? '—') ?></td>
                                 <td><?= e($doc['document_type'] ?? '—') ?></td>
                                 <td>v<?= e((string) $doc['current_version']) ?></td>
                                 <td><span class="t8-badge <?= e(t8_document_status_badge((string) $doc['status'])) ?>"><?= e(ucwords(str_replace('_', ' ', (string) $doc['status']))) ?></span></td>
                                 <td><?= $doc['expiration_date'] ? e(format_date($doc['expiration_date'], 'M d, Y')) : '—' ?><?php if ($doc['expiration_date'] && strtotime((string) $doc['expiration_date']) <= strtotime('+30 days')): ?> <span class="t8-badge t8-badge-rejected"><?= strtotime((string) $doc['expiration_date']) < strtotime('today') ? 'Expired' : 'Expiring soon' ?></span><?php endif; ?></td>
-                                <td><?= e(format_date($doc['updated_at'], 'M d, Y g:i A')) ?></td>
-                                <td><?= e($doc['uploaded_by_name']) ?></td>
-                                <td style="display:flex; gap:8px; flex-wrap:wrap;">
-                                    <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $doc['id']])) ?>">
-                                        <i class="fa-solid fa-eye"></i> View / Versions
-                                    </a>
-                                    <?php if ($isAdmin && $statusFilter === 'active' && $doc['status'] === 'pending'): ?>
-                                        <form method="post" action="<?= e(page_url('documents', ['action' => 'set_status'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $doc['id']) ?>"><input type="hidden" name="status" value="approved"><button class="t8-btn t8-btn-success t8-btn-sm" type="submit">Approve</button></form>
-                                        <form method="post" action="<?= e(page_url('documents', ['action' => 'set_status'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $doc['id']) ?>"><input type="hidden" name="status" value="returned_for_revision"><button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">Return</button></form>
-                                    <?php endif; ?>
-                                    <?php if ($isAdmin && $statusFilter === 'active'): ?>
-                                        <form method="post" action="<?= e(page_url('documents', ['action' => 'archive'])) ?>"
-                                              onsubmit="return confirm('Archive this document?');">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $doc['id']) ?>">
-                                            <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                <i class="fa-solid fa-box-archive"></i> Archive
-                                            </button>
-                                        </form>
-                                    <?php elseif ($isAdmin): ?>
-                                        <form method="post" action="<?= e(page_url('documents', ['action' => 'restore'])) ?>">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $doc['id']) ?>">
-                                            <button class="t8-btn t8-btn-success t8-btn-sm" type="submit">
-                                                <i class="fa-solid fa-rotate-left"></i> Restore
-                                            </button>
-                                        </form>
-                                    <?php endif; ?>
+                                <td class="t8-row-actions">
+                                    <?php t8_document_render_menu($doc, $isAdmin, $statusFilter); ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -1060,5 +1107,30 @@ function t8_render_camera_capture(): void
             </div>
         <?php endif; ?>
     </div>
+
+    <dialog id="t8DocumentDetailModal" class="t8-detail-modal">
+        <div class="t8-detail-header">
+            <div>
+                <h2 data-detail-field="title">Document</h2>
+            </div>
+            <button type="button" class="t8-detail-close" data-close-detail-modal aria-label="Close">&times;</button>
+        </div>
+        <div class="t8-detail-body">
+            <div class="t8-detail-grid">
+                <div class="t8-detail-item"><span>Document Type</span><strong data-detail-field="document-type">—</strong></div>
+                <div class="t8-detail-item"><span>Version</span><strong data-detail-field="version">—</strong></div>
+                <div class="t8-detail-item"><span>Status</span><strong data-detail-field="status">—</strong></div>
+                <div class="t8-detail-item"><span>Expiration</span><strong data-detail-field="expiration">—</strong></div>
+                <div class="t8-detail-item"><span>Department</span><strong data-detail-field="department">—</strong></div>
+                <div class="t8-detail-item"><span>Owner</span><strong data-detail-field="owner">—</strong></div>
+                <div class="t8-detail-item"><span>Category</span><strong data-detail-field="category">—</strong></div>
+                <div class="t8-detail-item"><span>Last Updated</span><strong data-detail-field="last-updated">—</strong></div>
+                <div class="t8-detail-item full"><span>Uploaded By</span><strong data-detail-field="uploaded-by">—</strong></div>
+            </div>
+        </div>
+        <div class="t8-detail-footer">
+            <button type="button" class="t8-btn t8-btn-outline" data-close-detail-modal>Close</button>
+        </div>
+    </dialog>
 
 <?php endif; ?>
