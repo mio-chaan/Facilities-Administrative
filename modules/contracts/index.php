@@ -18,7 +18,8 @@
  * Contracts/parties links use the same attach/detach pattern as
  * Legal Management's document attachments.
  *
- * Access: Administrator only.
+ * Access: administrators manage contracts; other authorized roles can view
+ * their scoped contracts and submit supporting documents.
  */
 
 declare(strict_types=1);
@@ -32,7 +33,7 @@ $action = $_GET['action'] ?? 'list';
 $errors = [];
 
 if (!defined('T8_CONTRACT_STATUSES')) {
-    define('T8_CONTRACT_STATUSES', ['draft', 'active', 'expiring_soon', 'expired', 'pending_renewal', 'terminated']);
+    define('T8_CONTRACT_STATUSES', ['draft', 'for_review', 'changes_requested', 'pending_approval', 'approved', 'active', 'expiring_soon', 'pending_renewal', 'renewed', 'expired', 'terminated', 'archived']);
 }
 if (!defined('T8_OBLIGATION_STATUSES')) {
     define('T8_OBLIGATION_STATUSES', ['pending', 'completed']);
@@ -48,6 +49,48 @@ function t8_contract_has_metadata(PDO $pdo): bool
     }
 }
 
+function t8_contract_has_column(PDO $pdo, string $column): bool
+{
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM team8_contracts LIKE :column");
+        $stmt->execute(['column' => $column]);
+        return (bool) $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function t8_contract_next_number(PDO $pdo): string
+{
+    $year = date('Y');
+    $nextId = (int) $pdo->query('SELECT COALESCE(MAX(id), 0) + 1 FROM team8_contracts')->fetchColumn();
+    return 'CON-' . $year . '-' . str_pad((string) $nextId, 6, '0', STR_PAD_LEFT);
+}
+
+function t8_contract_upload(array $file, string $title, int $version): array
+{
+    $allowed = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'png', 'jpg', 'jpeg'];
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Please choose a valid contract document.');
+    }
+    if (($file['size'] ?? 0) > UPLOAD_MAX_SIZE_MB * 1024 * 1024) {
+        throw new RuntimeException('The contract document is too large.');
+    }
+    $extension = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
+    if (!in_array($extension, $allowed, true)) {
+        throw new RuntimeException('This document type is not allowed.');
+    }
+    $directory = UPLOAD_DIR . '/documents';
+    if (!is_dir($directory)) { mkdir($directory, 0755, true); }
+    $slug = strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', '-', $title), '-')) ?: 'contract';
+    $filename = $slug . '_v' . $version . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
+    $destination = $directory . '/' . $filename;
+    if (!move_uploaded_file($file['tmp_name'], $destination)) {
+        throw new RuntimeException('The contract document could not be stored.');
+    }
+    return ['file_path' => 'documents/' . $filename, 'file_size' => (int) $file['size'], 'checksum' => hash_file('sha256', $destination) ?: null];
+}
+
 $contractHasMetadata = t8_contract_has_metadata($pdo);
 
 function t8_contract_fetch(PDO $pdo, int $id): ?array
@@ -57,10 +100,10 @@ function t8_contract_fetch(PDO $pdo, int $id): ?array
          FROM team8_contracts c
          JOIN users u ON u.id = c.owner_id
          LEFT JOIN team8_contracts r ON r.id = c.renewed_from_id
-         WHERE c.id = :id' . (t8_has_role('admin') ? '' : ' AND c.owner_id = :user_id') . ' LIMIT 1'
+         WHERE c.id = :id' . (t8_has_role('admin') || t8_has_role('legal_officer') ? '' : ' AND c.owner_id = :user_id') . ' LIMIT 1'
     );
     $params = ['id' => $id];
-    if (!t8_has_role('admin')) { $params += ['user_id' => t8_current_user_id()]; }
+    if (!t8_has_role('admin') && !t8_has_role('legal_officer')) { $params += ['user_id' => t8_current_user_id()]; }
     $stmt->execute($params);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
@@ -101,7 +144,7 @@ function t8_contract_status_badge(string $status): string
 function t8_contract_render_menu(array $c, bool $isAdmin, bool $archivedFilter): void
 {
     $id = (int) $c['id'];
-    $ref = 'CON-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+    $ref = (string) ($c['contract_number'] ?? ('CON-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT)));
     ?>
     <div class="t8-row-menu">
         <button type="button" class="t8-row-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions"
@@ -139,6 +182,26 @@ function t8_contract_render_menu(array $c, bool $isAdmin, bool $archivedFilter):
             </a>
             <?php if ($isAdmin && !$archivedFilter): ?>
                 <div class="t8-row-menu-divider"></div>
+                <?php if (in_array((string) $c['status'], ['draft', 'changes_requested'], true)): ?>
+                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                        <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="submit">
+                        <button class="t8-row-menu-item" type="submit" role="menuitem"><i class="fa-solid fa-paper-plane"></i> Submit for Review</button>
+                    </form>
+                <?php elseif ((string) $c['status'] === 'for_review'): ?>
+                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                        <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="approve">
+                        <button class="t8-row-menu-item t8-success" type="submit" role="menuitem"><i class="fa-solid fa-check"></i> Approve</button>
+                    </form>
+                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                        <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="request_changes"><input class="t8-input" type="text" name="comment" placeholder="Comment (optional)">
+                        <button class="t8-row-menu-item" type="submit" role="menuitem"><i class="fa-solid fa-comment-dots"></i> Request Changes</button>
+                    </form>
+                <?php elseif ((string) $c['status'] === 'approved'): ?>
+                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                        <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="activate">
+                        <button class="t8-row-menu-item t8-success" type="submit" role="menuitem"><i class="fa-solid fa-bolt"></i> Mark Active</button>
+                    </form>
+                <?php endif; ?>
                 <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('contracts', ['action' => 'edit', 'id' => $id])) ?>">
                     <i class="fa-solid fa-pen"></i> Edit
                 </a>
@@ -183,11 +246,51 @@ foreach ($expiryRows as $expiryRow) {
     }
 }
 
-if (!$isAdmin && !in_array($action, ['list', 'documents'], true)) {
+if (!$isAdmin && !in_array($action, ['list', 'documents', 'workflow'], true)) {
     t8_require_role(['admin']);
 }
 
 switch ($action) {
+    case 'workflow':
+        t8_require_role(['admin', 'legal_officer']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('contracts'));
+        }
+        $workflowId = (int) ($_POST['id'] ?? 0);
+        $workflowAction = (string) ($_POST['workflow_action'] ?? '');
+        $workflowComment = trim((string) ($_POST['comment'] ?? ''));
+        $workflowMap = [
+            'submit' => 'for_review',
+            'request_changes' => 'changes_requested',
+            'approve' => 'approved',
+            'activate' => 'active',
+            'renew' => 'pending_renewal',
+            'terminate' => 'terminated',
+        ];
+        $workflowContract = t8_contract_fetch($pdo, $workflowId);
+        if (!$workflowContract || !isset($workflowMap[$workflowAction])) {
+            t8_flash_set('danger', 'Contract workflow action is invalid.');
+            redirect(page_url('contracts'));
+        }
+        if ($workflowAction === 'approve' && !$isAdmin) {
+            t8_flash_set('danger', 'Only an administrator can approve contracts.');
+            redirect(page_url('contracts'));
+        }
+        $newWorkflowStatus = $workflowMap[$workflowAction];
+        $pdo->prepare('UPDATE team8_contracts SET status = :status WHERE id = :id')->execute(['status' => $newWorkflowStatus, 'id' => $workflowId]);
+        $pdo->prepare('INSERT INTO team8_contract_approvals (contract_id, reviewer_id, approver_id, action, comment) VALUES (:contract_id, :reviewer_id, :approver_id, :action, :comment)')->execute([
+            'contract_id' => $workflowId,
+            'reviewer_id' => in_array($workflowAction, ['submit', 'request_changes'], true) ? $currentUserId : null,
+            'approver_id' => in_array($workflowAction, ['approve', 'activate'], true) ? $currentUserId : null,
+            'action' => $workflowAction,
+            'comment' => $workflowComment !== '' ? $workflowComment : null,
+        ]);
+        t8_audit_log($pdo, $currentUserId, 'contract', $workflowId, $workflowAction, (string) $workflowContract['status'], $workflowComment);
+        t8_flash_set('success', 'Contract status updated.');
+        redirect(page_url('contracts'));
+        break;
+
     case 'create':
     case 'edit':
         t8_require_role(['admin']);
@@ -205,30 +308,55 @@ switch ($action) {
 
         $formValues = $existing !== null
             ? [
+                'contract_number' => $existing['contract_number'],
                 'title'            => $existing['title'],
+                'contract_type'    => (string) ($existing['contract_type'] ?? ''),
+                'description'     => (string) ($existing['description'] ?? ''),
                 'owner_id'         => (string) $existing['owner_id'],
                 'department_id'    => (string) ($existing['department_id'] ?? ''),
                 'start_date'       => $existing['start_date'],
                 'end_date'         => (string) $existing['end_date'],
                 'renewal_date'     => (string) ($existing['renewal_date'] ?? ''),
                 'amount'           => (string) ($existing['amount'] ?? ''),
+                'currency'         => (string) ($existing['currency'] ?? 'PHP'),
+                'payment_terms'    => (string) ($existing['payment_terms'] ?? ''),
+                'payment_frequency'=> (string) ($existing['payment_frequency'] ?? ''),
+                'payment_schedule' => (string) ($existing['payment_schedule'] ?? ''),
+                'deposit_amount'   => (string) ($existing['deposit_amount'] ?? ''),
+                'financial_notes'  => (string) ($existing['financial_notes'] ?? ''),
+                'notice_period_days' => (string) ($existing['notice_period_days'] ?? ''),
+                'termination_date' => (string) ($existing['termination_date'] ?? ''),
+                'termination_reason' => (string) ($existing['termination_reason'] ?? ''),
                 'status'           => $existing['status'],
                 'renewed_from_id'  => (string) ($existing['renewed_from_id'] ?? ''),
             ]
             : [
-                'title' => '', 'owner_id' => (string) $currentUserId, 'start_date' => date('Y-m-d'),
+                'contract_number' => t8_contract_next_number($pdo), 'title' => '', 'contract_type' => '', 'description' => '', 'owner_id' => (string) $currentUserId, 'start_date' => date('Y-m-d'),
                 'end_date' => '', 'renewal_date' => '', 'amount' => '', 'department_id' => '', 'status' => 'draft', 'renewed_from_id' => '',
+                'currency' => 'PHP', 'payment_terms' => '', 'payment_frequency' => '', 'payment_schedule' => '', 'deposit_amount' => '', 'financial_notes' => '', 'notice_period_days' => '', 'termination_date' => '', 'termination_reason' => '',
             ];
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $formValues = [
+                'contract_number' => trim((string) ($_POST['contract_number'] ?? '')),
                 'title'           => trim((string) ($_POST['title'] ?? '')),
+                'contract_type'   => trim((string) ($_POST['contract_type'] ?? '')),
+                'description'    => trim((string) ($_POST['description'] ?? '')),
                 'owner_id'        => (string) ($_POST['owner_id'] ?? ''),
                 'department_id'   => (string) ($_POST['department_id'] ?? ''),
                 'start_date'      => trim((string) ($_POST['start_date'] ?? '')),
                 'end_date'        => trim((string) ($_POST['end_date'] ?? '')),
                 'renewal_date'    => trim((string) ($_POST['renewal_date'] ?? '')),
                 'amount'          => trim((string) ($_POST['amount'] ?? '')),
+                'currency'        => strtoupper(trim((string) ($_POST['currency'] ?? 'PHP'))),
+                'payment_terms'   => trim((string) ($_POST['payment_terms'] ?? '')),
+                'payment_frequency' => trim((string) ($_POST['payment_frequency'] ?? '')),
+                'payment_schedule' => trim((string) ($_POST['payment_schedule'] ?? '')),
+                'deposit_amount'  => trim((string) ($_POST['deposit_amount'] ?? '')),
+                'financial_notes' => trim((string) ($_POST['financial_notes'] ?? '')),
+                'notice_period_days' => trim((string) ($_POST['notice_period_days'] ?? '')),
+                'termination_date' => trim((string) ($_POST['termination_date'] ?? '')),
+                'termination_reason' => trim((string) ($_POST['termination_reason'] ?? '')),
                 'status'          => (string) ($_POST['status'] ?? 'draft'),
                 'renewed_from_id' => trim((string) ($_POST['renewed_from_id'] ?? '')),
             ];
@@ -239,6 +367,7 @@ switch ($action) {
                 if ($formValues['title'] === '') {
                     $errors[] = 'Contract title is required.';
                 }
+                if ($formValues['contract_number'] === '') { $errors[] = 'Contract number is required.'; }
                 if (!$formValues['owner_id']) {
                     $errors[] = 'Please select a contract owner.';
                 }
@@ -253,28 +382,39 @@ switch ($action) {
                 }
                 if ($formValues['renewal_date'] !== '' && strtotime($formValues['renewal_date']) === false) { $errors[] = 'Renewal date must be a valid date.'; }
                 if ($formValues['amount'] !== '' && (!is_numeric($formValues['amount']) || (float) $formValues['amount'] < 0)) { $errors[] = 'Amount must be a non-negative number.'; }
+                if ($formValues['deposit_amount'] !== '' && (!is_numeric($formValues['deposit_amount']) || (float) $formValues['deposit_amount'] < 0)) { $errors[] = 'Deposit must be a non-negative number.'; }
+                if ($formValues['notice_period_days'] !== '' && filter_var($formValues['notice_period_days'], FILTER_VALIDATE_INT) === false) { $errors[] = 'Notice period must be a whole number of days.'; }
                 if (!in_array($formValues['status'], T8_CONTRACT_STATUSES, true)) {
                     $errors[] = 'Invalid status selected.';
                 }
 
                 if (!$errors) {
                     $params = [
+                        'contract_number' => $formValues['contract_number'],
                         'owner_id'        => (int) $formValues['owner_id'],
                         'title'           => $formValues['title'],
                         'start_date'      => $formValues['start_date'],
                         'end_date'        => $formValues['end_date'] !== '' ? $formValues['end_date'] : null,
                         'status'          => $formValues['status'],
                         'renewed_from_id' => $formValues['renewed_from_id'] !== '' ? (int) $formValues['renewed_from_id'] : null,
+                        'contract_type'   => $formValues['contract_type'] !== '' ? $formValues['contract_type'] : null,
+                        'description'     => $formValues['description'] !== '' ? $formValues['description'] : null,
+                        'currency'        => $formValues['currency'] !== '' ? $formValues['currency'] : 'PHP',
+                        'payment_terms'   => $formValues['payment_terms'] !== '' ? $formValues['payment_terms'] : null,
+                        'payment_frequency' => $formValues['payment_frequency'] !== '' ? $formValues['payment_frequency'] : null,
+                        'payment_schedule' => $formValues['payment_schedule'] !== '' ? $formValues['payment_schedule'] : null,
+                        'deposit_amount'  => $formValues['deposit_amount'] !== '' ? $formValues['deposit_amount'] : null,
+                        'financial_notes' => $formValues['financial_notes'] !== '' ? $formValues['financial_notes'] : null,
+                        'notice_period_days' => $formValues['notice_period_days'] !== '' ? (int) $formValues['notice_period_days'] : null,
+                        'termination_date' => $formValues['termination_date'] !== '' ? $formValues['termination_date'] : null,
+                        'termination_reason' => $formValues['termination_reason'] !== '' ? $formValues['termination_reason'] : null,
                     ];
 
                     if ($action === 'create') {
                         if ($contractHasMetadata) {
                             $params += ['department_id' => $formValues['department_id'] !== '' ? (int) $formValues['department_id'] : null, 'renewal_date' => $formValues['renewal_date'] !== '' ? $formValues['renewal_date'] : null, 'amount' => $formValues['amount'] !== '' ? $formValues['amount'] : null];
                         }
-                        $pdo->prepare($contractHasMetadata
-                            ? 'INSERT INTO team8_contracts (owner_id, department_id, renewed_from_id, title, start_date, end_date, renewal_date, amount, status) VALUES (:owner_id, :department_id, :renewed_from_id, :title, :start_date, :end_date, :renewal_date, :amount, :status)'
-                            : 'INSERT INTO team8_contracts (owner_id, renewed_from_id, title, start_date, end_date, status) VALUES (:owner_id, :renewed_from_id, :title, :start_date, :end_date, :status)'
-                        )->execute($params);
+                        $pdo->prepare('INSERT INTO team8_contracts (contract_number, owner_id, department_id, renewed_from_id, title, contract_type, description, start_date, end_date, renewal_date, amount, currency, payment_terms, payment_frequency, payment_schedule, deposit_amount, financial_notes, notice_period_days, termination_date, termination_reason, status) VALUES (:contract_number, :owner_id, :department_id, :renewed_from_id, :title, :contract_type, :description, :start_date, :end_date, :renewal_date, :amount, :currency, :payment_terms, :payment_frequency, :payment_schedule, :deposit_amount, :financial_notes, :notice_period_days, :termination_date, :termination_reason, :status)')->execute($params);
                         $newId = (int) $pdo->lastInsertId();
                         t8_contract_save_history($pdo, $newId, $params, $currentUserId);
                         t8_audit_log($pdo, $currentUserId, 'contract', $newId, 'create');
@@ -284,10 +424,7 @@ switch ($action) {
                         if ($contractHasMetadata) {
                             $params += ['department_id' => $formValues['department_id'] !== '' ? (int) $formValues['department_id'] : null, 'renewal_date' => $formValues['renewal_date'] !== '' ? $formValues['renewal_date'] : null, 'amount' => $formValues['amount'] !== '' ? $formValues['amount'] : null];
                         }
-                        $pdo->prepare($contractHasMetadata
-                            ? 'UPDATE team8_contracts SET owner_id = :owner_id, department_id = :department_id, renewed_from_id = :renewed_from_id, title = :title, start_date = :start_date, end_date = :end_date, renewal_date = :renewal_date, amount = :amount, status = :status WHERE id = :id'
-                            : 'UPDATE team8_contracts SET owner_id = :owner_id, renewed_from_id = :renewed_from_id, title = :title, start_date = :start_date, end_date = :end_date, status = :status WHERE id = :id'
-                        )->execute($params);
+                        $pdo->prepare('UPDATE team8_contracts SET contract_number = :contract_number, owner_id = :owner_id, department_id = :department_id, renewed_from_id = :renewed_from_id, title = :title, contract_type = :contract_type, description = :description, start_date = :start_date, end_date = :end_date, renewal_date = :renewal_date, amount = :amount, currency = :currency, payment_terms = :payment_terms, payment_frequency = :payment_frequency, payment_schedule = :payment_schedule, deposit_amount = :deposit_amount, financial_notes = :financial_notes, notice_period_days = :notice_period_days, termination_date = :termination_date, termination_reason = :termination_reason, status = :status WHERE id = :id')->execute($params);
                         t8_contract_save_history($pdo, $contractId, $params, $currentUserId);
                         t8_audit_log($pdo, $currentUserId, 'contract', $contractId, 'update');
                         t8_flash_set('success', 'Contract updated.');
@@ -505,6 +642,37 @@ switch ($action) {
             $documentId = (int) ($_POST['document_id'] ?? 0);
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
+            } elseif (isset($_FILES['contract_file']) && ($_FILES['contract_file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                try {
+                    $version = 1;
+                    if ($documentId) {
+                        $versionStmt = $pdo->prepare('SELECT current_version, title FROM team8_documents WHERE id = :id AND deleted_at IS NULL');
+                        $versionStmt->execute(['id' => $documentId]);
+                        $document = $versionStmt->fetch(PDO::FETCH_ASSOC);
+                        if (!$document) { throw new RuntimeException('The selected document is not available.'); }
+                        $version = (int) $document['current_version'] + 1;
+                        $documentTitle = (string) $document['title'];
+                    } else {
+                        $documentTitle = trim((string) ($_POST['document_title'] ?? '')) ?: $contract['title'];
+                    }
+                    $stored = t8_contract_upload($_FILES['contract_file'], $documentTitle, $version);
+                    if (!$documentId) {
+                        $pdo->prepare('INSERT INTO team8_documents (uploaded_by, owner_id, title, file_path, current_version, status) VALUES (:uploaded_by, :owner_id, :title, :file_path, 1, "pending")')->execute([
+                            'uploaded_by' => $currentUserId, 'owner_id' => $contract['owner_id'], 'title' => $documentTitle, 'file_path' => $stored['file_path'],
+                        ]);
+                        $documentId = (int) $pdo->lastInsertId();
+                        $pdo->prepare('INSERT INTO team8_document_versions (document_id, version_no, file_path, file_size, checksum) VALUES (:document_id, 1, :file_path, :file_size, :checksum)')->execute(['document_id' => $documentId] + $stored);
+                    } else {
+                        $pdo->prepare('INSERT INTO team8_document_versions (document_id, version_no, file_path, file_size, checksum) VALUES (:document_id, :version_no, :file_path, :file_size, :checksum)')->execute(['document_id' => $documentId, 'version_no' => $version] + $stored);
+                        $pdo->prepare('UPDATE team8_documents SET file_path = :file_path, current_version = :version WHERE id = :id')->execute(['file_path' => $stored['file_path'], 'version' => $version, 'id' => $documentId]);
+                    }
+                    $pdo->prepare('INSERT IGNORE INTO team8_contract_documents (contract_id, document_id) VALUES (:contract_id, :document_id)')->execute(['contract_id' => $contractId, 'document_id' => $documentId]);
+                    t8_audit_log($pdo, $currentUserId, 'contract', $contractId, 'upload_document', null, 'v' . $version);
+                    t8_flash_set('success', 'Contract document uploaded.');
+                    redirect(page_url('contracts', ['action' => 'documents', 'id' => $contractId]));
+                } catch (RuntimeException $exception) {
+                    $errors[] = $exception->getMessage();
+                }
             } elseif (!$documentId) {
                 $errors[] = 'Please select a document to attach.';
             } else {
@@ -567,7 +735,14 @@ $showList = !$showForm && !$showParties && !$showObligations && !$showDocuments;
 
 if ($showList) {
     $archivedFilter = ($_GET['archived'] ?? '0') === '1';
+    $search = trim((string) ($_GET['search'] ?? ''));
+    $statusFilter = trim((string) ($_GET['status'] ?? ''));
+    $typeFilter = trim((string) ($_GET['contract_type'] ?? ''));
     $where = $archivedFilter ? 'c.deleted_at IS NOT NULL' : 'c.deleted_at IS NULL';
+    $listParams = [];
+    if ($search !== '') { $where .= ' AND (c.contract_number LIKE :search OR c.title LIKE :search OR c.description LIKE :search OR EXISTS (SELECT 1 FROM team8_contract_parties cp JOIN team8_parties p ON p.id = cp.party_id WHERE cp.contract_id = c.id AND p.name LIKE :party_search))'; $listParams['search'] = '%' . $search . '%'; $listParams['party_search'] = '%' . $search . '%'; }
+    if ($statusFilter !== '' && in_array($statusFilter, T8_CONTRACT_STATUSES, true)) { $where .= ' AND c.status = :status'; $listParams['status'] = $statusFilter; }
+    if ($typeFilter !== '') { $where .= ' AND c.contract_type = :contract_type'; $listParams['contract_type'] = $typeFilter; }
     $scope = $isAdmin ? '' : ($contractHasMetadata ? ' AND (c.owner_id = :user_id OR c.department_id = :department_id)' : ' AND c.owner_id = :user_id');
     $contractsStmt = $pdo->prepare(
         "SELECT c.*, u.full_name AS owner_name" . ($contractHasMetadata ? ', d.name AS department_name' : '') . "
@@ -577,7 +752,8 @@ if ($showList) {
          WHERE $where$scope
          ORDER BY c.start_date DESC"
     );
-    $contractsStmt->execute($isAdmin ? [] : ($contractHasMetadata ? ['user_id' => $currentUserId, 'department_id' => $_SESSION['department_id'] ?? 0] : ['user_id' => $currentUserId]));
+    $listParams += $isAdmin ? [] : ($contractHasMetadata ? ['user_id' => $currentUserId, 'department_id' => $_SESSION['department_id'] ?? 0] : ['user_id' => $currentUserId]);
+    $contractsStmt->execute($listParams);
     $contracts = $contractsStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 ?>
@@ -600,9 +776,29 @@ if ($showList) {
               novalidate>
             <?= t8_csrf_field() ?>
 
+            <div class="t8-field">
+                <label class="t8-label" for="contract_number">Contract Number</label>
+                <input class="t8-input" type="text" id="contract_number" name="contract_number" value="<?= e($formValues['contract_number']) ?>" required>
+            </div>
+
+            <div class="t8-field">
+                <label class="t8-label" for="contract_type">Contract Type</label>
+                <select class="t8-select" id="contract_type" name="contract_type">
+                    <option value="">Select type</option>
+                    <?php foreach (['Service Agreement', 'Supplier/Vendor Agreement', 'Employment Contract', 'Lease Agreement', 'Partnership Agreement', 'Non-Disclosure Agreement', 'Maintenance Agreement', 'Purchase Agreement', 'Other'] as $type): ?>
+                        <option value="<?= e($type) ?>" <?= $formValues['contract_type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
             <div class="t8-field t8-form-span-2">
                 <label class="t8-label" for="title">Contract Title</label>
                 <input class="t8-input" type="text" id="title" name="title" value="<?= e($formValues['title']) ?>" required>
+            </div>
+
+            <div class="t8-field t8-form-span-2">
+                <label class="t8-label" for="description">Description</label>
+                <textarea class="t8-input" id="description" name="description" rows="3"><?= e($formValues['description']) ?></textarea>
             </div>
 
             <div class="t8-field">
@@ -630,8 +826,15 @@ if ($showList) {
                 <span class="t8-help-text">Optional — leave blank for open-ended contracts.</span>
             </div>
 
-            <?php if ($contractHasMetadata): ?><div class="t8-field"><label class="t8-label" for="renewal_date">Renewal Date</label><input class="t8-input" type="date" id="renewal_date" name="renewal_date" value="<?= e($formValues['renewal_date']) ?>"></div>
-            <div class="t8-field"><label class="t8-label" for="amount">Amount</label><input class="t8-input" type="number" min="0" step="0.01" id="amount" name="amount" value="<?= e($formValues['amount']) ?>"></div><?php endif; ?>
+            <div class="t8-field"><label class="t8-label" for="renewal_date">Renewal Date</label><input class="t8-input" type="date" id="renewal_date" name="renewal_date" value="<?= e($formValues['renewal_date']) ?>"></div>
+            <div class="t8-field"><label class="t8-label" for="amount">Contract Value</label><input class="t8-input" type="number" min="0" step="0.01" id="amount" name="amount" value="<?= e($formValues['amount']) ?>"></div>
+            <div class="t8-field"><label class="t8-label" for="currency">Currency</label><input class="t8-input" type="text" maxlength="3" id="currency" name="currency" value="<?= e($formValues['currency']) ?>"></div>
+            <div class="t8-field"><label class="t8-label" for="payment_frequency">Payment Frequency</label><input class="t8-input" type="text" id="payment_frequency" name="payment_frequency" value="<?= e($formValues['payment_frequency']) ?>" placeholder="Monthly, milestone, one-time"></div>
+            <div class="t8-field t8-form-span-2"><label class="t8-label" for="payment_terms">Payment Terms</label><input class="t8-input" type="text" id="payment_terms" name="payment_terms" value="<?= e($formValues['payment_terms']) ?>"></div>
+            <div class="t8-field t8-form-span-2"><label class="t8-label" for="payment_schedule">Payment Schedule</label><textarea class="t8-input" id="payment_schedule" name="payment_schedule" rows="3"><?= e($formValues['payment_schedule']) ?></textarea></div>
+            <div class="t8-field"><label class="t8-label" for="deposit_amount">Deposit / Advance</label><input class="t8-input" type="number" min="0" step="0.01" id="deposit_amount" name="deposit_amount" value="<?= e($formValues['deposit_amount']) ?>"></div>
+            <div class="t8-field"><label class="t8-label" for="notice_period_days">Notice Period (days)</label><input class="t8-input" type="number" min="0" id="notice_period_days" name="notice_period_days" value="<?= e($formValues['notice_period_days']) ?>"></div>
+            <div class="t8-field t8-form-span-2"><label class="t8-label" for="financial_notes">Financial Notes</label><textarea class="t8-input" id="financial_notes" name="financial_notes" rows="2"><?= e($formValues['financial_notes']) ?></textarea></div>
 
             <div class="t8-field">
                 <label class="t8-label" for="status">Status</label>
@@ -641,6 +844,9 @@ if ($showList) {
                     <?php endforeach; ?>
                 </select>
             </div>
+
+            <div class="t8-field"><label class="t8-label" for="termination_date">Termination Date</label><input class="t8-input" type="date" id="termination_date" name="termination_date" value="<?= e($formValues['termination_date']) ?>"></div>
+            <div class="t8-field t8-form-span-2"><label class="t8-label" for="termination_reason">Termination Reason</label><textarea class="t8-input" id="termination_reason" name="termination_reason" rows="2"><?= e($formValues['termination_reason']) ?></textarea></div>
 
             <div class="t8-field">
                 <label class="t8-label" for="renewed_from_id">Renewed From (optional)</label>
@@ -834,24 +1040,29 @@ if ($showList) {
             <h2 class="t8-card-title"><?= e($contract['title']) ?> — Documents</h2>
         </div>
 
-        <?php if ($availableDocs === []): ?>
-            <div class="t8-empty">No documents exist yet. Upload one in Document Management first.</div>
-        <?php else: ?>
-            <form method="post" action="<?= e(page_url('contracts', ['action' => 'documents', 'id' => $contractId])) ?>"
+        <?php if ($availableDocs === []): ?><div class="t8-empty">No existing documents are available. Upload a contract document below.</div><?php endif; ?>
+            <form method="post" enctype="multipart/form-data" action="<?= e(page_url('contracts', ['action' => 'documents', 'id' => $contractId])) ?>"
                   style="padding: 0 var(--t8-space-4) var(--t8-space-4);" novalidate>
                 <?= t8_csrf_field() ?>
                 <div class="t8-field">
                     <label class="t8-label" for="document_id">Attach Document</label>
-                    <select class="t8-select" id="document_id" name="document_id" required>
+                    <select class="t8-select" id="document_id" name="document_id">
                         <option value="">Select a document…</option>
                         <?php foreach ($availableDocs as $d): ?>
                             <option value="<?= e((string) $d['id']) ?>"><?= e($d['title']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <div class="t8-field">
+                    <label class="t8-label" for="document_title">New Document Title</label>
+                    <input class="t8-input" type="text" id="document_title" name="document_title" placeholder="Optional for a new upload">
+                </div>
+                <div class="t8-field">
+                    <label class="t8-label" for="contract_file">Upload New Version</label>
+                    <input class="t8-input" type="file" id="contract_file" name="contract_file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.png,.jpg,.jpeg">
+                </div>
                 <button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-paperclip"></i> Attach</button>
             </form>
-        <?php endif; ?>
 
         <?php if ($attachedDocs === []): ?>
             <div class="t8-empty">No documents attached to this contract yet.</div>
@@ -897,25 +1108,32 @@ if ($showList) {
         <div class="t8-card-header">
             <h2 class="t8-card-title"><?= $archivedFilter ? 'Archived Contracts' : 'Contracts' ?></h2>
         </div>
+        <form method="get" action="<?= e(base_url('index.php')) ?>" class="t8-card-header" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+            <input type="hidden" name="page" value="contracts">
+            <div class="t8-field"><label class="t8-label" for="search">Search</label><input class="t8-input" id="search" name="search" value="<?= e($search) ?>" placeholder="Number, title, party"></div>
+            <div class="t8-field"><label class="t8-label" for="status_filter">Status</label><select class="t8-select" id="status_filter" name="status"><option value="">All statuses</option><?php foreach (T8_CONTRACT_STATUSES as $status): ?><option value="<?= e($status) ?>" <?= $statusFilter === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?></select></div>
+            <div class="t8-field"><label class="t8-label" for="contract_type_filter">Type</label><input class="t8-input" id="contract_type_filter" name="contract_type" value="<?= e($typeFilter) ?>"></div>
+            <?php if ($archivedFilter): ?><input type="hidden" name="archived" value="1"><?php endif; ?><button class="t8-btn t8-btn-outline" type="submit"><i class="fa-solid fa-filter"></i> Filter</button>
+        </form>
         <?php if ($contracts === []): ?>
             <div class="t8-empty"><?= $archivedFilter ? 'No archived contracts.' : 'No contracts yet.' ?></div>
         <?php else: ?>
             <div class="t8-table-wrap">
                 <table class="t8-table">
                     <thead>
-                        <tr><th>Contract ID</th><th>Title</th><?php if ($contractHasMetadata): ?><th>Department</th><?php endif; ?><th>Responsible Person</th><th>Start</th><th>End</th><?php if ($contractHasMetadata): ?><th>Renewal</th><th>Amount</th><?php endif; ?><th>Status</th><th>Actions</th></tr>
+                        <tr><th>Contract No.</th><th>Title</th><th>Type</th><?php if ($contractHasMetadata): ?><th>Department</th><?php endif; ?><th>Responsible Person</th><th>Start</th><th>End</th><th>Value</th><th>Status</th><th>Actions</th></tr>
                     </thead>
                     <tbody>
                         <?php foreach ($contracts as $c): ?>
                             <tr>
-                                <td>#<?= e((string) $c['id']) ?></td>
+                                <td><?= e((string) $c['contract_number']) ?></td>
                                 <td><?= e($c['title']) ?></td>
+                                <td><?= e((string) ($c['contract_type'] ?? '—')) ?></td>
                                 <?php if ($contractHasMetadata): ?><td><?= e((string) ($c['department_name'] ?? '—')) ?></td><?php endif; ?>
                                 <td><?= e($c['owner_name']) ?></td>
                                 <td><?= e(format_date($c['start_date'], 'M d, Y')) ?></td>
                                 <td><?= $c['end_date'] ? e(format_date($c['end_date'], 'M d, Y')) : '—' ?></td>
-                                <?php if ($contractHasMetadata): ?><td><?= $c['renewal_date'] ? e(format_date($c['renewal_date'], 'M d, Y')) : '—' ?></td>
-                                <td><?= $c['amount'] !== null ? e(number_format((float) $c['amount'], 2)) : '—' ?></td><?php endif; ?>
+                                <td><?= $c['amount'] !== null ? e((string) ($c['currency'] ?? 'PHP') . ' ' . number_format((float) $c['amount'], 2)) : '—' ?></td>
                                 <td><span class="t8-badge <?= t8_contract_status_badge($c['status']) ?>"><?= e(ucwords(str_replace('_', ' ', $c['status']))) ?></span></td>
                                 <td style="text-align:right;">
                                     <?php t8_contract_render_menu($c, $isAdmin, $archivedFilter); ?>

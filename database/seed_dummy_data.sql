@@ -88,11 +88,11 @@ INSERT INTO team8_compliance_checks (id, record_id, checked_by, check_date, resu
     (103, 103, 4, DATE_SUB(CURDATE(), INTERVAL 3 DAY), 'non_compliant', 'Disposal approval is still pending.')
 ON DUPLICATE KEY UPDATE record_id = VALUES(record_id), checked_by = VALUES(checked_by), check_date = VALUES(check_date), result = VALUES(result), notes = VALUES(notes);
 
-INSERT INTO team8_contracts (id, owner_id, department_id, renewed_from_id, title, start_date, end_date, renewal_date, amount, status, deleted_at) VALUES
-    (101, 4, 2, NULL, 'OfficePro Annual Supply Agreement', DATE_SUB(CURDATE(), INTERVAL 10 MONTH), DATE_ADD(CURDATE(), INTERVAL 20 DAY), DATE_ADD(CURDATE(), INTERVAL 10 DAY), 250000.00, 'expiring_soon', NULL),
-    (102, 2, 1, NULL, 'Elevator Maintenance Contract', DATE_SUB(CURDATE(), INTERVAL 2 MONTH), DATE_ADD(CURDATE(), INTERVAL 10 MONTH), DATE_ADD(CURDATE(), INTERVAL 9 MONTH), 180000.00, 'active', NULL),
-    (103, 4, 2, 101, 'OfficePro Annual Supply Agreement Renewal', DATE_ADD(CURDATE(), INTERVAL 21 DAY), DATE_ADD(CURDATE(), INTERVAL 385 DAY), DATE_ADD(CURDATE(), INTERVAL 355 DAY), 275000.00, 'draft', NULL)
-ON DUPLICATE KEY UPDATE owner_id = VALUES(owner_id), department_id = VALUES(department_id), renewed_from_id = VALUES(renewed_from_id), title = VALUES(title), start_date = VALUES(start_date), end_date = VALUES(end_date), renewal_date = VALUES(renewal_date), amount = VALUES(amount), status = VALUES(status), deleted_at = VALUES(deleted_at);
+INSERT INTO team8_contracts (id, contract_number, owner_id, department_id, renewed_from_id, title, contract_type, description, start_date, end_date, renewal_date, amount, currency, status, deleted_at) VALUES
+    (101, 'CON-2026-000101', 4, 2, NULL, 'OfficePro Annual Supply Agreement', 'Supplier/Vendor Agreement', 'Annual office supply agreement.', DATE_SUB(CURDATE(), INTERVAL 10 MONTH), DATE_ADD(CURDATE(), INTERVAL 20 DAY), DATE_ADD(CURDATE(), INTERVAL 10 DAY), 250000.00, 'PHP', 'expiring_soon', NULL),
+    (102, 'CON-2026-000102', 2, 1, NULL, 'Elevator Maintenance Contract', 'Maintenance Agreement', 'Scheduled elevator maintenance services.', DATE_SUB(CURDATE(), INTERVAL 2 MONTH), DATE_ADD(CURDATE(), INTERVAL 10 MONTH), DATE_ADD(CURDATE(), INTERVAL 9 MONTH), 180000.00, 'PHP', 'active', NULL),
+    (103, 'CON-2026-000103', 4, 2, 101, 'OfficePro Annual Supply Agreement Renewal', 'Supplier/Vendor Agreement', 'Renewal of the annual supply agreement.', DATE_ADD(CURDATE(), INTERVAL 21 DAY), DATE_ADD(CURDATE(), INTERVAL 385 DAY), DATE_ADD(CURDATE(), INTERVAL 355 DAY), 275000.00, 'PHP', 'draft', NULL)
+ON DUPLICATE KEY UPDATE contract_number = VALUES(contract_number), owner_id = VALUES(owner_id), department_id = VALUES(department_id), renewed_from_id = VALUES(renewed_from_id), title = VALUES(title), contract_type = VALUES(contract_type), description = VALUES(description), start_date = VALUES(start_date), end_date = VALUES(end_date), renewal_date = VALUES(renewal_date), amount = VALUES(amount), currency = VALUES(currency), status = VALUES(status), deleted_at = VALUES(deleted_at);
 
 INSERT INTO team8_parties (id, name, type, contact_email, contact_phone) VALUES
     (101, 'OfficePro Supplies Inc.', 'organization', 'contracts@officepro.example', '02-8123-4567'),

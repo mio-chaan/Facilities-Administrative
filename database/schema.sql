@@ -361,14 +361,26 @@ CREATE TABLE team8_legal_documents (
 
 CREATE TABLE team8_contracts (
     id              INT AUTO_INCREMENT PRIMARY KEY,
+    contract_number VARCHAR(40) NOT NULL UNIQUE,
     owner_id        INT NOT NULL,
     department_id   INT NULL,
     renewed_from_id INT NULL,
     title           VARCHAR(200) NOT NULL,
+    contract_type   VARCHAR(100) NULL,
+    description     TEXT NULL,
     start_date      DATE NOT NULL,
     end_date        DATE NULL,
     renewal_date    DATE NULL,
     amount          DECIMAL(14,2) NULL,
+    currency        CHAR(3) NOT NULL DEFAULT 'PHP',
+    payment_terms   VARCHAR(255) NULL,
+    payment_frequency VARCHAR(50) NULL,
+    payment_schedule TEXT NULL,
+    deposit_amount  DECIMAL(14,2) NULL,
+    financial_notes TEXT NULL,
+    notice_period_days INT NULL,
+    termination_date DATE NULL,
+    termination_reason VARCHAR(500) NULL,
     status          VARCHAR(30) NOT NULL DEFAULT 'draft',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -417,6 +429,19 @@ CREATE TABLE team8_contract_history (
     CONSTRAINT uq_team8_contract_history UNIQUE (contract_id, version_no),
     CONSTRAINT fk_team8_contracthistory_contract FOREIGN KEY (contract_id) REFERENCES team8_contracts(id),
     CONSTRAINT fk_team8_contracthistory_user FOREIGN KEY (changed_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_contract_approvals (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    contract_id  INT NOT NULL,
+    reviewer_id  INT NULL,
+    approver_id  INT NULL,
+    action       VARCHAR(30) NOT NULL,
+    comment      VARCHAR(1000) NULL,
+    acted_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_team8_contractapproval_contract FOREIGN KEY (contract_id) REFERENCES team8_contracts(id),
+    CONSTRAINT fk_team8_contractapproval_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id),
+    CONSTRAINT fk_team8_contractapproval_approver FOREIGN KEY (approver_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_contract_obligations (
@@ -612,6 +637,8 @@ CREATE INDEX idx_team8_legal_cases_assignee ON team8_legal_cases(assigned_to, st
 CREATE INDEX idx_team8_contracts_status ON team8_contracts(status);
 CREATE INDEX idx_team8_contracts_deleted_status ON team8_contracts(deleted_at, status);
 CREATE INDEX idx_team8_contracts_enddate ON team8_contracts(end_date);
+CREATE INDEX idx_team8_contracts_number ON team8_contracts(contract_number);
+CREATE INDEX idx_team8_contractapproval_contract ON team8_contract_approvals(contract_id, acted_at);
 CREATE INDEX idx_team8_contracts_department ON team8_contracts(department_id, status);
 CREATE INDEX idx_team8_contractobl_duedate ON team8_contract_obligations(due_date);
 CREATE UNIQUE INDEX uq_team8_legal_documents_case_document ON team8_legal_documents(case_id, document_id);

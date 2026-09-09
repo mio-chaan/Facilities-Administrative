@@ -641,10 +641,12 @@ if (!$showForm) {
                 </label>
             </div>
 
-            <button class="t8-btn t8-btn-accent" type="submit">
-                <i class="fa-solid fa-check"></i> Submit
-            </button>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('visitor')) ?>">Cancel</a>
+            <div class="t8-form-actions">
+                <button class="t8-btn t8-btn-accent" type="submit">
+                    <i class="fa-solid fa-check"></i> Submit
+                </button>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('visitor')) ?>">Cancel</a>
+            </div>
         </form>
     </div>
 

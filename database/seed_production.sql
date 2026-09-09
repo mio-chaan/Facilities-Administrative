@@ -25,8 +25,7 @@ INSERT INTO team8_document_categories (id, name) VALUES
     (6, 'Facilities'),
     (7, 'Human Resources'),
     (8, 'Others'),
-    (9, 'Legal'),
-    (10, 'HR')
+    (9, 'Legal')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 -- Retention Schedules
