@@ -25,10 +25,11 @@ if (!function_exists('t8_reservation_fetch')) {
     function t8_reservation_fetch(PDO $pdo, int $id): ?array
     {
         $stmt = $pdo->prepare(
-            'SELECT r.*, f.name AS facility_name, f.location AS facility_location, f.facility_type, u.full_name AS requester_name
+            'SELECT r.*, COALESCE(d.name, r.department) AS department_name, f.name AS facility_name, f.location AS facility_location, f.facility_type, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
+             LEFT JOIN departments d ON d.id = r.department_id
              WHERE r.id = :id LIMIT 1'
         );
         $stmt->execute(['id' => $id]);

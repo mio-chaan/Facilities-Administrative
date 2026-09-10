@@ -826,7 +826,7 @@ if ($showList) {
                 <span class="t8-help-text">Optional — leave blank for open-ended contracts.</span>
             </div>
 
-            <div class="t8-field"><label class="t8-label" for="renewal_date">Renewal Date</label><input class="t8-input" type="date" id="renewal_date" name="renewal_date" value="<?= e($formValues['renewal_date']) ?>"></div>
+            <div class="t8-field"><label class="t8-label" for="renewal_date">Renewal Date</label><input class="t8-input" type="date" id="renewal_date" name="renewal_date" value="<?= e($formValues['renewal_date']) ?>" data-t8-date-rule="future"></div>
             <div class="t8-field"><label class="t8-label" for="amount">Contract Value</label><input class="t8-input" type="number" min="0" step="0.01" id="amount" name="amount" value="<?= e($formValues['amount']) ?>"></div>
             <div class="t8-field"><label class="t8-label" for="currency">Currency</label><input class="t8-input" type="text" maxlength="3" id="currency" name="currency" value="<?= e($formValues['currency']) ?>"></div>
             <div class="t8-field"><label class="t8-label" for="payment_frequency">Payment Frequency</label><input class="t8-input" type="text" id="payment_frequency" name="payment_frequency" value="<?= e($formValues['payment_frequency']) ?>" placeholder="Monthly, milestone, one-time"></div>
@@ -969,7 +969,7 @@ if ($showList) {
             </div>
             <div class="t8-field">
                 <label class="t8-label" for="due_date">Due Date</label>
-                <input class="t8-input" type="date" id="due_date" name="due_date" placeholder="Optional">
+                <input class="t8-input" type="date" id="due_date" name="due_date" placeholder="Optional" data-t8-date-rule="future">
             </div>
             <button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-plus"></i> Add Obligation</button>
         </form>

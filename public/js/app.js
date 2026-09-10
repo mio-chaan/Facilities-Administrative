@@ -36,6 +36,27 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 
 document.addEventListener("DOMContentLoaded", function () {
+    var today = new Date();
+    var todayValue = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+
+    document.querySelectorAll('input[type="date"], input[type="datetime-local"]').forEach(function (input) {
+        if (input.matches('[data-t8-date-rule="future"]')) {
+            input.min = input.type === "datetime-local" && !input.min ? todayValue + "T00:00" : todayValue;
+        }
+
+        if (typeof input.showPicker === "function") {
+            input.addEventListener("click", function () {
+                try {
+                    input.showPicker();
+                } catch (error) {
+                    // The browser may open the native picker automatically.
+                }
+            });
+        }
+    });
+});
+
+document.addEventListener("DOMContentLoaded", function () {
     var collapseBtn = document.getElementById("t8SidebarCollapseToggle");
     var shell = document.querySelector(".t8-shell");
     var storageKey = "t8SidebarCollapsed";

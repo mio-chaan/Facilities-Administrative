@@ -884,7 +884,7 @@ function t8_render_camera_capture(): void
             <div class="t8-field">
                 <label class="t8-label" for="expiration_date">Expiration Date</label>
                 <input class="t8-input" type="date" id="expiration_date" name="expiration_date"
-                       value="<?= e((string) ($_POST['expiration_date'] ?? '')) ?>">
+                      value="<?= e((string) ($_POST['expiration_date'] ?? '')) ?>" data-t8-date-rule="future">
             </div>
 
             <div class="t8-field t8-form-span-full">

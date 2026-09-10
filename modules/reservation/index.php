@@ -8,21 +8,6 @@ $isReservationStaff = t8_has_role('facilities_staff');
 $action = $_GET['action'] ?? 'list';
 $errors = [];
 
-// Dropdown options for Department. Edit or extend these values as needed.
-const T8_DEPARTMENTS = [
-    'Administration',
-    'Finance',
-    'Human Resources',
-    'Information Technology',
-    'Legal',
-    'Operations',
-    'Procurement',
-    'Facilities',
-    'Security',
-    'Marketing',
-    'Customer Service',
-];
-
 // Single source of truth for facility-type-driven reservation fields.
 const T8_FACILITY_RESERVATION_CONFIG = [
     'Room' => [
@@ -84,10 +69,11 @@ const T8_FACILITY_RESERVATION_CONFIG = [
 function t8_reservation_fetch(PDO $pdo, int $id): ?array
 {
     $stmt = $pdo->prepare(
-        'SELECT r.*, f.name AS facility_name, f.location AS facility_location, f.facility_type, u.full_name AS requester_name
+        'SELECT r.*, COALESCE(d.name, r.department) AS department_name, f.name AS facility_name, f.location AS facility_location, f.facility_type, u.full_name AS requester_name
          FROM team8_reservations r
          JOIN team8_facilities f ON f.id = r.facility_id
          JOIN users u ON u.id = r.user_id
+         LEFT JOIN departments d ON d.id = r.department_id
          WHERE r.id = :id LIMIT 1'
     );
     $stmt->execute(['id' => $id]);
@@ -330,7 +316,7 @@ function t8_reservation_form_values(array $source): array
         'facility_id' => (string) ($source['facility_id'] ?? ''),
         'start_time' => t8_normalize_datetime((string) ($source['start_time'] ?? '')),
         'end_time' => t8_normalize_datetime((string) ($source['end_time'] ?? '')),
-        'department' => trim((string) ($source['department'] ?? '')),
+        'department_id' => (string) ($source['department_id'] ?? ''),
         'key_person' => trim((string) ($source['key_person'] ?? '')),
         'expected_participants' => trim((string) ($source['expected_participants'] ?? '')),
         'quantity' => trim((string) ($source['quantity'] ?? '')),
@@ -455,8 +441,10 @@ function t8_reservation_validate(PDO $pdo, array $activeFacilities, array $value
     if (in_array('requirements', $requiredFields, true) && $values['requirements'] === '') {
         $errors[] = 'Requirements are required.';
     }
-    if ($values['department'] === '') {
+    if ($values['department_id'] === '' || !ctype_digit($values['department_id']) || (int) $values['department_id'] < 1) {
         $errors[] = 'Department is required.';
+    } elseif ((int) $pdo->query('SELECT COUNT(*) FROM departments WHERE id = ' . (int) $values['department_id'])->fetchColumn() < 1) {
+        $errors[] = 'Please select a valid department.';
     }
     if ($values['key_person'] === '') {
         $errors[] = 'Key person / point of contact is required.';
@@ -475,6 +463,9 @@ $activeFacilities = $pdo->query(
      WHERE status = 'active' AND COALESCE(maintenance_status, 'operational') <> 'maintenance'
      ORDER BY name"
 )->fetchAll(PDO::FETCH_ASSOC);
+$departments = $pdo->query(
+    'SELECT id, name FROM departments ORDER BY name'
+)->fetchAll(PDO::FETCH_ASSOC) ?? [];
 $hasActiveFacilities = $activeFacilities !== [];
 
 // Lifecycle checks happen before create, edit, approval, cancellation, and
@@ -485,7 +476,7 @@ $formValues = [
     'facility_id'           => '',
     'start_time'            => '',
     'end_time'              => '',
-    'department'            => '',
+    'department_id'         => '',
     'key_person'            => '',
     'expected_participants' => '',
     'quantity'              => '',
@@ -634,9 +625,9 @@ switch ($action) {
                     $status = 'pending';
                     $stmt = $pdo->prepare(
                         'INSERT INTO team8_reservations
-                            (facility_id, user_id, start_time, end_time, status, department, key_person, expected_participants, quantity, event_category, description, expected_return_date, remarks, schedule, requirements)
+                            (facility_id, user_id, start_time, end_time, status, department_id, key_person, expected_participants, quantity, event_category, description, expected_return_date, remarks, schedule, requirements)
                          VALUES
-                            (:facility_id, :user_id, :start_time, :end_time, :status, :department, :key_person, :expected_participants, :quantity, :event_category, :description, :return_date, :remarks, :schedule, :requirements)'
+                            (:facility_id, :user_id, :start_time, :end_time, :status, :department_id, :key_person, :expected_participants, :quantity, :event_category, :description, :return_date, :remarks, :schedule, :requirements)'
                     );
                     $stmt->execute([
                         'facility_id'           => $facilityId,
@@ -644,7 +635,7 @@ switch ($action) {
                         'start_time'            => $formValues['start_time'] !== '' ? $formValues['start_time'] : null,
                         'end_time'              => $formValues['end_time'] !== '' ? $formValues['end_time'] : null,
                         'status'                => $status,
-                        'department'            => $formValues['department'],
+                        'department_id'         => (int) $formValues['department_id'],
                         'key_person'            => $formValues['key_person'],
                         'expected_participants' => $participants,
                         'quantity'              => $quantity,
@@ -682,7 +673,7 @@ switch ($action) {
             'facility_id'           => (string) $existing['facility_id'],
             'start_time'            => (string) $existing['start_time'],
             'end_time'              => (string) $existing['end_time'],
-            'department'            => (string) ($existing['department'] ?? ''),
+            'department_id'         => (string) ($existing['department_id'] ?? ''),
             'key_person'            => (string) ($existing['key_person'] ?? ''),
             'expected_participants' => (string) ($existing['expected_participants'] ?? ''),
             'quantity'              => (string) ($existing['quantity'] ?? ''),
@@ -720,7 +711,7 @@ switch ($action) {
                     $pdo->prepare(
                         'UPDATE team8_reservations SET
                             facility_id = :facility_id, start_time = :start_time, end_time = :end_time,
-                            department = :department, key_person = :key_person,
+                            department_id = :department_id, key_person = :key_person,
                             expected_participants = :expected_participants, quantity = :quantity, event_category = :event_category,
                             description = :description, expected_return_date = :return_date, remarks = :remarks,
                             schedule = :schedule, requirements = :requirements
@@ -729,7 +720,7 @@ switch ($action) {
                         'facility_id'           => $facilityId,
                         'start_time'            => $formValues['start_time'] !== '' ? $formValues['start_time'] : null,
                         'end_time'              => $formValues['end_time'] !== '' ? $formValues['end_time'] : null,
-                        'department'            => $formValues['department'],
+                        'department_id'         => (int) $formValues['department_id'],
                         'key_person'            => $formValues['key_person'],
                         'expected_participants' => $participants,
                         'quantity'              => $quantity,
@@ -961,7 +952,7 @@ if (!$showForm) {
     $reservationRangeFilter = trim((string) ($_GET['range'] ?? ''));
     $reservationMonthFilter = (int) ($_GET['month'] ?? 0);
     $reservationYearFilter = (int) ($_GET['year'] ?? 0);
-    $reservationDepartmentFilter = trim((string) ($_GET['department'] ?? ''));
+    $reservationDepartmentFilter = (int) ($_GET['department'] ?? 0);
     $reservationFilters = [
         'facility' => $reservationFacilityFilter > 0 ? $reservationFacilityFilter : '',
         'type' => $reservationTypeFilter,
@@ -970,7 +961,7 @@ if (!$showForm) {
         'range' => $reservationRangeFilter,
         'month' => $reservationMonthFilter > 0 ? $reservationMonthFilter : '',
         'year' => $reservationYearFilter > 0 ? $reservationYearFilter : '',
-        'department' => $reservationDepartmentFilter,
+        'department' => $reservationDepartmentFilter > 0 ? $reservationDepartmentFilter : '',
     ];
 
     /** Reusable SQL fragment for the "Schedule" quick filter (today / this week / this month). */
@@ -1045,9 +1036,10 @@ if (!$showForm) {
         }
         if ($reservationSearchFilter !== '') {
             $searchTerm = '%' . $reservationSearchFilter . '%';
-            $allWhere[] = '(u.full_name LIKE :all_search_user OR r.department LIKE :all_search_department OR r.key_person LIKE :all_search_key_person OR f.name LIKE :all_search_facility)';
+            $allWhere[] = '(u.full_name LIKE :all_search_user OR d.name LIKE :all_search_department OR r.department LIKE :all_search_department_legacy OR r.key_person LIKE :all_search_key_person OR f.name LIKE :all_search_facility)';
             $allParams['all_search_user'] = $searchTerm;
             $allParams['all_search_department'] = $searchTerm;
+            $allParams['all_search_department_legacy'] = $searchTerm;
             $allParams['all_search_key_person'] = $searchTerm;
             $allParams['all_search_facility'] = $searchTerm;
         }
@@ -1063,6 +1055,7 @@ if (!$showForm) {
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
+             LEFT JOIN departments d ON d.id = r.department_id
              WHERE {$allWhereSql}"
         );
         $allCountStmt->execute($allParams);
@@ -1071,10 +1064,11 @@ if (!$showForm) {
         $allPage = min(max(1, (int) ($_GET['page'] ?? 1)), $allTotalPages);
         $allOffset = ($allPage - 1) * $reservationPageSize;
         $allStmt = $pdo->prepare(
-            "SELECT r.*, f.name AS facility_name, f.facility_type, f.capacity AS facility_capacity, f.location AS facility_location, u.full_name AS requester_name
+            "SELECT r.*, COALESCE(d.name, r.department) AS department_name, f.name AS facility_name, f.facility_type, f.capacity AS facility_capacity, f.location AS facility_location, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
+             LEFT JOIN departments d ON d.id = r.department_id
              WHERE {$allWhereSql}
              ORDER BY COALESCE(r.start_time, r.schedule, r.created_at) ASC, r.id ASC
              LIMIT {$reservationPageSize} OFFSET {$allOffset}"
@@ -1092,10 +1086,11 @@ if (!$showForm) {
         }
         if ($reservationSearchFilter !== '') {
             $searchTerm = '%' . $reservationSearchFilter . '%';
-            $archiveWhere[] = '(f.name LIKE :archive_search_facility OR u.full_name LIKE :archive_search_user OR r.department LIKE :archive_search_department OR r.key_person LIKE :archive_search_key_person OR r.event_category LIKE :archive_search_category OR r.description LIKE :archive_search_description)';
+            $archiveWhere[] = '(f.name LIKE :archive_search_facility OR u.full_name LIKE :archive_search_user OR d.name LIKE :archive_search_department OR r.department LIKE :archive_search_department_legacy OR r.key_person LIKE :archive_search_key_person OR r.event_category LIKE :archive_search_category OR r.description LIKE :archive_search_description)';
             $archiveParams['archive_search_facility'] = $searchTerm;
             $archiveParams['archive_search_user'] = $searchTerm;
             $archiveParams['archive_search_department'] = $searchTerm;
+            $archiveParams['archive_search_department_legacy'] = $searchTerm;
             $archiveParams['archive_search_key_person'] = $searchTerm;
             $archiveParams['archive_search_category'] = $searchTerm;
             $archiveParams['archive_search_description'] = $searchTerm;
@@ -1108,19 +1103,20 @@ if (!$showForm) {
             $archiveWhere[] = "YEAR({$archiveDateSql}) = :archive_year";
             $archiveParams['archive_year'] = $reservationYearFilter;
         }
-        if ($reservationDepartmentFilter !== '') {
-            $archiveWhere[] = 'r.department = :archive_department';
+        if ($reservationDepartmentFilter > 0) {
+            $archiveWhere[] = 'r.department_id = :archive_department';
             $archiveParams['archive_department'] = $reservationDepartmentFilter;
         }
         $archiveWhereSql = implode(' AND ', $archiveWhere);
-        $archivedCountStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_reservations r JOIN team8_facilities f ON f.id = r.facility_id JOIN users u ON u.id = r.user_id WHERE {$archiveWhereSql}");
+        $archivedCountStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_reservations r JOIN team8_facilities f ON f.id = r.facility_id JOIN users u ON u.id = r.user_id LEFT JOIN departments d ON d.id = r.department_id WHERE {$archiveWhereSql}");
         $archivedCountStmt->execute($archiveParams);
         $archivedTotal = (int) $archivedCountStmt->fetchColumn();
         $archivedReservationsStmt = $pdo->prepare(
-            "SELECT r.*, f.name AS facility_name, f.facility_type, f.capacity AS facility_capacity, u.full_name AS requester_name
+            "SELECT r.*, COALESCE(d.name, r.department) AS department_name, f.name AS facility_name, f.facility_type, f.capacity AS facility_capacity, u.full_name AS requester_name
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
+             LEFT JOIN departments d ON d.id = r.department_id
              WHERE {$archiveWhereSql}
              ORDER BY COALESCE(r.end_time, r.schedule, r.expected_return_date, r.archived_at) DESC"
         );
@@ -1135,6 +1131,7 @@ if (!$showForm) {
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
+             LEFT JOIN departments d ON d.id = r.department_id
              WHERE r.status = 'pending'
              ORDER BY r.start_time ASC"
         )->fetchAll(PDO::FETCH_ASSOC);
@@ -1145,6 +1142,7 @@ if (!$showForm) {
              FROM team8_reservations r
              JOIN team8_facilities f ON f.id = r.facility_id
              JOIN users u ON u.id = r.user_id
+             LEFT JOIN departments d ON d.id = r.department_id
              WHERE r.status = 'cancellation_pending'
              ORDER BY r.cancellation_requested_at ASC"
         )->fetchAll(PDO::FETCH_ASSOC);
@@ -1200,14 +1198,15 @@ if (!$showForm) {
         }
         if ($reservationSearchFilter !== '') {
             $searchTerm = '%' . $reservationSearchFilter . '%';
-            $myWhere[] = '(u.full_name LIKE :my_search_user OR r.department LIKE :my_search_department OR r.key_person LIKE :my_search_key_person OR f.name LIKE :my_search_facility)';
+            $myWhere[] = '(u.full_name LIKE :my_search_user OR d.name LIKE :my_search_department OR r.department LIKE :my_search_department_legacy OR r.key_person LIKE :my_search_key_person OR f.name LIKE :my_search_facility)';
             $myParams['my_search_user'] = $searchTerm;
             $myParams['my_search_department'] = $searchTerm;
+            $myParams['my_search_department_legacy'] = $searchTerm;
             $myParams['my_search_key_person'] = $searchTerm;
             $myParams['my_search_facility'] = $searchTerm;
         }
         $myWhereSql = implode(' AND ', $myWhere);
-        $myCountStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_reservations r JOIN team8_facilities f ON f.id = r.facility_id WHERE {$myWhereSql}");
+        $myCountStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_reservations r JOIN team8_facilities f ON f.id = r.facility_id JOIN users u ON u.id = r.user_id LEFT JOIN departments d ON d.id = r.department_id WHERE {$myWhereSql}");
         $myCountStmt->execute($myParams);
            $myTotal = (int) $myCountStmt->fetchColumn();
            $myTotalPages = max(1, (int) ceil($myTotal / $reservationPageSize));
@@ -1215,8 +1214,10 @@ if (!$showForm) {
            $myOffset = ($myPage - 1) * $reservationPageSize;
            $myStmt = $pdo->prepare(
              "SELECT r.*, f.name AS facility_name, f.facility_type, f.capacity AS facility_capacity
-               FROM team8_reservations r
-               JOIN team8_facilities f ON f.id = r.facility_id
+                         FROM team8_reservations r
+                             JOIN team8_facilities f ON f.id = r.facility_id
+                             JOIN users u ON u.id = r.user_id
+                             LEFT JOIN departments d ON d.id = r.department_id
              WHERE {$myWhereSql}
                ORDER BY COALESCE(r.start_time, r.schedule, r.created_at) DESC, r.id DESC
                LIMIT {$reservationPageSize} OFFSET {$myOffset}"
@@ -1255,7 +1256,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                 data-facility-type="<?= e((string) ($r['facility_type'] ?? 'Unknown')) ?>"
                 data-facility-location="<?= e((string) ($r['facility_location'] ?? '—')) ?>"
                 data-requester="<?= e((string) ($r['requester_name'] ?? '—')) ?>"
-                data-department="<?= e((string) ($r['department'] ?? '—')) ?>"
+                data-department="<?= e((string) ($r['department_name'] ?? $r['department'] ?? '—')) ?>"
                 data-key-person="<?= e((string) ($r['key_person'] ?? '—')) ?>"
                 data-category="<?= e($summary['category']) ?>"
                 data-status="<?= e((string) $r['status']) ?>"
@@ -1371,11 +1372,11 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                 </div>
 
                 <div class="t8-field">
-                    <label class="t8-label" for="department">Department</label>
-                    <select class="t8-select" id="department" name="department" required>
+                    <label class="t8-label" for="department_id">Department</label>
+                    <select class="t8-select" id="department_id" name="department_id" required>
                         <option value="">Select a department…</option>
-                        <?php foreach (T8_DEPARTMENTS as $dept): ?>
-                            <option value="<?= e($dept) ?>" <?= $dept === $formValues['department'] ? 'selected' : '' ?>><?= e($dept) ?></option>
+                        <?php foreach ($departments as $department): ?>
+                            <option value="<?= e((string) $department['id']) ?>" <?= (string) $department['id'] === $formValues['department_id'] ? 'selected' : '' ?>><?= e($department['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -1422,6 +1423,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                     <input class="t8-input t8-datetime-input" type="datetime-local" id="start_time" name="start_time"
                            value="<?= e(str_replace(' ', 'T', substr($formValues['start_time'], 0, 16))) ?>"
                            min="<?= e(date('Y-m-d\\TH:i')) ?>"
+                              data-t8-date-rule="future"
                            onclick="this.showPicker && this.showPicker();">
                 </div>
 
@@ -1430,6 +1432,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                     <input class="t8-input t8-datetime-input" type="datetime-local" id="end_time" name="end_time"
                            value="<?= e(str_replace(' ', 'T', substr($formValues['end_time'], 0, 16))) ?>"
                            min="<?= e(date('Y-m-d\\TH:i')) ?>"
+                              data-t8-date-rule="future"
                            onclick="this.showPicker && this.showPicker();">
                 </div>
 
@@ -1442,7 +1445,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                 <div class="t8-field" data-reservation-field="return_date">
                     <label class="t8-label" for="return_date">Expected Return Date</label>
                     <input class="t8-input" type="date" id="return_date" name="return_date" value="<?= e($formValues['return_date']) ?>"
-                           min="<?= e(date('Y-m-d')) ?>">
+                              min="<?= e(date('Y-m-d')) ?>" data-t8-date-rule="future">
                 </div>
 
                 <div class="t8-field" data-reservation-field="remarks">
@@ -1454,7 +1457,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                     <label class="t8-label" for="schedule">Schedule</label>
                     <input class="t8-input t8-datetime-input" type="datetime-local" id="schedule" name="schedule"
                            value="<?= e(str_replace(' ', 'T', substr($formValues['schedule'], 0, 16))) ?>"
-                           min="<?= e(date('Y-m-d\\TH:i')) ?>">
+                              min="<?= e(date('Y-m-d\\TH:i')) ?>" data-t8-date-rule="future">
                 </div>
 
                 <div class="t8-field" data-reservation-field="requirements">
@@ -1524,7 +1527,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                     <label>Month <select class="t8-select" data-filter-month><option value="">All months</option><?php foreach (range(1, 12) as $month): ?><option value="<?= e((string) $month) ?>" <?= $reservationFilters['month'] === $month ? 'selected' : '' ?>><?= e(date('F', mktime(0, 0, 0, $month, 1))) ?></option><?php endforeach; ?></select></label>
                     <label>Year <select class="t8-select" data-filter-year><option value="">All years</option><?php foreach ($archivedYears as $archiveYear): ?><option value="<?= e((string) $archiveYear) ?>" <?= $reservationFilters['year'] === (int) $archiveYear ? 'selected' : '' ?>><?= e((string) $archiveYear) ?></option><?php endforeach; ?></select></label>
                     <label>Facility <select class="t8-select" data-filter-facility><option value="">All facilities</option><?php foreach ($activeFacilities as $facilityOption): ?><option value="<?= e((string) $facilityOption['id']) ?>" <?= $reservationFilters['facility'] === (int) $facilityOption['id'] ? 'selected' : '' ?>><?= e($facilityOption['name']) ?></option><?php endforeach; ?></select></label>
-                    <label>Department <select class="t8-select" data-filter-department><option value="">All departments</option><?php foreach (T8_DEPARTMENTS as $department): ?><option value="<?= e($department) ?>" <?= $reservationFilters['department'] === $department ? 'selected' : '' ?>><?= e($department) ?></option><?php endforeach; ?></select></label>
+                    <label>Department <select class="t8-select" data-filter-department><option value="">All departments</option><?php foreach ($departments as $department): ?><option value="<?= e((string) $department['id']) ?>" <?= (string) $reservationFilters['department'] === (string) $department['id'] ? 'selected' : '' ?>><?= e($department['name']) ?></option><?php endforeach; ?></select></label>
                 </div>
                 <div class="t8-reservation-filters-meta">
                     <div class="t8-filter-chips" data-filter-chips>
@@ -1536,7 +1539,14 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                         if ($reservationFilters['facility'] !== '') {
                             foreach ($activeFacilities as $facilityOption) { if ((int) $facilityOption['id'] === (int) $reservationFilters['facility']) { $archiveChips['facility'] = 'Facility: ' . $facilityOption['name']; break; } }
                         }
-                        if ($reservationFilters['department'] !== '') { $archiveChips['department'] = 'Department: ' . $reservationFilters['department']; }
+                        if ($reservationFilters['department'] !== '') {
+                            foreach ($departments as $department) {
+                                if ((int) $department['id'] === (int) $reservationFilters['department']) {
+                                    $archiveChips['department'] = 'Department: ' . $department['name'];
+                                    break;
+                                }
+                            }
+                        }
                         ?>
                         <?php if ($archiveChips === []): ?>
                             <span class="t8-filter-empty-chips">No filters applied</span>
@@ -1563,7 +1573,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                             <td><?= e($r['facility_name']) ?></td>
                             <td><span class="t8-type-pill"><?= e((string) ($r['facility_type'] ?? 'Unknown')) ?></span></td>
                             <td><?= e($r['requester_name']) ?></td>
-                            <td><?= e((string) ($r['department'] ?? '-')) ?></td>
+                            <td><?= e((string) ($r['department_name'] ?? $r['department'] ?? '-')) ?></td>
                             <td><?= e((string) ($r['key_person'] ?? '-')) ?></td>
                             <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                             <td><?= e($schedule['primary']) ?></td>

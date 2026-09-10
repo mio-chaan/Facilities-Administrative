@@ -58,7 +58,7 @@ foreach ($facilityRows as &$row) {
 unset($row);
 $addResults($results, 'Facilities', $facilityRows);
 
-$reservationWhere = "(f.name LIKE :q OR f.facility_type LIKE :q OR r.status LIKE :q OR r.event_category LIKE :q OR r.department LIKE :q OR r.description LIKE :q OR r.remarks LIKE :q OR r.start_time LIKE :q OR r.schedule LIKE :q OR CAST(r.id AS CHAR) LIKE :q)";
+$reservationWhere = "(f.name LIKE :q OR f.facility_type LIKE :q OR r.status LIKE :q OR r.event_category LIKE :q OR d.name LIKE :q OR r.department LIKE :q OR r.description LIKE :q OR r.remarks LIKE :q OR r.start_time LIKE :q OR r.schedule LIKE :q OR CAST(r.id AS CHAR) LIKE :q)";
 $reservationParams = ['q' => $like];
 if (!t8_has_role('admin')) {
     $reservationWhere .= ' AND r.user_id = :user_id';
@@ -67,6 +67,7 @@ if (!t8_has_role('admin')) {
 $reservationRows = $search(
     "SELECT r.id, f.name AS facility_name, f.facility_type, r.status, r.event_category, r.start_time, r.schedule
      FROM team8_reservations r JOIN team8_facilities f ON f.id = r.facility_id
+     LEFT JOIN departments d ON d.id = r.department_id
      WHERE {$reservationWhere}
      ORDER BY r.created_at DESC LIMIT 8",
     $reservationParams

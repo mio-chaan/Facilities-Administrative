@@ -401,7 +401,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
 
             <?php if ($legalHasCaseMetadata): ?><div class="t8-field">
                 <label class="t8-label" for="deadline">Deadline</label>
-                <input class="t8-input" type="date" id="deadline" name="deadline" value="<?= e($formValues['deadline']) ?>">
+                <input class="t8-input" type="date" id="deadline" name="deadline" value="<?= e($formValues['deadline']) ?>" data-t8-date-rule="future">
             </div><?php endif; ?>
 
             <div class="t8-field">

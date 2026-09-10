@@ -1,8 +1,17 @@
 -- Departments
+
 INSERT INTO departments (id, name) VALUES
-    (1, 'Facilities & Administration'),
-    (2, 'Legal'),
-    (3, 'General Staff')
+    (1, 'Administration'),
+    (2, 'Finance'),
+    (3, 'Human Resources'),
+    (4, 'Information Technology'),
+    (5, 'Legal'),
+    (6, 'Operations'),
+    (7, 'Procurement'),
+    (8, 'Facilities'),
+    (9, 'Security'),
+    (10, 'Marketing'),
+    (11, 'Customer Service')
 ON DUPLICATE KEY UPDATE name = VALUES(name);
 
 -- Roles

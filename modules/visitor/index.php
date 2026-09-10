@@ -218,7 +218,7 @@ function t8_visitor_render_menu(array $v, string $context): void
                     <div style="padding: 0 8px 8px;">
                         <input id="reschedule-<?= e((string) $id) ?>" class="t8-input" type="datetime-local" name="scheduled_date"
                                min="<?= e(date('Y-m-d\TH:i')) ?>"
-                               value="<?= e(str_replace(' ', 'T', substr((string) $v['scheduled_date'], 0, 16))) ?>" required>
+                               value="<?= e(str_replace(' ', 'T', substr((string) $v['scheduled_date'], 0, 16))) ?>" data-t8-date-rule="future" required>
                     </div>
                     <button class="t8-row-menu-item" type="submit" role="menuitem">
                         <i class="fa-solid fa-calendar-pen"></i> Change Schedule
@@ -629,6 +629,7 @@ if (!$showForm) {
                 <input class="t8-input t8-datetime-input" type="datetime-local" id="scheduled_date" name="scheduled_date"
                        value="<?= e(str_replace(' ', 'T', substr($formValues['scheduled_date'], 0, 16))) ?>"
                        min="<?= e(date('Y-m-d\\TH:i')) ?>"
+                      data-t8-date-rule="future"
                        onclick="this.showPicker && this.showPicker();" required>
                 <span class="t8-help-text">When the visitor is expected to arrive.</span>
             </div>

@@ -139,6 +139,7 @@ CREATE TABLE team8_reservations (
     start_time              DATETIME NULL,
     end_time                DATETIME NULL,
     status                  VARCHAR(30) NOT NULL DEFAULT 'pending', -- pending | approved | rejected | cancellation_pending | cancelled | completed | expired
+    department_id           INT NULL,
     department              VARCHAR(150) NULL,
     key_person              VARCHAR(150) NULL,
     expected_participants   INT NULL,
@@ -163,6 +164,7 @@ CREATE TABLE team8_reservations (
     CONSTRAINT chk_team8_reservations_quantity CHECK (quantity IS NULL OR quantity > 0),
     CONSTRAINT fk_team8_reservations_facility FOREIGN KEY (facility_id) REFERENCES team8_facilities(id),
     CONSTRAINT fk_team8_reservations_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_team8_reservations_department FOREIGN KEY (department_id) REFERENCES departments(id),
     CONSTRAINT fk_team8_reservations_cancel_requester FOREIGN KEY (cancellation_requested_by) REFERENCES users(id),
     CONSTRAINT fk_team8_reservations_cancel_reviewer FOREIGN KEY (cancellation_reviewed_by) REFERENCES users(id)
 ) ENGINE=InnoDB;

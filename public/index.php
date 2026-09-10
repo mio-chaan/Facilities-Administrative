@@ -40,7 +40,7 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
     $rangeFilter = trim((string) ($_GET['range'] ?? ''));
     $monthFilter = (int) ($_GET['month'] ?? 0);
     $yearFilter = (int) ($_GET['year'] ?? 0);
-    $departmentFilter = trim((string) ($_GET['department'] ?? ''));
+    $departmentFilter = (int) ($_GET['department'] ?? 0);
 
     $currentUserId = t8_current_user_id();
     $isAdmin = t8_has_role('admin');
@@ -156,7 +156,7 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
                     data-facility-type="<?= e((string) ($r['facility_type'] ?? 'Unknown')) ?>"
                     data-facility-location="<?= e((string) ($r['facility_location'] ?? '—')) ?>"
                     data-requester="<?= e((string) ($r['requester_name'] ?? '—')) ?>"
-                    data-department="<?= e((string) ($r['department'] ?? '—')) ?>"
+                    data-department="<?= e((string) ($r['department_name'] ?? $r['department'] ?? '—')) ?>"
                     data-key-person="<?= e((string) ($r['key_person'] ?? '—')) ?>"
                     data-category="<?= e($summary['category']) ?>"
                     data-status="<?= e((string) $r['status']) ?>"
@@ -246,10 +246,11 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
     if ($searchFilter !== '') {
         $searchTerm = '%' . $searchFilter . '%';
         $where[] = $table_type === 'archive'
-            ? '(u.full_name LIKE :search_user OR r.department LIKE :search_department OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility OR r.event_category LIKE :search_category OR r.description LIKE :search_description)'
-            : '(u.full_name LIKE :search_user OR r.department LIKE :search_department OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility)';
+            ? '(u.full_name LIKE :search_user OR d.name LIKE :search_department OR r.department LIKE :search_department_legacy OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility OR r.event_category LIKE :search_category OR r.description LIKE :search_description)'
+            : '(u.full_name LIKE :search_user OR d.name LIKE :search_department OR r.department LIKE :search_department_legacy OR r.key_person LIKE :search_key_person OR f.name LIKE :search_facility)';
         $params['search_user'] = $searchTerm;
         $params['search_department'] = $searchTerm;
+        $params['search_department_legacy'] = $searchTerm;
         $params['search_key_person'] = $searchTerm;
         $params['search_facility'] = $searchTerm;
         if ($table_type === 'archive') {
@@ -267,8 +268,8 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
             $where[] = "YEAR({$archiveDateSql}) = :filter_year";
             $params['filter_year'] = $yearFilter;
         }
-        if ($departmentFilter !== '') {
-            $where[] = 'r.department = :filter_department';
+        if ($departmentFilter > 0) {
+            $where[] = 'r.department_id = :filter_department';
             $params['filter_department'] = $departmentFilter;
         }
     }
@@ -291,16 +292,18 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
          FROM team8_reservations r
          JOIN team8_facilities f ON f.id = r.facility_id
          JOIN users u ON u.id = r.user_id
+         LEFT JOIN departments d ON d.id = r.department_id
          WHERE {$whereSql}"
     );
     $countStmt->execute($params);
     $totalCount = (int) $countStmt->fetchColumn();
 
     $stmt = $pdo->prepare(
-        "SELECT r.*, f.name AS facility_name, f.location AS facility_location, f.facility_type, f.capacity AS facility_capacity, u.full_name AS requester_name
+        "SELECT r.*, COALESCE(d.name, r.department) AS department_name, f.name AS facility_name, f.location AS facility_location, f.facility_type, f.capacity AS facility_capacity, u.full_name AS requester_name
          FROM team8_reservations r
          JOIN team8_facilities f ON f.id = r.facility_id
          JOIN users u ON u.id = r.user_id
+         LEFT JOIN departments d ON d.id = r.department_id
          WHERE {$whereSql}
          ORDER BY COALESCE(r.end_time, r.schedule, r.expected_return_date, r.archived_at, r.created_at) DESC
          LIMIT 100"
@@ -324,7 +327,7 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
                     . '<td>' . e($r['facility_name']) . '</td>'
                     . '<td><span class="t8-type-pill">' . e((string) ($r['facility_type'] ?? 'Unknown')) . '</span></td>'
                     . '<td>' . e($r['requester_name']) . '</td>'
-                    . '<td>' . e((string) ($r['department'] ?? '-')) . '</td>'
+                    . '<td>' . e((string) ($r['department_name'] ?? $r['department'] ?? '-')) . '</td>'
                     . '<td>' . e((string) ($r['key_person'] ?? '-')) . '</td>'
                     . '<td><strong>' . e($summary['category']) . '</strong>' . ($summary['detail'] !== '' ? '<span class="t8-table-subtext">• ' . e($summary['detail']) . '</span>' : '') . '</td>'
                     . '<td>' . e($schedule['primary']) . '</td>'
