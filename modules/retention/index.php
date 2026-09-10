@@ -336,7 +336,7 @@ function t8_retention_suggest_date(int $years): string
                 <div class="t8-field">
                     <label class="t8-label" for="disposition_date">Disposition Date</label>
                     <input class="t8-input" type="date" id="disposition_date" name="disposition_date"
-                           value="<?= e(t8_retention_suggest_date(1)) ?>" required>
+                              value="<?= e(t8_retention_suggest_date(1)) ?>" data-t8-date-rule="future" required>
                     <span class="t8-help-text">Auto-filled from the schedule's retention period once selected — adjust if needed.</span>
                 </div>
 

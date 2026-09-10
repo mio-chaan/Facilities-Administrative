@@ -1,12 +1,12 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../app/config/config.php';
-require_once __DIR__ . '/../app/config/constants.php';
-require_once __DIR__ . '/../app/includes/db_connect.php';
-require_once __DIR__ . '/../app/includes/auth_check.php';
-require_once __DIR__ . '/../app/includes/permissions.php';
-require_once __DIR__ . '/../app/includes/ai_helper.php';
+require_once __DIR__ . '/../../app/config/config.php';
+require_once __DIR__ . '/../../app/config/constants.php';
+require_once __DIR__ . '/../../app/includes/db_connect.php';
+require_once __DIR__ . '/../../app/includes/auth_check.php';
+require_once __DIR__ . '/../../app/includes/permissions.php';
+require_once __DIR__ . '/../../app/includes/ai_helper.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');

@@ -67,6 +67,30 @@
 
 /* ---- Forms ---- */
 .t8-field { margin-bottom: var(--t8-space-4); }
+.t8-form-span-2 { grid-column: 1 / -1; }
+.t8-form-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+}
+.t8-legal-form-grid,
+.t8-contract-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 24px;
+}
+.t8-legal-form-grid > .t8-field,
+.t8-contract-form-grid > .t8-field,
+.t8-legal-form-grid > .t8-form-actions,
+.t8-contract-form-grid > .t8-form-actions {
+    margin-bottom: 0;
+}
+.t8-legal-form-actions,
+.t8-contract-form-actions {
+    margin-top: 4px;
+}
 .t8-label {
     display: block;
     font-size: 0.85rem;

@@ -545,7 +545,7 @@ if ($showEquipmentForm) {
 
                 <div class="t8-field">
                     <label class="t8-label" for="next_maintenance_date">Next Maintenance Date</label>
-                    <input class="t8-input" type="date" id="next_maintenance_date" name="next_maintenance_date" value="<?= e((string) ($facility['next_maintenance_date'] ?? '')) ?>">
+                    <input class="t8-input" type="date" id="next_maintenance_date" name="next_maintenance_date" value="<?= e((string) ($facility['next_maintenance_date'] ?? '')) ?>" data-t8-date-rule="future">
                 </div>
                 <?php if ($action === 'edit'): ?>
                 <div class="t8-field t8-form-span-2">

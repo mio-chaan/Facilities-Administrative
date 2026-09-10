@@ -1,14 +1,14 @@
 <?php
 /**
- * public/reservation_status_poll.php
+ * public/api/reservation_status_poll.php
  * DYNAMIC STATUS: small AJAX-only endpoint polled by
- * public/js/reservation.js so reservation status badges (Pending →
- * Approved → Ongoing → Completed, plus Cancelled/Rejected) and time-
+ * public/js/reservation.js so reservation status badges (Pending ->
+ * Approved -> Ongoing -> Completed, plus Cancelled/Rejected) and time-
  * conflict indicators stay in sync across every open reservation view
  * without the user needing to manually refresh the page.
  *
  * POST only, same auth/CSRF/JSON pattern as
- * public/notifications_action.php.
+ * public/api/notifications_action.php.
  *
  * Request:  POST ids[]=1&ids[]=2&...&csrf_token=...
  * Response: {"reservations":[{"id":1,"status":"approved","display_status":"ongoing","has_conflict":false}, ...]}
@@ -25,12 +25,12 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../app/config/config.php';
-require_once __DIR__ . '/../app/config/constants.php';
-require_once __DIR__ . '/../app/includes/db_connect.php';
-require_once __DIR__ . '/../app/includes/auth_check.php';
-require_once __DIR__ . '/../app/includes/helpers.php';
-require_once __DIR__ . '/../app/includes/reservation_helpers.php';
+require_once __DIR__ . '/../../app/config/config.php';
+require_once __DIR__ . '/../../app/config/constants.php';
+require_once __DIR__ . '/../../app/includes/db_connect.php';
+require_once __DIR__ . '/../../app/includes/auth_check.php';
+require_once __DIR__ . '/../../app/includes/helpers.php';
+require_once __DIR__ . '/../../app/includes/reservation_helpers.php';
 
 header('Content-Type: application/json');
 header('Cache-Control: no-store');

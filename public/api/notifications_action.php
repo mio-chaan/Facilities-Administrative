@@ -1,18 +1,18 @@
 <?php
 /**
- * notifications_action.php
+ * public/api/notifications_action.php
  * Follows the same bootstrap order as public/logout.php and returns
  * JSON, same shape as modules/assistant/index.php's endpoint.
  */
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../app/config/config.php';
-require_once __DIR__ . '/../app/config/constants.php';
-require_once __DIR__ . '/../app/includes/db_connect.php';
-require_once __DIR__ . '/../app/includes/auth_check.php';
-require_once __DIR__ . '/../app/includes/helpers.php';
-require_once __DIR__ . '/../app/includes/notifications.php';
+require_once __DIR__ . '/../../app/config/config.php';
+require_once __DIR__ . '/../../app/config/constants.php';
+require_once __DIR__ . '/../../app/includes/db_connect.php';
+require_once __DIR__ . '/../../app/includes/auth_check.php';
+require_once __DIR__ . '/../../app/includes/helpers.php';
+require_once __DIR__ . '/../../app/includes/notifications.php';
 
 header('Content-Type: application/json');
 header('Cache-Control: no-store');

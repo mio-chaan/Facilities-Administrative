@@ -534,7 +534,7 @@ document.addEventListener('DOMContentLoaded', function () {
             });
             var editId = new URLSearchParams(window.location.search).get('id');
             if (editId) params.set('exclude_id', editId);
-            fetch('reservation_availability.php?' + params.toString(), { headers: { 'Accept': 'application/json' } })
+            fetch('api/reservation_availability.php?' + params.toString(), { headers: { 'Accept': 'application/json' } })
                 .then(function (response) { return response.json(); })
                 .then(function (data) {
                     // Ignore responses for a facility that is no longer selected.
@@ -568,7 +568,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 start_time: document.getElementById('start_time').value,
                 end_time: document.getElementById('end_time').value
             });
-            fetch('reservation_suggestions.php?' + params.toString(), { headers: { 'Accept': 'application/json' } })
+            fetch('api/reservation_suggestions.php?' + params.toString(), { headers: { 'Accept': 'application/json' } })
                 .then(function (response) { return response.json(); })
                 .then(function (data) {
                     suggestions.textContent = data.suggestions || 'No alternative dates found.';

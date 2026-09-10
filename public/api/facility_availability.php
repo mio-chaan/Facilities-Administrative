@@ -1,6 +1,6 @@
 <?php
 /**
- * public/facility_availability.php
+ * public/api/facility_availability.php
  * CAPACITY VALIDATION: small read-only AJAX endpoint used by the
  * reservation form (public/js/reservation.js) to fetch a facility's
  * CURRENT available quantity the moment it's selected (or whenever
@@ -24,12 +24,12 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../app/config/config.php';
-require_once __DIR__ . '/../app/config/constants.php';
-require_once __DIR__ . '/../app/includes/db_connect.php';
-require_once __DIR__ . '/../app/includes/auth_check.php';
-require_once __DIR__ . '/../app/includes/helpers.php';
-require_once __DIR__ . '/../app/includes/reservation_helpers.php';
+require_once __DIR__ . '/../../app/config/config.php';
+require_once __DIR__ . '/../../app/config/constants.php';
+require_once __DIR__ . '/../../app/includes/db_connect.php';
+require_once __DIR__ . '/../../app/includes/auth_check.php';
+require_once __DIR__ . '/../../app/includes/helpers.php';
+require_once __DIR__ . '/../../app/includes/reservation_helpers.php';
 
 header('Content-Type: application/json');
 header('Cache-Control: no-store');

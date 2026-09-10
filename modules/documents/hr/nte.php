@@ -140,7 +140,7 @@ if ($action === 'nte_new') {
 
             <div class="t8-field">
                 <label class="t8-label" for="deadline">Deadline to Respond</label>
-                <input class="t8-input" type="date" id="deadline" name="deadline" value="<?= e($formValues['deadline']) ?>" required>
+                <input class="t8-input" type="date" id="deadline" name="deadline" value="<?= e($formValues['deadline']) ?>" data-t8-date-rule="future" required>
             </div>
             <div class="t8-field">
                 <label class="t8-label" for="remarks">Remarks <span class="t8-help-text">(optional)</span></label>

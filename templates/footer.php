@@ -26,6 +26,7 @@ $page = $page ?? current_page();
 <?php endif; ?>
 <?php if ($page === 'documents'): ?>
     <script src="<?= e(asset('js/documents.js')) ?>"></script>
+    <script src="<?= e(asset('js/row-menu.js')) ?>"></script>
 <?php endif; ?>
 <?php if ($page === 'retention'): ?>
     <script src="<?= e(asset('js/retention.js')) ?>"></script>
