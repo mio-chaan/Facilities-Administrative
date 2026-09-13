@@ -16,6 +16,14 @@ declare(strict_types=1);
 
 if ($action === 'incident_report_new') {
     $employee = t8_hr_current_employee($pdo);
+    try {
+        $facilityLocations = $pdo->query(
+            'SELECT id, name FROM team8_facility_locations ORDER BY name'
+        )->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $facilityLocations = [];
+    }
+    $facilityLocationNames = array_column($facilityLocations, 'name');
     $formValues = [
         'incident_date'     => date('Y-m-d'),
         'incident_time'     => date('H:i'),
@@ -46,6 +54,10 @@ if ($action === 'incident_report_new') {
             }
             if ($formValues['incident_location'] === '') {
                 $errors[] = 'Incident location is required.';
+            } elseif ($facilityLocationNames === []) {
+                $errors[] = 'No facility locations are available. Please ask an administrator to add one in Facilities.';
+            } elseif (!in_array($formValues['incident_location'], $facilityLocationNames, true)) {
+                $errors[] = 'Please select an incident location from the Facilities locations.';
             }
             if (!in_array($formValues['incident_type'], T8_INCIDENT_TYPES, true)) {
                 $errors[] = 'Please select a valid incident type.';
@@ -146,7 +158,12 @@ if ($action === 'incident_report_new') {
 
                 <div class="t8-field">
                     <label class="t8-label" for="incident_location">Incident Location</label>
-                    <input class="t8-input" type="text" id="incident_location" name="incident_location" value="<?= e($formValues['incident_location']) ?>" required>
+                    <select class="t8-select" id="incident_location" name="incident_location" required>
+                        <option value="">Select a location…</option>
+                        <?php foreach ($facilityLocations as $location): ?>
+                            <option value="<?= e($location['name']) ?>" <?= $location['name'] === $formValues['incident_location'] ? 'selected' : '' ?>><?= e($location['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
 
                 <div class="t8-field t8-incident-report-span-full">
