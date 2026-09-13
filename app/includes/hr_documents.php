@@ -236,7 +236,12 @@ if (!function_exists('t8_hr_incident_report_fetch')) {
     function t8_hr_incident_report_fetch(PDO $pdo, int $id): ?array
     {
         $stmt = $pdo->prepare(
-            'SELECT ir.*, e.full_name AS employee_name, p.full_name AS prepared_by_name, d.name AS department_name
+            'SELECT ir.*, e.full_name AS employee_name, p.full_name AS prepared_by_name, d.name AS department_name,
+                    (SELECT r.role_name
+                     FROM user_roles ur
+                     JOIN roles r ON r.id = ur.role_id
+                     WHERE ur.user_id = ir.employee_id
+                     ORDER BY ur.id ASC LIMIT 1) AS position_role
              FROM team8_incident_reports ir
              JOIN users e ON e.id = ir.employee_id
              JOIN users p ON p.id = ir.prepared_by

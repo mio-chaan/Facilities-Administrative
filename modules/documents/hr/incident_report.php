@@ -109,63 +109,69 @@ if ($action === 'incident_report_new') {
     <div class="t8-card">
         <div class="t8-card-header"><h2 class="t8-card-title">New Incident Report</h2></div>
 
+     
         <div class="t8-hr-readonly-block">
+            <div class="t8-hr-readonly-item"><span>IR Document Number</span><strong>Generated upon submission</strong></div>
             <div class="t8-hr-readonly-item"><span>Employee ID</span><strong>#<?= e((string) $employee['employee_id']) ?></strong></div>
-            <div class="t8-hr-readonly-item"><span>Employee Name</span><strong><?= e($employee['full_name']) ?></strong></div>
+            <div class="t8-hr-readonly-item"><span>Reported By</span><strong><?= e($employee['full_name']) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Department</span><strong><?= e($employee['department_name']) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Position</span><strong><?= e($employee['position']) ?></strong></div>
-            <div class="t8-hr-readonly-item"><span>Prepared By</span><strong><?= e($employee['full_name']) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Date / Time Filed</span><strong><?= e(date('M d, Y g:i A')) ?></strong></div>
         </div>
-        <p class="t8-help-text">The fields above are taken directly from your account and cannot be edited.</p>
-
-        <form method="post" action="<?= e(page_url('documents', ['action' => 'incident_report_new'])) ?>" enctype="multipart/form-data" novalidate>
+    
+        <form class="t8-incident-report-form" method="post" action="<?= e(page_url('documents', ['action' => 'incident_report_new'])) ?>" enctype="multipart/form-data" novalidate>
             <?= t8_csrf_field() ?>
 
-            <div class="t8-reservation-datetime">
+            <h3>Incident Information</h3>
+            <div class="t8-incident-report-grid">
                 <div class="t8-field">
                     <label class="t8-label" for="incident_date">Incident Date</label>
                     <input class="t8-input" type="date" id="incident_date" name="incident_date" value="<?= e($formValues['incident_date']) ?>" required>
                 </div>
+
+                <div class="t8-field">
+                    <label class="t8-label" for="incident_type">Incident Type</label>
+                    <select class="t8-select" id="incident_type" name="incident_type" required>
+                        <option value="">Select a type…</option>
+                        <?php foreach (T8_INCIDENT_TYPES as $type): ?>
+                            <option value="<?= e($type) ?>" <?= $type === $formValues['incident_type'] ? 'selected' : '' ?>><?= e($type) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
                 <div class="t8-field">
                     <label class="t8-label" for="incident_time">Incident Time</label>
                     <input class="t8-input" type="time" id="incident_time" name="incident_time" value="<?= e($formValues['incident_time']) ?>" required>
                 </div>
-            </div>
 
-            <div class="t8-field">
-                <label class="t8-label" for="incident_location">Incident Location</label>
-                <input class="t8-input" type="text" id="incident_location" name="incident_location" value="<?= e($formValues['incident_location']) ?>" required>
-            </div>
+                <div class="t8-field">
+                    <label class="t8-label" for="incident_location">Incident Location</label>
+                    <input class="t8-input" type="text" id="incident_location" name="incident_location" value="<?= e($formValues['incident_location']) ?>" required>
+                </div>
 
-            <div class="t8-field">
-                <label class="t8-label" for="incident_type">Incident Type</label>
-                <select class="t8-select" id="incident_type" name="incident_type" required>
-                    <option value="">Select a type…</option>
-                    <?php foreach (T8_INCIDENT_TYPES as $type): ?>
-                        <option value="<?= e($type) ?>" <?= $type === $formValues['incident_type'] ? 'selected' : '' ?>><?= e($type) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+                <div class="t8-field t8-incident-report-span-full">
+                    <label class="t8-label" for="description">Description</label>
+                    <textarea class="t8-textarea" id="description" name="description" rows="4" required><?= e($formValues['description']) ?></textarea>
+                </div>
 
-            <div class="t8-field">
-                <label class="t8-label" for="description">Description</label>
-                <textarea class="t8-textarea" id="description" name="description" rows="4" required><?= e($formValues['description']) ?></textarea>
-            </div>
+                <h3 class="t8-incident-report-section-title">Additional Information</h3>
 
-            <div class="t8-field">
-                <label class="t8-label" for="witness">Witness <span class="t8-help-text">(optional)</span></label>
-                <input class="t8-input" type="text" id="witness" name="witness" value="<?= e($formValues['witness']) ?>">
-            </div>
+                <div class="t8-field">
+                    <label class="t8-label" for="witness">Witness <span class="t8-help-text">(optional)</span></label>
+                    <input class="t8-input" type="text" id="witness" name="witness" value="<?= e($formValues['witness']) ?>">
+                </div>
 
-            <div class="t8-field">
-                <label class="t8-label" for="attachment">Attachment <span class="t8-help-text">(optional)</span></label>
-                <input class="t8-input" type="file" id="attachment" name="attachment">
-                <span class="t8-help-text">Max <?= e((string) UPLOAD_MAX_SIZE_MB) ?>MB. PDF, Word, Excel, or image.</span>
-            </div>
+                <div class="t8-field">
+                    <label class="t8-label" for="attachment">Supporting Attachment <span class="t8-help-text">(optional)</span></label>
+                    <input class="t8-input" type="file" id="attachment" name="attachment">
+                    <span class="t8-help-text">Max <?= e((string) UPLOAD_MAX_SIZE_MB) ?>MB. PDF, Word, Excel, or image.</span>
+                </div>
 
-            <button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-check"></i> Submit Report</button>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">Cancel</a>
+                <div class="t8-form-actions t8-incident-report-span-full">
+                    <button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-check"></i> Submit Report</button>
+                    <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">Cancel</a>
+                </div>
+            </div>
         </form>
     </div>
     <?php
@@ -211,10 +217,12 @@ if ($action === 'incident_report_view') {
         </div>
 
         <div class="t8-hr-readonly-block">
-            <div class="t8-hr-readonly-item"><span>Employee</span><strong><?= e($report['employee_name']) ?></strong></div>
+            <div class="t8-hr-readonly-item"><span>IR Document Number</span><strong><?= e($report['document_number']) ?></strong></div>
+            <div class="t8-hr-readonly-item"><span>Reported By</span><strong><?= e($report['prepared_by_name']) ?></strong></div>
+            <div class="t8-hr-readonly-item"><span>Employee ID</span><strong>#<?= e((string) $report['employee_id']) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Department</span><strong><?= e($report['department_name'] ?? '—') ?></strong></div>
-            <div class="t8-hr-readonly-item"><span>Prepared By</span><strong><?= e($report['prepared_by_name']) ?></strong></div>
-            <div class="t8-hr-readonly-item"><span>Filed</span><strong><?= e(format_date((string) $report['created_at'], 'M d, Y g:i A')) ?></strong></div>
+            <div class="t8-hr-readonly-item"><span>Position</span><strong><?= e($report['position_role'] !== null ? ucwords(str_replace('_', ' ', (string) $report['position_role'])) : '—') ?></strong></div>
+            <div class="t8-hr-readonly-item"><span>Date / Time Filed</span><strong><?= e(format_date((string) $report['created_at'], 'M d, Y g:i A')) ?></strong></div>
         </div>
 
         <table class="t8-table" style="margin-top: var(--t8-space-4);">
@@ -226,7 +234,7 @@ if ($action === 'incident_report_view') {
                 <tr><th>Description</th><td><?= nl2br(e((string) $report['description'])) ?></td></tr>
                 <tr><th>Witness</th><td><?= e((string) ($report['witness'] ?? '—')) ?></td></tr>
                 <tr>
-                    <th>Attachment</th>
+                    <th>Supporting Attachment</th>
                     <td>
                         <?php if (!empty($report['attachment_path'])): ?>
                             <a href="<?= e(asset('uploads/' . $report['attachment_path'])) ?>" target="_blank"><i class="fa-solid fa-paperclip"></i> View attachment</a>

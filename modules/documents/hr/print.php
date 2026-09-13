@@ -34,8 +34,12 @@ switch ($type) {
         $statusValue = $row['status'];
         $bodyHtml = '
             <table class="print-table">
-                <tr><th>Employee</th><td>' . e($row['employee_name']) . '</td></tr>
+                <tr><th>IR Document Number</th><td>' . e($row['document_number']) . '</td></tr>
+                <tr><th>Reported By</th><td>' . e($row['prepared_by_name']) . '</td></tr>
+                <tr><th>Employee ID</th><td>#' . e((string) $row['employee_id']) . '</td></tr>
                 <tr><th>Department</th><td>' . e((string) ($row['department_name'] ?? '—')) . '</td></tr>
+                <tr><th>Position</th><td>' . e($row['position_role'] !== null ? ucwords(str_replace('_', ' ', (string) $row['position_role'])) : '—') . '</td></tr>
+                <tr><th>Date / Time Filed</th><td>' . e(format_date((string) $row['created_at'], 'M d, Y g:i A')) . '</td></tr>
                 <tr><th>Incident Date</th><td>' . e(format_date((string) $row['incident_date'], 'M d, Y')) . '</td></tr>
                 <tr><th>Incident Time</th><td>' . e((string) $row['incident_time']) . '</td></tr>
                 <tr><th>Location</th><td>' . e((string) $row['incident_location']) . '</td></tr>
@@ -160,12 +164,12 @@ while (ob_get_level() > 0) {
     <?= $bodyHtml ?>
 
     <div class="print-meta">
-        <span>Prepared By: <?= e($preparedByName) ?></span>
+        <span><?= $type === 'incident_report' ? 'Reported By' : 'Prepared By' ?>: <?= e($preparedByName) ?></span>
         <span>Generated: <?= e(date('M d, Y g:i A')) ?></span>
     </div>
 
     <div class="print-signatures">
-        <div class="print-signature"><div class="line"><?= e($preparedByName) ?><br>Prepared By</div></div>
+        <div class="print-signature"><div class="line"><?= e($preparedByName) ?><br><?= $type === 'incident_report' ? 'Reported By' : 'Prepared By' ?></div></div>
         <div class="print-signature"><div class="line">Signature Over Printed Name<br>Approved By</div></div>
     </div>
 </body>
