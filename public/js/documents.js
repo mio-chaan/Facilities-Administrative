@@ -21,6 +21,108 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // ---- NTE picker: AJAX search, filters, pagination, and page size ----
+    var nteFilterForm = document.getElementById('t8NteFilterForm');
+    var nteResults = document.getElementById('t8NteResults');
+
+    if (nteFilterForm && nteResults) {
+        var nteSearchInput = nteFilterForm.querySelector('input[name="nte_search"]');
+        var nteTypeInput = nteFilterForm.querySelector('select[name="nte_type"]');
+        var nteDateInput = nteFilterForm.querySelector('select[name="nte_date"]');
+        var nteResetButton = document.getElementById('t8NteReset');
+        var nteSearchTimer = null;
+
+        function buildNteUrl() {
+            var formAction = nteFilterForm.getAttribute('action') || window.location.href;
+            var url = new URL(formAction, window.location.origin);
+            var formData = new FormData(nteFilterForm);
+            formData.forEach(function (value, key) {
+                if (value !== '') {
+                    url.searchParams.set(key, value);
+                } else {
+                    url.searchParams.delete(key);
+                }
+            });
+            url.searchParams.set('nte_page', '1');
+            return url;
+        }
+
+        function bindNteResults() {
+            nteResults.querySelectorAll('[data-nte-page-link]').forEach(function (link) {
+                link.addEventListener('click', function (event) {
+                    event.preventDefault();
+                    applyAjaxFilters(new URL(link.href, window.location.origin));
+                });
+            });
+
+            var pageSizeInput = nteResults.querySelector('[data-nte-page-size]');
+            if (pageSizeInput) {
+                pageSizeInput.addEventListener('change', function () {
+                    var url = buildNteUrl();
+                    url.searchParams.set('nte_per_page', pageSizeInput.value);
+                    applyAjaxFilters(url);
+                });
+            }
+        }
+
+        function applyAjaxFilters(url) {
+            url = url || buildNteUrl();
+            url.searchParams.set('page', 'documents');
+            url.searchParams.set('action', 'nte_new');
+            fetch(url.toString(), {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'text/html'
+                }
+            })
+                .then(function (response) { return response.text(); })
+                .then(function (html) {
+                    var container = document.createElement('div');
+                    container.innerHTML = html;
+                    var nextResults = container.querySelector('#t8NteResults');
+                    if (!nextResults) {
+                        return;
+                    }
+                    nteResults.innerHTML = nextResults.innerHTML;
+                    window.history.replaceState({}, '', url.toString());
+                    bindNteResults();
+                })
+                .catch(function (error) {
+                    if (error.name !== 'AbortError') {
+                        console.error('NTE filter error:', error);
+                    }
+                });
+        }
+
+        if (nteSearchInput) {
+            nteSearchInput.addEventListener('input', function () {
+                window.clearTimeout(nteSearchTimer);
+                nteSearchTimer = window.setTimeout(function () {
+                    applyAjaxFilters();
+                }, 300);
+            });
+        }
+        if (nteTypeInput) {
+            nteTypeInput.addEventListener('change', function () { applyAjaxFilters(); });
+        }
+        if (nteDateInput) {
+            nteDateInput.addEventListener('change', function () { applyAjaxFilters(); });
+        }
+        if (nteResetButton) {
+            nteResetButton.addEventListener('click', function () {
+                if (nteSearchInput) nteSearchInput.value = '';
+                if (nteTypeInput) nteTypeInput.value = '';
+                if (nteDateInput) nteDateInput.value = '';
+                applyAjaxFilters();
+            });
+        }
+        nteFilterForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+            applyAjaxFilters();
+        });
+        bindNteResults();
+    }
+
     // ---- Browse list: AJAX filter without a full page reload ----
     var filterForm = document.getElementById('t8DocumentsFilterForm');
     var resultsContainer = document.getElementById('t8DocumentsResults');
