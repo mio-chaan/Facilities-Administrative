@@ -18,6 +18,33 @@
 .t8-retention-kpi strong { display: block; margin: 2px 0; color: var(--t8-ink); font-size: 1.4rem; line-height: 1.1; }
 .t8-retention-kpi div:last-child { min-width: 0; }
 .t8-retention-kpi span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* =========================================================
+   PHASE 5 (Unified Dashboard) ADDITION
+   Three of the KPI cards (Total Documents / Contracts / Legal Cases)
+   are now <a> elements linking out to their own module, so the
+   dashboard doubles as quick navigation. .t8-retention-kpi never had
+   anchor-specific resets before since it was always a plain <div> -
+   without this, a linked card would render with default browser link
+   styling (blue, underlined) instead of matching the plain KPI cards
+   beside it.
+   ========================================================= */
+a.t8-retention-kpi {
+    color: inherit;
+    text-decoration: none;
+    transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+a.t8-retention-kpi:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--t8-shadow-lift);
+    border-color: var(--t8-primary-light);
+}
+a.t8-retention-kpi span,
+a.t8-retention-kpi strong,
+a.t8-retention-kpi small {
+    color: inherit;
+}
+
 .t8-retention-summary-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr); gap: 16px; margin-bottom: 20px; }
 .t8-retention-summary-grid .t8-card { margin: 0 !important; }
 .t8-retention-summary-grid .t8-card-title i { margin-right: 6px; color: var(--t8-primary); }
@@ -28,6 +55,9 @@
 .t8-retention-deadline:last-child { border-bottom: 0; }
 .t8-retention-deadline strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .t8-retention-deadline > span:last-child { color: var(--t8-text-muted); white-space: nowrap; }
+/* Phase 5: "Coming Up" quick lists render these as <a> too. */
+a.t8-retention-deadline { color: inherit; }
+a.t8-retention-deadline:hover { background: var(--t8-secondary); }
 .t8-retention-severity { width: 8px; height: 8px; border-radius: 50%; background: #f2c94c; }
 .t8-retention-severity.is-critical { background: var(--t8-danger); }
 .t8-retention-severity.is-warning { background: #f2994a; }

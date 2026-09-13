@@ -418,6 +418,18 @@ code { font-family: var(--t8-font-data); }
 }
 
 .t8-sidebar-nav { display: flex; flex-direction: column; gap: 3px; padding: 0 var(--t8-space-3); flex: 1; }
+.t8-sidebar-section-title {
+    margin: 14px var(--t8-space-4) 3px;
+    color: rgba(255,255,255,0.52);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .t8-sidebar-link {
     display: flex;
     align-items: center;
@@ -468,6 +480,7 @@ code { font-family: var(--t8-font-data); }
 .t8-shell.t8-sidebar-collapsed .t8-sidebar { width: var(--t8-sidebar-width-collapsed); overflow: hidden; }
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-brand-text,
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-label,
+.t8-shell.t8-sidebar-collapsed .t8-sidebar-section-title,
 .t8-shell.t8-sidebar-collapsed .t8-sidebar-collapse-btn span {
     display: none !important;
 }

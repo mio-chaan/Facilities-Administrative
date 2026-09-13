@@ -50,6 +50,9 @@ $page      = $page ?? current_page();
     <?php if ($page === 'retention'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/retention.css')) ?>">
     <?php endif; ?>
+    <?php if ($page === 'legal' || $page === 'contracts'): ?>
+        <link rel="stylesheet" href="<?= e(asset('css/contract-lifecycle.css')) ?>">
+    <?php endif; ?>
     <?php if (in_array($page, ['contracts', 'visitor', 'legal'], true)): ?>
         <!-- Row meatball-menu + View Details modal system, shared by
              Contract Management, Visitor Management, and Legal

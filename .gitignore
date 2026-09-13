@@ -20,6 +20,7 @@ app/config/config.local.php
 storage/
 tests/
 scripts/
+Document Life cycle/
 
 
 

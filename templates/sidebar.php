@@ -24,6 +24,37 @@ $t8NavIcons = [
     'contracts'   => 'fa-file-contract',
     'audit'       => 'fa-clipboard-list',
 ];
+
+$t8NavGroups = [
+    'Operations' => ['reservation', 'facilities', 'visitor'],
+    'Document & Records Management' => ['documents', 'contracts', 'legal', 'audit', 'retention'],
+];
+
+$t8RenderNavItem = static function (string $key) use ($t8Routes, $t8NavIcons, $active, $t8CurrentRole, $t8LegalOfficerHiddenPages): void {
+    if (!isset($t8Routes[$key])) {
+        return;
+    }
+
+    $route = $t8Routes[$key];
+    if (!empty($route['roles']) && !t8_has_role($route['roles'])) {
+        return;
+    }
+    if (!empty($route['hidden'])) {
+        return;
+    }
+    if ($t8CurrentRole === 'legal_officer' && in_array($key, $t8LegalOfficerHiddenPages, true)) {
+        return;
+    }
+    ?>
+    <a href="<?= e(page_url($key)) ?>"
+            class="t8-sidebar-link<?= $active === $key ? ' t8-sidebar-link-active' : '' ?>"
+            title="<?= e($route['label']) ?>"
+            aria-label="<?= e($route['label']) ?>">
+        <i class="fa-solid <?= e($t8NavIcons[$key] ?? 'fa-circle-dot') ?>"></i>
+        <span class="t8-sidebar-label"><?= e($route['label']) ?></span>
+    </a>
+    <?php
+};
 ?>
 <aside class="t8-sidebar" id="t8Sidebar">
     <div class="t8-sidebar-brand">
@@ -35,23 +66,13 @@ $t8NavIcons = [
     </div>
 
     <nav class="t8-sidebar-nav">
-        <?php foreach ($t8Routes as $key => $route): ?>
-            <?php if (!empty($route['roles']) && !t8_has_role($route['roles'])): ?>
-        <?php continue; ?>
-            <?php endif; ?>
-        <?php if (!empty($route['hidden'])): ?>
-            <?php continue; ?>
-        <?php endif; ?>
-        <?php if ($t8CurrentRole === 'legal_officer' && in_array($key, $t8LegalOfficerHiddenPages, true)): ?>
-            <?php continue; ?>
-        <?php endif; ?>
-            <a href="<?= e(page_url($key)) ?>"
-                    class="t8-sidebar-link<?= $active === $key ? ' t8-sidebar-link-active' : '' ?>"
-                    title="<?= e($route['label']) ?>"
-                    aria-label="<?= e($route['label']) ?>">
-                <i class="fa-solid <?= e($t8NavIcons[$key] ?? 'fa-circle-dot') ?>"></i>
-                <span class="t8-sidebar-label"><?= e($route['label']) ?></span>
-            </a>
+        <?php $t8RenderNavItem('dashboard'); ?>
+
+        <?php foreach ($t8NavGroups as $t8GroupLabel => $t8GroupKeys): ?>
+            <div class="t8-sidebar-section-title"><?= e($t8GroupLabel) ?></div>
+            <?php foreach ($t8GroupKeys as $t8GroupKey): ?>
+                <?php $t8RenderNavItem($t8GroupKey); ?>
+            <?php endforeach; ?>
         <?php endforeach; ?>
     </nav>
 

@@ -4,22 +4,52 @@
  * Legal Management - administrators manage cases; assigned Legal Officers
  * have read-only access only to their own cases.
  *
+ * PHASE 3 (Document/Legal/Contract/Retention rebuild):
+ *   - Legal Cases get the same computed "monitoring" sub-state as
+ *     Contracts (Phase 2), driven off the existing `deadline` column:
+ *     an open/under_review case within 90 days of its deadline shows
+ *     a Monitoring badge, exactly mirroring
+ *     t8_contract_is_monitoring() in modules/contracts/index.php.
+ *   - A case is registered under retention automatically the moment
+ *     it first reaches 'closed' status, anchored to the new
+ *     `closed_at` timestamp (see
+ *     database/migrations/2026_09_11_legal_case_closed_at.sql -
+ *     updated_at was not safe to use, since it changes on every edit,
+ *     not only the closure event).
+ *   - Legal Case disposal is DUAL CONTROL: the confirmed plan requires
+ *     the requester and the authorizer to be two different
+ *     administrators, given the case's evidentiary/legal significance.
+ *     This is enforced in app/includes/retention_helpers.php's
+ *     t8_retention_authorize_disposal() (Phase 1) - server-side, not
+ *     only in this file's UI. This file's job is to expose that
+ *     workflow clearly and disable the "wrong" button as a courtesy,
+ *     not as the actual control.
+ *
  * Backing tables:
  *   team8_legal_cases     (id, assigned_to, contract_id, title, status,
- *     filed_date, created_at, updated_at, deleted_at)
+ *     filed_date, deadline, closed_at, created_at, updated_at, deleted_at)
  *   team8_legal_documents (id, case_id, document_id, description,
  *     created_at) - links an existing Document Management document to
  *     a case; attaching/removing here never touches the document
  *     itself, only the link row.
+ *   team8_records         (polymorphic retention table - Phase 1)
  *
  * contract_id is nullable and intentionally left unset by this form
  * for now - it gets wired up once Contract Management exists.
  *
- * Access: Administrator only. Facilities Staff never see this module
- * in the nav, but this guard blocks direct URL access too.
+ * Access: Administrator only for mutations. Legal Officers see only
+ * their own assigned cases, read-only plus document attachment.
  */
 
 declare(strict_types=1);
+
+// Retention registration + disposal workflow hook (Phase 1/3 of the
+// Document/Legal/Contract/Retention rebuild) - defensive require,
+// same pattern as ai_helper.php's require in documents/index.php.
+$retentionHelperPath = __DIR__ . '/../../app/includes/retention_helpers.php';
+if (is_file($retentionHelperPath)) {
+    require_once $retentionHelperPath;
+}
 
 t8_require_role(['admin', 'legal_officer']);
 
@@ -41,7 +71,18 @@ function t8_legal_has_case_metadata(PDO $pdo): bool
     }
 }
 
+/** Guards against modules/legal/index.php running before the Phase 3 migration lands. */
+function t8_legal_has_closed_at(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW COLUMNS FROM team8_legal_cases LIKE 'closed_at'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 $legalHasCaseMetadata = t8_legal_has_case_metadata($pdo);
+$legalHasClosedAt = t8_legal_has_closed_at($pdo);
 
 /** Fetch one legal case with assignee name, or null. */
 function t8_legal_case_fetch(PDO $pdo, int $id): ?array
@@ -57,6 +98,55 @@ function t8_legal_case_fetch(PDO $pdo, int $id): ?array
     $stmt->execute($params);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
+}
+
+/**
+ * MONITORING (computed, not stored) - mirrors
+ * t8_contract_is_monitoring() in modules/contracts/index.php exactly:
+ * an open/under_review case within $withinDays of its deadline shows
+ * the same visual sub-badge treatment, driven off a real date instead
+ * of a second stored status that could drift out of sync.
+ */
+function t8_legal_is_monitoring(array $case, int $withinDays = 90): bool
+{
+    if (!in_array($case['status'] ?? '', ['open', 'under_review'], true)) {
+        return false;
+    }
+    $deadline = $case['deadline'] ?? null;
+    if ($deadline === null || $deadline === '') {
+        return false;
+    }
+    $ts = strtotime((string) $deadline);
+    return $ts !== false && $ts <= strtotime("+{$withinDays} days");
+}
+
+/**
+ * Registers a newly-closed case under retention EXACTLY ONCE - checks
+ * t8_retention_fetch_for_entity() first, same guard as
+ * t8_contract_register_retention() in modules/contracts/index.php, so
+ * a records officer's later manual override of retention_years/basis
+ * is never silently clobbered by a subsequent edit to the case.
+ */
+function t8_legal_register_retention(PDO $pdo, array $case, int $actorId): void
+{
+    if (!function_exists('t8_retention_register') || !function_exists('t8_retention_fetch_for_entity')) {
+        return; // retention_helpers.php not present yet (Phase 1 not deployed)
+    }
+    if (t8_retention_fetch_for_entity($pdo, 'legal_case', (int) $case['id']) !== null) {
+        return; // already registered - never overwrite a manual override
+    }
+
+    $clockStart = $case['closed_at'] ?? date('Y-m-d H:i:s');
+    t8_retention_register(
+        $pdo,
+        'legal_case',
+        (int) $case['id'],
+        'General civil prescription period (Civil Code Arts. 1139-1155) + records retention practice',
+        10,
+        (string) $clockStart,
+        $actorId
+    );
+    t8_audit_log($pdo, $actorId, 'legal_case', (int) $case['id'], 'retention_registered');
 }
 
 $assignees = $pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC);
@@ -114,10 +204,18 @@ switch ($action) {
                 }
 
                 if (!$errors) {
+                    // Was this case ALREADY closed before this save? Only the
+                    // FIRST transition into 'closed' sets closed_at and fires
+                    // retention registration - re-saving an already-closed
+                    // case (e.g. fixing a typo in the title) must not reset
+                    // the retention clock.
+                    $wasAlreadyClosed = $existing !== null && $existing['status'] === 'closed';
+                    $justClosed = $legalHasClosedAt && $formValues['status'] === 'closed' && !$wasAlreadyClosed;
+
                     if ($action === 'create') {
                         $sql = $legalHasCaseMetadata
-                            ? 'INSERT INTO team8_legal_cases (assigned_to, title, subject, department_id, status, filed_date, deadline) VALUES (:assigned_to, :title, :subject, :department_id, :status, :filed_date, :deadline)'
-                            : 'INSERT INTO team8_legal_cases (assigned_to, title, status, filed_date) VALUES (:assigned_to, :title, :status, :filed_date)';
+                            ? 'INSERT INTO team8_legal_cases (assigned_to, title, subject, department_id, status, filed_date, deadline' . ($justClosed ? ', closed_at' : '') . ') VALUES (:assigned_to, :title, :subject, :department_id, :status, :filed_date, :deadline' . ($justClosed ? ', NOW()' : '') . ')'
+                            : 'INSERT INTO team8_legal_cases (assigned_to, title, status, filed_date' . ($justClosed ? ', closed_at' : '') . ') VALUES (:assigned_to, :title, :status, :filed_date' . ($justClosed ? ', NOW()' : '') . ')';
                         $params = [
                             'assigned_to' => (int) $formValues['assigned_to'],
                             'title'       => $formValues['title'],
@@ -131,10 +229,17 @@ switch ($action) {
                         $newId = (int) $pdo->lastInsertId();
                         t8_audit_log($pdo, $currentUserId, 'legal_case', $newId, 'create');
                         t8_flash_set('success', 'Legal case created.');
+
+                        if ($justClosed) {
+                            $created = t8_legal_case_fetch($pdo, $newId);
+                            if ($created !== null) {
+                                t8_legal_register_retention($pdo, $created, $currentUserId);
+                            }
+                        }
                     } else {
                         $sql = $legalHasCaseMetadata
-                            ? 'UPDATE team8_legal_cases SET assigned_to = :assigned_to, title = :title, subject = :subject, department_id = :department_id, status = :status, filed_date = :filed_date, deadline = :deadline WHERE id = :id'
-                            : 'UPDATE team8_legal_cases SET assigned_to = :assigned_to, title = :title, status = :status, filed_date = :filed_date WHERE id = :id';
+                            ? 'UPDATE team8_legal_cases SET assigned_to = :assigned_to, title = :title, subject = :subject, department_id = :department_id, status = :status, filed_date = :filed_date, deadline = :deadline' . ($justClosed ? ', closed_at = NOW()' : '') . ' WHERE id = :id'
+                            : 'UPDATE team8_legal_cases SET assigned_to = :assigned_to, title = :title, status = :status, filed_date = :filed_date' . ($justClosed ? ', closed_at = NOW()' : '') . ' WHERE id = :id';
                         $params = [
                             'assigned_to' => (int) $formValues['assigned_to'],
                             'title'       => $formValues['title'],
@@ -148,6 +253,13 @@ switch ($action) {
                         $pdo->prepare($sql)->execute($params);
                         t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'update');
                         t8_flash_set('success', 'Legal case updated.');
+
+                        if ($justClosed) {
+                            $refreshed = t8_legal_case_fetch($pdo, $caseId);
+                            if ($refreshed !== null) {
+                                t8_legal_register_retention($pdo, $refreshed, $currentUserId);
+                            }
+                        }
                     }
                     redirect(page_url('legal'));
                 }
@@ -246,11 +358,99 @@ switch ($action) {
         t8_flash_set('success', 'Document removed from case.');
         redirect(page_url('legal', ['action' => 'documents', 'id' => $caseId]));
         break;
+
+    // ---------------------------------------------------------------
+    // PHASE 3 — Retention & disposal sub-view.
+    //
+    // Deliberately its own screen (like 'documents' above) rather than
+    // buttons crammed into the row menu - a dual-control disposal
+    // action deserves its own confirmation surface, not a one-click
+    // dropdown item.
+    // ---------------------------------------------------------------
+    case 'retention':
+        $caseId = (int) ($_GET['id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+        $retentionRecord = function_exists('t8_retention_fetch_for_entity')
+            ? t8_retention_fetch_for_entity($pdo, 'legal_case', $caseId)
+            : null;
+        break;
+
+    case 'retention_archive':
+        t8_require_role(['admin']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('legal'));
+        }
+        $recordId = (int) ($_POST['record_id'] ?? 0);
+        $caseId = (int) ($_POST['case_id'] ?? 0);
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+        if ($reason === '' || !function_exists('t8_retention_archive')) {
+            t8_flash_set('danger', 'An archive reason is required.');
+        } elseif (t8_retention_archive($pdo, $recordId, $reason)) {
+            t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'retention_archived', null, $reason);
+            t8_flash_set('success', 'Retention record archived.');
+        } else {
+            t8_flash_set('danger', 'That retention record could not be archived from its current state.');
+        }
+        redirect(page_url('legal', ['action' => 'retention', 'id' => $caseId]));
+        break;
+
+    case 'retention_dispose_request':
+        t8_require_role(['admin']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('legal'));
+        }
+        $recordId = (int) ($_POST['record_id'] ?? 0);
+        $caseId = (int) ($_POST['case_id'] ?? 0);
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+        if ($reason === '' || !function_exists('t8_retention_request_disposal')) {
+            t8_flash_set('danger', 'A disposal reason is required.');
+        } elseif (t8_retention_request_disposal($pdo, $recordId, $currentUserId, $reason)) {
+            t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'disposal_requested', null, $reason);
+            t8_flash_set('success', 'Disposal requested. A DIFFERENT administrator must authorize it before it is disposed.');
+        } else {
+            t8_flash_set('danger', 'That retention record is not in a state that can be requested for disposal.');
+        }
+        redirect(page_url('legal', ['action' => 'retention', 'id' => $caseId]));
+        break;
+
+    case 'retention_dispose_authorize':
+        t8_require_role(['admin']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('legal'));
+        }
+        $recordId = (int) ($_POST['record_id'] ?? 0);
+        $caseId = (int) ($_POST['case_id'] ?? 0);
+        if (!function_exists('t8_retention_authorize_disposal')) {
+            t8_flash_set('danger', 'Retention features are not available yet.');
+            redirect(page_url('legal', ['action' => 'retention', 'id' => $caseId]));
+        }
+        // DUAL CONTROL: t8_retention_authorize_disposal() itself rejects
+        // this if $currentUserId === the row's disposal_requested_by -
+        // that check happens server-side inside the helper, not here.
+        // This call site does not (and must not) attempt to duplicate
+        // or second-guess that check.
+        $result = t8_retention_authorize_disposal($pdo, $recordId, $currentUserId);
+        if ($result['ok']) {
+            t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'disposed');
+            t8_flash_set('success', 'Legal case record disposed.');
+        } else {
+            t8_flash_set('danger', (string) $result['error']);
+        }
+        redirect(page_url('legal', ['action' => 'retention', 'id' => $caseId]));
+        break;
 }
 
 $showForm = in_array($action, ['create', 'edit'], true);
 $showDocuments = $action === 'documents';
-$showList = !$showForm && !$showDocuments;
+$showRetention = $action === 'retention';
+$showList = !$showForm && !$showDocuments && !$showRetention;
 
 if ($showList) {
     $statusFilter = $_GET['status'] ?? 'all';
@@ -291,7 +491,7 @@ function t8_legal_status_badge(string $status): string
  * #t8LegalDetailModal. Same pattern as
  * t8_reservation_render_menu() in modules/reservation/index.php.
  */
-function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, bool $legalHasCaseMetadata): void
+function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, bool $legalHasCaseMetadata, bool $isMonitoring, ?array $retentionRecord): void
 {
     $id = (int) $c['id'];
     $ref = 'CASE-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT);
@@ -303,7 +503,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 data-title="<?= e((string) $c['title']) ?>"
                 data-subject="<?= e((string) ($c['subject'] ?? '')) ?>"
                 data-department="<?= e((string) ($c['department_name'] ?? '')) ?>"
-                data-status="<?= e(ucwords(str_replace('_', ' ', (string) $c['status']))) ?>"
+                data-status="<?= e(ucwords(str_replace('_', ' ', (string) $c['status']))) ?><?= $isMonitoring ? ' · Monitoring' : '' ?>"
                 data-filed="<?= e(format_date((string) $c['filed_date'], 'M d, Y')) ?>"
                 data-deadline="<?= e($legalHasCaseMetadata && !empty($c['deadline']) ? format_date((string) $c['deadline'], 'M d, Y') : '') ?>"
                 data-assigned-to="<?= e((string) $c['assigned_to_name']) ?>">
@@ -320,6 +520,11 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $id])) ?>">
                 <i class="fa-solid fa-paperclip"></i> Documents
             </a>
+            <?php if ($c['status'] === 'closed'): ?>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('legal', ['action' => 'retention', 'id' => $id])) ?>">
+                    <i class="fa-solid fa-box-archive"></i> <?= $retentionRecord !== null ? 'Manage Retention' : 'View Retention' ?>
+                </a>
+            <?php endif; ?>
             <?php if ($isAdmin && !$archivedFilter): ?>
                 <div class="t8-row-menu-divider"></div>
                 <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('legal', ['action' => 'edit', 'id' => $id])) ?>">
@@ -391,6 +596,11 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                         </option>
                     <?php endforeach; ?>
                 </select>
+                <?php if ($existing !== null && $existing['status'] === 'closed'): ?>
+                    <span class="t8-help-text">This case is already closed<?= !empty($existing['closed_at']) ? ' (on ' . e(format_date((string) $existing['closed_at'], 'M d, Y')) . ')' : '' ?> and under retention. Manage disposal from its Retention screen, not by changing status here.</span>
+                <?php else: ?>
+                    <span class="t8-help-text">Setting this to "Closed" registers the case under retention automatically.</span>
+                <?php endif; ?>
             </div>
 
             <div class="t8-field">
@@ -507,6 +717,100 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
         <?php endif; ?>
     </div>
 
+<?php elseif ($showRetention): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4);">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">
+            <i class="fa-solid fa-arrow-left"></i> Back to Cases
+        </a>
+    </div>
+
+    <div class="t8-card">
+        <div class="t8-card-header">
+            <h2 class="t8-card-title"><?= e($case['title']) ?> — Retention</h2>
+        </div>
+
+        <?php if ($retentionRecord === null): ?>
+            <div class="t8-empty">
+                This case is closed but has not been registered under retention yet.
+                <?php if (!$legalHasClosedAt): ?>
+                    <br><br>The <code>closed_at</code> column migration has not run yet - see
+                    <code>database/migrations/2026_09_11_legal_case_closed_at.sql</code>.
+                <?php endif; ?>
+            </div>
+        <?php else: ?>
+            <div class="t8-hr-readonly-block">
+                <div class="t8-hr-readonly-item"><span>Status</span><strong><span class="t8-badge <?= e(t8_retention_status_badge((string) $retentionRecord['status'])) ?>"><?= e(ucwords(str_replace('_', ' ', (string) $retentionRecord['status']))) ?></span></strong></div>
+                <div class="t8-hr-readonly-item"><span>Retention Basis</span><strong><?= e((string) $retentionRecord['retention_basis']) ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Retention Period</span><strong><?= e((string) $retentionRecord['retention_years']) ?> years</strong></div>
+                <div class="t8-hr-readonly-item"><span>Clock Start</span><strong><?= e(format_date((string) $retentionRecord['retention_start_date'], 'M d, Y')) ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Disposition Date</span><strong><?= e(format_date((string) $retentionRecord['disposition_date'], 'M d, Y')) ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Custodian</span><strong><?= e((string) $retentionRecord['custodian_name']) ?></strong></div>
+            </div>
+
+            <?php if ($isAdmin && in_array($retentionRecord['status'], ['active', 'due_review'], true)): ?>
+                <div class="t8-alert t8-alert-info">
+                    Legal Case retention <strong>defaults to archive-only</strong>. Disposal requires two
+                    <strong>different</strong> administrators - one to request it, another to authorize it -
+                    given the case's evidentiary and legal significance.
+                </div>
+                <form method="post" action="<?= e(page_url('legal', ['action' => 'retention_archive'])) ?>" style="display:flex; gap:8px; align-items:end; flex-wrap:wrap;">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="record_id" value="<?= e((string) $retentionRecord['id']) ?>">
+                    <input type="hidden" name="case_id" value="<?= e((string) $caseId) ?>">
+                    <div class="t8-field" style="margin-bottom:0; flex:1; min-width:220px;">
+                        <label class="t8-label" for="archive_reason">Archive Reason</label>
+                        <input class="t8-input" type="text" id="archive_reason" name="reason" required>
+                    </div>
+                    <button class="t8-btn t8-btn-outline" type="submit"><i class="fa-solid fa-box-archive"></i> Archive</button>
+                </form>
+            <?php elseif ($isAdmin && $retentionRecord['status'] === 'archived'): ?>
+                <div class="t8-alert t8-alert-info">
+                    Requesting disposal here does not dispose the record - a <strong>different</strong>
+                    administrator must authorize it below before it is actually disposed.
+                </div>
+                <form method="post" action="<?= e(page_url('legal', ['action' => 'retention_dispose_request'])) ?>" style="display:flex; gap:8px; align-items:end; flex-wrap:wrap;">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="record_id" value="<?= e((string) $retentionRecord['id']) ?>">
+                    <input type="hidden" name="case_id" value="<?= e((string) $caseId) ?>">
+                    <div class="t8-field" style="margin-bottom:0; flex:1; min-width:220px;">
+                        <label class="t8-label" for="dispose_reason">Disposal Reason</label>
+                        <input class="t8-input" type="text" id="dispose_reason" name="reason" required>
+                    </div>
+                    <button class="t8-btn t8-btn-danger" type="submit"><i class="fa-solid fa-trash"></i> Request Disposal</button>
+                </form>
+            <?php elseif ($isAdmin && $retentionRecord['status'] === 'pending_disposal'): ?>
+                <?php $isSameAdmin = (int) $retentionRecord['disposal_requested_by'] === $currentUserId; ?>
+                <div class="t8-hr-readonly-block">
+                    <div class="t8-hr-readonly-item"><span>Requested By</span><strong><?= e((string) $retentionRecord['disposal_requested_by_name']) ?></strong></div>
+                    <div class="t8-hr-readonly-item"><span>Requested At</span><strong><?= e(format_date((string) $retentionRecord['disposal_requested_at'], 'M d, Y g:i A')) ?></strong></div>
+                    <div class="t8-hr-readonly-item"><span>Reason</span><strong><?= e((string) $retentionRecord['disposal_reason']) ?></strong></div>
+                </div>
+                <?php if ($isSameAdmin): ?>
+                    <div class="t8-alert t8-alert-warning">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        You requested this disposal. A <strong>different</strong> administrator must authorize it — dual control cannot be satisfied by the same account.
+                    </div>
+                    <button class="t8-btn t8-btn-danger" type="button" disabled title="A different administrator must authorize this">
+                        <i class="fa-solid fa-lock"></i> Authorize Disposal (unavailable to you)
+                    </button>
+                <?php else: ?>
+                    <form method="post" action="<?= e(page_url('legal', ['action' => 'retention_dispose_authorize'])) ?>" onsubmit="return confirm('Authorize disposal of this legal case record? This cannot be undone.');">
+                        <?= t8_csrf_field() ?>
+                        <input type="hidden" name="record_id" value="<?= e((string) $retentionRecord['id']) ?>">
+                        <input type="hidden" name="case_id" value="<?= e((string) $caseId) ?>">
+                        <button class="t8-btn t8-btn-danger" type="submit"><i class="fa-solid fa-check-double"></i> Authorize Disposal</button>
+                    </form>
+                <?php endif; ?>
+            <?php elseif ($retentionRecord['status'] === 'disposed'): ?>
+                <div class="t8-hr-readonly-block">
+                    <div class="t8-hr-readonly-item"><span>Disposed At</span><strong><?= e(format_date((string) $retentionRecord['disposed_at'], 'M d, Y g:i A')) ?></strong></div>
+                    <div class="t8-hr-readonly-item"><span>Authorized By</span><strong><?= e((string) $retentionRecord['disposal_authorized_by_name']) ?></strong></div>
+                </div>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+
 <?php else: ?>
 
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
@@ -541,6 +845,12 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                     </thead>
                     <tbody>
                         <?php foreach ($cases as $c): ?>
+                            <?php
+                            $isMonitoring = t8_legal_is_monitoring($c);
+                            $retentionRecordForRow = function_exists('t8_retention_fetch_for_entity')
+                                ? t8_retention_fetch_for_entity($pdo, 'legal_case', (int) $c['id'])
+                                : null;
+                            ?>
                             <tr>
                                 <td><?= e($c['title']) ?></td>
                                 <?php if ($legalHasCaseMetadata): ?><td><?= e((string) ($c['subject'] ?? '—')) ?></td>
@@ -549,12 +859,13 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                                     <span class="t8-badge <?= t8_legal_status_badge($c['status']) ?>">
                                         <?= e(ucwords(str_replace('_', ' ', $c['status']))) ?>
                                     </span>
+                                    <?php if ($isMonitoring): ?><span class="t8-badge-monitoring" title="Within 90 days of the case deadline">Monitoring</span><?php endif; ?>
                                 </td>
                                 <td><?= e(format_date($c['filed_date'], 'M d, Y')) ?></td>
                                 <?php if ($legalHasCaseMetadata): ?><td><?= $c['deadline'] ? e(format_date($c['deadline'], 'M d, Y')) : '—' ?></td><?php endif; ?>
                                 <td><?= e($c['assigned_to_name']) ?></td>
                                 <td style="text-align:right;">
-                                    <?php t8_legal_render_menu($c, $isAdmin, $archivedFilter, $legalHasCaseMetadata); ?>
+                                    <?php t8_legal_render_menu($c, $isAdmin, $archivedFilter, $legalHasCaseMetadata, $isMonitoring, $retentionRecordForRow); ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

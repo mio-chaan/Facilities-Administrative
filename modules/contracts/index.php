@@ -4,6 +4,15 @@
  * Contract Management - administrators manage contracts; staff have scoped,
  * read-only access plus supporting-document submission.
  *
+ * PHASE 2 (Document/Legal/Contract/Retention rebuild) — lifecycle v2:
+ *   draft -> review -> negotiation -> approval -> signing -> active
+ *     -> renewal_or_amendment -> expiration_or_termination -> archived
+ * See T8_CONTRACT_STATUSES below for the full rationale and the
+ * "monitoring" computed sub-state that replaces the old stored
+ * 'expiring_soon' status. See
+ * database/migrations/2026_09_11_contract_lifecycle_v2.sql for the
+ * one-time status remapping applied to existing rows.
+ *
  * Backing tables:
  *   team8_contracts            (id, owner_id, renewed_from_id, title,
  *     start_date, end_date, status, created_at, updated_at, deleted_at)
@@ -12,6 +21,8 @@
  *   team8_contract_documents   (id, contract_id, document_id, created_at)
  *   team8_parties              (id, name, type, contact_email, contact_phone, created_at, updated_at)
  *     - shared party directory; a party can appear on multiple contracts.
+ *   team8_records              (polymorphic retention table - see
+ *     app/includes/retention_helpers.php - Phase 1 of this rebuild)
  *
  * team8_contract_obligations has no deleted_at column, so obligations
  * are hard-deleted when removed (nothing else references them).
@@ -24,6 +35,15 @@
 
 declare(strict_types=1);
 
+// Retention registration hook (Phase 1/2 of the Document/Legal/Contract/
+// Retention rebuild) - defensive require, safe even if already loaded
+// centrally elsewhere, same pattern as ai_helper.php's require in
+// modules/documents/index.php.
+$retentionHelperPath = __DIR__ . '/../../app/includes/retention_helpers.php';
+if (is_file($retentionHelperPath)) {
+    require_once $retentionHelperPath;
+}
+
 t8_require_role(['admin', 'legal_officer', 'facilities_staff', 'employee']);
 
 $pageTitle = 'Contract Management';
@@ -33,7 +53,20 @@ $action = $_GET['action'] ?? 'list';
 $errors = [];
 
 if (!defined('T8_CONTRACT_STATUSES')) {
-    define('T8_CONTRACT_STATUSES', ['draft', 'for_review', 'changes_requested', 'pending_approval', 'approved', 'active', 'expiring_soon', 'pending_renewal', 'renewed', 'expired', 'terminated', 'archived']);
+    // Lifecycle v2 (Phase 2 rebuild). Order here IS the stepper order
+    // rendered by t8_contract_render_lifecycle_stepper() below, so
+    // don't reorder without checking that function's assumptions.
+    //
+    //   draft -> review -> negotiation -> approval -> signing -> active
+    //     -> renewal_or_amendment -> expiration_or_termination -> archived
+    //
+    // "monitoring" is NOT a stored status - it is a computed sub-state
+    // of 'active' (see t8_contract_is_monitoring()), shown as an extra
+    // badge alongside the real status. This replaces the old, separately
+    // stored 'expiring_soon' status, which could silently drift out of
+    // sync with the contract's actual dates if the sweep below didn't
+    // run at the right moment. A computed value can never drift.
+    define('T8_CONTRACT_STATUSES', ['draft', 'review', 'negotiation', 'approval', 'signing', 'active', 'renewal_or_amendment', 'expiration_or_termination', 'archived']);
 }
 if (!defined('T8_OBLIGATION_STATUSES')) {
     define('T8_OBLIGATION_STATUSES', ['pending', 'completed']);
@@ -124,14 +157,111 @@ function t8_contract_save_history(PDO $pdo, int $contractId, array $data, int $u
 function t8_contract_status_badge(string $status): string
 {
     $map = [
-        'draft'      => 't8-badge-pending',
-        'active'     => 't8-badge-approved',
-        'expiring_soon' => 't8-badge-pending',
-        'pending_renewal' => 't8-badge-pending',
-        'expired'    => 't8-badge-rejected',
-        'terminated' => 't8-badge-rejected',
+        'draft'                     => 't8-badge-pending',
+        'review'                    => 't8-badge-pending',
+        'negotiation'               => 't8-badge-pending',
+        'approval'                  => 't8-badge-pending',
+        'signing'                   => 't8-badge-pending',
+        'active'                    => 't8-badge-approved',
+        'renewal_or_amendment'      => 't8-badge-pending',
+        'expiration_or_termination' => 't8-badge-rejected',
+        'archived'                  => 't8-badge-archived',
     ];
     return $map[$status] ?? 't8-badge-pending';
+}
+
+/**
+ * MONITORING (computed, not stored - see T8_CONTRACT_STATUSES docblock).
+ * True when an ACTIVE contract is within $withinDays of its own end
+ * date, its termination date (if already set), its renewal date, or
+ * any still-pending obligation's due date - whichever comes soonest.
+ * Mirrors the same "compute a display sub-state from real dates
+ * instead of storing a second status" pattern already used by
+ * t8_reservation_display_status() in app/includes/reservation_helpers.php.
+ */
+function t8_contract_is_monitoring(PDO $pdo, array $contract, int $withinDays = 90): bool
+{
+    if (($contract['status'] ?? '') !== 'active') {
+        return false;
+    }
+
+    $horizon = strtotime("+{$withinDays} days");
+    foreach (['end_date', 'termination_date', 'renewal_date'] as $field) {
+        $value = $contract[$field] ?? null;
+        if ($value === null || $value === '') {
+            continue;
+        }
+        $ts = strtotime((string) $value);
+        if ($ts !== false && $ts <= $horizon) {
+            return true;
+        }
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM team8_contract_obligations
+         WHERE contract_id = :id AND status = 'pending' AND due_date IS NOT NULL AND due_date <= :horizon"
+    );
+    $stmt->execute(['id' => (int) $contract['id'], 'horizon' => date('Y-m-d', $horizon)]);
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+/**
+ * Compact horizontal stepper showing where a contract currently sits
+ * across the 9-stage lifecycle. Purely presentational - reads
+ * T8_CONTRACT_STATUSES for the stage order so it can never drift out
+ * of sync with the actual status list.
+ */
+function t8_contract_render_lifecycle_stepper(string $currentStatus): void
+{
+    $stages = T8_CONTRACT_STATUSES;
+    $currentIndex = array_search($currentStatus, $stages, true);
+    if ($currentIndex === false) {
+        $currentIndex = 0;
+    }
+    ?>
+    <ol class="t8-contract-stepper" aria-label="Contract lifecycle progress">
+        <?php foreach ($stages as $index => $stage): ?>
+            <?php
+            $state = $index < $currentIndex ? 'done' : ($index === $currentIndex ? 'current' : 'upcoming');
+            $label = ucwords(str_replace('_', ' ', $stage));
+            ?>
+            <li class="t8-contract-step t8-contract-step-<?= e($state) ?>">
+                <span class="t8-contract-step-dot" aria-hidden="true"></span>
+                <span class="t8-contract-step-label"><?= e($label) ?></span>
+            </li>
+        <?php endforeach; ?>
+    </ol>
+    <?php
+}
+
+/**
+ * Registers a terminal-status contract under retention EXACTLY ONCE.
+ * Deliberately checks t8_retention_fetch_for_entity() first and does
+ * nothing if a retention row already exists, so this can be safely
+ * called from both the manual workflow action and the automatic
+ * expiry sweep without ever clobbering a records officer's later
+ * manual adjustment to retention_years/basis on that same contract.
+ */
+function t8_contract_register_retention(PDO $pdo, array $contract, int $actorId): void
+{
+    if (!function_exists('t8_retention_register') || !function_exists('t8_retention_fetch_for_entity')) {
+        return; // retention_helpers.php not present yet (Phase 1 not deployed)
+    }
+    if (t8_retention_fetch_for_entity($pdo, 'contract', (int) $contract['id']) !== null) {
+        return; // already registered - never overwrite a manual override
+    }
+
+    $clockStart = $contract['termination_date'] ?: $contract['end_date'] ?: date('Y-m-d');
+    t8_retention_register(
+        $pdo,
+        'contract',
+        (int) $contract['id'],
+        'Civil Code Art. 1144 - written contract (10-year prescriptive period)',
+        10,
+        (string) $clockStart,
+        $actorId
+    );
+    t8_audit_log($pdo, $actorId, 'contract', (int) $contract['id'], 'retention_registered');
 }
 
 /**
@@ -141,7 +271,7 @@ function t8_contract_status_badge(string $status): string
  * and public/js/row-menu.js). Same pattern as
  * t8_reservation_render_menu() in modules/reservation/index.php.
  */
-function t8_contract_render_menu(array $c, bool $isAdmin, bool $archivedFilter): void
+function t8_contract_render_menu(array $c, bool $isAdmin, bool $archivedFilter, bool $isMonitoring, ?array $retentionRecord): void
 {
     $id = (int) $c['id'];
     $ref = (string) ($c['contract_number'] ?? ('CON-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT)));
@@ -153,7 +283,7 @@ function t8_contract_render_menu(array $c, bool $isAdmin, bool $archivedFilter):
                 data-title="<?= e((string) $c['title']) ?>"
                 data-department="<?= e((string) ($c['department_name'] ?? '—')) ?>"
                 data-owner="<?= e((string) $c['owner_name']) ?>"
-                data-status="<?= e(ucwords(str_replace('_', ' ', (string) $c['status']))) ?>"
+                data-status="<?= e(ucwords(str_replace('_', ' ', (string) $c['status']))) ?><?= $isMonitoring ? ' · Monitoring' : '' ?>"
                 data-start="<?= e(format_date((string) $c['start_date'], 'M d, Y')) ?>"
                 data-end="<?= e($c['end_date'] ? format_date((string) $c['end_date'], 'M d, Y') : '—') ?>"
                 data-renewal="<?= e((string) ($c['renewal_date'] ?? '') !== '' ? format_date((string) $c['renewal_date'], 'M d, Y') : '') ?>"
@@ -180,26 +310,54 @@ function t8_contract_render_menu(array $c, bool $isAdmin, bool $archivedFilter):
             <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('contracts', ['action' => 'documents', 'id' => $id])) ?>">
                 <i class="fa-solid fa-paperclip"></i> Documents
             </a>
+            <?php if ($retentionRecord !== null): ?>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('retention', ['action' => 'view', 'id' => $retentionRecord['id']])) ?>">
+                    <i class="fa-solid fa-box-archive"></i> View Retention Record
+                </a>
+            <?php endif; ?>
             <?php if ($isAdmin && !$archivedFilter): ?>
                 <div class="t8-row-menu-divider"></div>
-                <?php if (in_array((string) $c['status'], ['draft', 'changes_requested'], true)): ?>
+                <?php if (in_array((string) $c['status'], ['draft', 'negotiation'], true)): ?>
                     <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
                         <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="submit">
                         <button class="t8-row-menu-item" type="submit" role="menuitem"><i class="fa-solid fa-paper-plane"></i> Submit for Review</button>
                     </form>
-                <?php elseif ((string) $c['status'] === 'for_review'): ?>
+                <?php elseif ((string) $c['status'] === 'review'): ?>
                     <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
                         <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="approve">
-                        <button class="t8-row-menu-item t8-success" type="submit" role="menuitem"><i class="fa-solid fa-check"></i> Approve</button>
+                        <button class="t8-row-menu-item t8-success" type="submit" role="menuitem"><i class="fa-solid fa-check"></i> Move to Approval</button>
                     </form>
                     <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
                         <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="request_changes"><input class="t8-input" type="text" name="comment" placeholder="Comment (optional)">
-                        <button class="t8-row-menu-item" type="submit" role="menuitem"><i class="fa-solid fa-comment-dots"></i> Request Changes</button>
+                        <button class="t8-row-menu-item" type="submit" role="menuitem"><i class="fa-solid fa-comment-dots"></i> Send Back to Negotiation</button>
                     </form>
-                <?php elseif ((string) $c['status'] === 'approved'): ?>
+                <?php elseif ((string) $c['status'] === 'approval'): ?>
+                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                        <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="sign">
+                        <button class="t8-row-menu-item t8-success" type="submit" role="menuitem"><i class="fa-solid fa-signature"></i> Move to Signing</button>
+                    </form>
+                <?php elseif ((string) $c['status'] === 'signing'): ?>
                     <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
                         <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="activate">
                         <button class="t8-row-menu-item t8-success" type="submit" role="menuitem"><i class="fa-solid fa-bolt"></i> Mark Active</button>
+                    </form>
+                <?php elseif ((string) $c['status'] === 'active'): ?>
+                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                        <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="renew">
+                        <button class="t8-row-menu-item" type="submit" role="menuitem"><i class="fa-solid fa-rotate"></i> Start Renewal / Amendment</button>
+                    </form>
+                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" onsubmit="return confirm('Terminate this contract? This moves it to Expiration/Termination.');">
+                        <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="terminate">
+                        <button class="t8-row-menu-item t8-danger" type="submit" role="menuitem"><i class="fa-solid fa-ban"></i> Terminate</button>
+                    </form>
+                <?php elseif ((string) $c['status'] === 'renewal_or_amendment'): ?>
+                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                        <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="activate">
+                        <button class="t8-row-menu-item t8-success" type="submit" role="menuitem"><i class="fa-solid fa-bolt"></i> Return to Active</button>
+                    </form>
+                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" onsubmit="return confirm('Terminate this contract? This moves it to Expiration/Termination.');">
+                        <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $id) ?>"><input type="hidden" name="workflow_action" value="terminate">
+                        <button class="t8-row-menu-item t8-danger" type="submit" role="menuitem"><i class="fa-solid fa-ban"></i> Terminate</button>
                     </form>
                 <?php endif; ?>
                 <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('contracts', ['action' => 'edit', 'id' => $id])) ?>">
@@ -230,20 +388,28 @@ function t8_contract_render_menu(array $c, bool $isAdmin, bool $archivedFilter):
 $owners = $pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC);
 $departments = $contractHasMetadata ? $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) : [];
 
-// Lifecycle reminders are evaluated whenever the module is used. Status
-// changes are persisted and audited so approaching expirations are visible.
-$expiryRows = $pdo->query("SELECT id, owner_id, status, end_date FROM team8_contracts WHERE deleted_at IS NULL AND end_date IS NOT NULL AND status IN ('active', 'expiring_soon')")->fetchAll(PDO::FETCH_ASSOC);
+// ---------------------------------------------------------------
+// Lifecycle reminders - evaluated whenever the module is used.
+//
+// Lifecycle v2: 'expiring_soon' is no longer a stored status - it is
+// the computed "monitoring" sub-state (see t8_contract_is_monitoring()
+// above), shown as an extra badge on an 'active' contract. This sweep
+// now only flips a contract whose end_date has actually passed into
+// the terminal 'expiration_or_termination' status, and registers it
+// under retention the first time that happens (see
+// t8_contract_register_retention() above).
+// ---------------------------------------------------------------
+$expiryRows = $pdo->query(
+    "SELECT id, owner_id, status, end_date, termination_date FROM team8_contracts
+     WHERE deleted_at IS NULL AND end_date IS NOT NULL AND status = 'active' AND end_date < CURDATE()"
+)->fetchAll(PDO::FETCH_ASSOC);
 foreach ($expiryRows as $expiryRow) {
-    $nextStatus = strtotime($expiryRow['end_date']) < strtotime('today') ? 'expired'
-        : (strtotime($expiryRow['end_date']) <= strtotime('+30 days') ? 'expiring_soon' : 'active');
-    if ($nextStatus !== $expiryRow['status']) {
-        $pdo->prepare('UPDATE team8_contracts SET status = :status WHERE id = :id')->execute(['status' => $nextStatus, 'id' => $expiryRow['id']]);
-        t8_audit_log($pdo, $currentUserId, 'contract', (int) $expiryRow['id'], $nextStatus, (string) $expiryRow['status'], 'automatic expiration review');
-        if ($nextStatus === 'expiring_soon') {
-            $pdo->prepare('INSERT INTO notifications (user_id, message, status) VALUES (:user_id, :message, "unread")')
-                ->execute(['user_id' => $expiryRow['owner_id'], 'message' => 'A contract assigned to you expires within 30 days.']);
-        }
-    }
+    $pdo->prepare("UPDATE team8_contracts SET status = 'expiration_or_termination' WHERE id = :id")
+        ->execute(['id' => $expiryRow['id']]);
+    t8_audit_log($pdo, $currentUserId, 'contract', (int) $expiryRow['id'], 'expiration_or_termination', (string) $expiryRow['status'], 'automatic expiration review');
+    $pdo->prepare('INSERT INTO notifications (user_id, message, status) VALUES (:user_id, :message, "unread")')
+        ->execute(['user_id' => $expiryRow['owner_id'], 'message' => 'A contract assigned to you has reached its end date and moved to Expiration/Termination.']);
+    t8_contract_register_retention($pdo, $expiryRow, $currentUserId);
 }
 
 if (!$isAdmin && !in_array($action, ['list', 'documents', 'workflow'], true)) {
@@ -260,33 +426,48 @@ switch ($action) {
         $workflowId = (int) ($_POST['id'] ?? 0);
         $workflowAction = (string) ($_POST['workflow_action'] ?? '');
         $workflowComment = trim((string) ($_POST['comment'] ?? ''));
+        // Lifecycle v2 mapping - see T8_CONTRACT_STATUSES docblock above.
         $workflowMap = [
-            'submit' => 'for_review',
-            'request_changes' => 'changes_requested',
-            'approve' => 'approved',
-            'activate' => 'active',
-            'renew' => 'pending_renewal',
-            'terminate' => 'terminated',
+            'submit'          => 'review',
+            'request_changes' => 'negotiation',
+            'approve'         => 'approval',
+            'sign'            => 'signing',
+            'activate'        => 'active',
+            'renew'           => 'renewal_or_amendment',
+            'terminate'       => 'expiration_or_termination',
         ];
         $workflowContract = t8_contract_fetch($pdo, $workflowId);
         if (!$workflowContract || !isset($workflowMap[$workflowAction])) {
             t8_flash_set('danger', 'Contract workflow action is invalid.');
             redirect(page_url('contracts'));
         }
-        if ($workflowAction === 'approve' && !$isAdmin) {
-            t8_flash_set('danger', 'Only an administrator can approve contracts.');
+        if (in_array($workflowAction, ['approve', 'sign'], true) && !$isAdmin) {
+            t8_flash_set('danger', 'Only an administrator can approve or sign contracts.');
             redirect(page_url('contracts'));
         }
         $newWorkflowStatus = $workflowMap[$workflowAction];
         $pdo->prepare('UPDATE team8_contracts SET status = :status WHERE id = :id')->execute(['status' => $newWorkflowStatus, 'id' => $workflowId]);
-        $pdo->prepare('INSERT INTO team8_contract_approvals (contract_id, reviewer_id, approver_id, action, comment) VALUES (:contract_id, :reviewer_id, :approver_id, :action, :comment)')->execute([
+        $pdo->prepare(
+            'INSERT INTO team8_contract_approvals (contract_id, reviewer_id, approver_id, action, comment) VALUES (:contract_id, :reviewer_id, :approver_id, :action, :comment)'
+        )->execute([
             'contract_id' => $workflowId,
             'reviewer_id' => in_array($workflowAction, ['submit', 'request_changes'], true) ? $currentUserId : null,
-            'approver_id' => in_array($workflowAction, ['approve', 'activate'], true) ? $currentUserId : null,
+            'approver_id' => in_array($workflowAction, ['approve', 'sign', 'activate'], true) ? $currentUserId : null,
             'action' => $workflowAction,
             'comment' => $workflowComment !== '' ? $workflowComment : null,
         ]);
         t8_audit_log($pdo, $currentUserId, 'contract', $workflowId, $workflowAction, (string) $workflowContract['status'], $workflowComment);
+
+        // RETENTION HOOK: the moment a contract reaches end-of-life via a
+        // manual "Terminate" action (as opposed to the automatic expiry
+        // sweep above), register it under retention the same way.
+        if ($newWorkflowStatus === 'expiration_or_termination') {
+            $refreshedContract = t8_contract_fetch($pdo, $workflowId);
+            if ($refreshedContract !== null) {
+                t8_contract_register_retention($pdo, $refreshedContract, $currentUserId);
+            }
+        }
+
         t8_flash_set('success', 'Contract status updated.');
         redirect(page_url('contracts'));
         break;
@@ -427,6 +608,17 @@ switch ($action) {
                         $pdo->prepare('UPDATE team8_contracts SET contract_number = :contract_number, owner_id = :owner_id, department_id = :department_id, renewed_from_id = :renewed_from_id, title = :title, contract_type = :contract_type, description = :description, start_date = :start_date, end_date = :end_date, renewal_date = :renewal_date, amount = :amount, currency = :currency, payment_terms = :payment_terms, payment_frequency = :payment_frequency, payment_schedule = :payment_schedule, deposit_amount = :deposit_amount, financial_notes = :financial_notes, notice_period_days = :notice_period_days, termination_date = :termination_date, termination_reason = :termination_reason, status = :status WHERE id = :id')->execute($params);
                         t8_contract_save_history($pdo, $contractId, $params, $currentUserId);
                         t8_audit_log($pdo, $currentUserId, 'contract', $contractId, 'update');
+
+                        // A manual edit can ALSO be how a contract reaches its
+                        // terminal status (status dropdown set directly, rather
+                        // than via the workflow buttons) - register the same way.
+                        if ($params['status'] === 'expiration_or_termination') {
+                            $refreshedContract = t8_contract_fetch($pdo, $contractId);
+                            if ($refreshedContract !== null) {
+                                t8_contract_register_retention($pdo, $refreshedContract, $currentUserId);
+                            }
+                        }
+
                         t8_flash_set('success', 'Contract updated.');
                     }
                     redirect(page_url('contracts'));
@@ -770,6 +962,11 @@ if ($showList) {
         <div class="t8-card-header">
             <h2 class="t8-card-title"><?= $action === 'edit' ? 'Edit Contract' : 'New Contract' ?></h2>
         </div>
+
+        <?php if ($existing !== null): ?>
+            <?php t8_contract_render_lifecycle_stepper((string) $existing['status']); ?>
+        <?php endif; ?>
+
         <form method="post"
               action="<?= e(page_url('contracts', array_filter(['action' => $action, 'id' => $_GET['id'] ?? null]))) ?>"
               class="t8-contract-form-grid"
@@ -823,7 +1020,7 @@ if ($showList) {
             <div class="t8-field">
                 <label class="t8-label" for="end_date">End Date</label>
                 <input class="t8-input" type="date" id="end_date" name="end_date" value="<?= e($formValues['end_date']) ?>">
-                <span class="t8-help-text">Optional — leave blank for open-ended contracts.</span>
+                <span class="t8-help-text">Optional — leave blank for open-ended contracts. This is also the retention-clock start date, unless the contract is later terminated early.</span>
             </div>
 
             <div class="t8-field"><label class="t8-label" for="renewal_date">Renewal Date</label><input class="t8-input" type="date" id="renewal_date" name="renewal_date" value="<?= e($formValues['renewal_date']) ?>" data-t8-date-rule="future"></div>
@@ -840,9 +1037,10 @@ if ($showList) {
                 <label class="t8-label" for="status">Status</label>
                 <select class="t8-select" id="status" name="status" required>
                     <?php foreach (T8_CONTRACT_STATUSES as $s): ?>
-                        <option value="<?= e($s) ?>" <?= $s === $formValues['status'] ? 'selected' : '' ?>><?= e(ucfirst($s)) ?></option>
+                        <option value="<?= e($s) ?>" <?= $s === $formValues['status'] ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $s))) ?></option>
                     <?php endforeach; ?>
                 </select>
+                <span class="t8-help-text">Prefer the lifecycle action buttons in the list view when possible — this dropdown is a manual override for edge cases.</span>
             </div>
 
             <div class="t8-field"><label class="t8-label" for="termination_date">Termination Date</label><input class="t8-input" type="date" id="termination_date" name="termination_date" value="<?= e($formValues['termination_date']) ?>"></div>
@@ -1125,6 +1323,12 @@ if ($showList) {
                     </thead>
                     <tbody>
                         <?php foreach ($contracts as $c): ?>
+                            <?php
+                            $isMonitoring = t8_contract_is_monitoring($pdo, $c);
+                            $retentionRecord = function_exists('t8_retention_fetch_for_entity')
+                                ? t8_retention_fetch_for_entity($pdo, 'contract', (int) $c['id'])
+                                : null;
+                            ?>
                             <tr>
                                 <td><?= e((string) $c['contract_number']) ?></td>
                                 <td><?= e($c['title']) ?></td>
@@ -1134,9 +1338,12 @@ if ($showList) {
                                 <td><?= e(format_date($c['start_date'], 'M d, Y')) ?></td>
                                 <td><?= $c['end_date'] ? e(format_date($c['end_date'], 'M d, Y')) : '—' ?></td>
                                 <td><?= $c['amount'] !== null ? e((string) ($c['currency'] ?? 'PHP') . ' ' . number_format((float) $c['amount'], 2)) : '—' ?></td>
-                                <td><span class="t8-badge <?= t8_contract_status_badge($c['status']) ?>"><?= e(ucwords(str_replace('_', ' ', $c['status']))) ?></span></td>
+                                <td>
+                                    <span class="t8-badge <?= t8_contract_status_badge($c['status']) ?>"><?= e(ucwords(str_replace('_', ' ', $c['status']))) ?></span>
+                                    <?php if ($isMonitoring): ?><span class="t8-badge-monitoring" title="Within 90 days of end date, termination date, renewal date, or a pending obligation">Monitoring</span><?php endif; ?>
+                                </td>
                                 <td style="text-align:right;">
-                                    <?php t8_contract_render_menu($c, $isAdmin, $archivedFilter); ?>
+                                    <?php t8_contract_render_menu($c, $isAdmin, $archivedFilter, $isMonitoring, $retentionRecord); ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

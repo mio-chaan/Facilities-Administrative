@@ -7,6 +7,18 @@
  * and generated documents (Incident Report, Notice To Explain,
  * Explanation Letter, Memorandum/Warning Letter, Certificate).
  *
+ * PHASE 4 (Document/Legal/Contract/Retention rebuild):
+ *   Every newly uploaded document is registered under retention
+ *   automatically (see t8_document_register_retention() below), using
+ *   a basis suggested from its category - mirroring the same
+ *   "register once, never silently re-overwrite a manual override"
+ *   guard already used by Contracts (Phase 2) and Legal Cases
+ *   (Phase 3). This ONLY applies to uploads through THIS module's
+ *   'create' action (team8_documents) - the separate HR Document
+ *   Automation tables (team8_incident_reports, team8_memorandums,
+ *   etc.) are a different entity model entirely and are out of scope
+ *   for this rebuild's "Documents" retention entity type.
+ *
  * Routing:
  *   ?action=dashboard (default)         -> modules/documents/hr/dashboard.php
  *   ?action=browse                      -> the original upload list/table (below)
@@ -37,6 +49,14 @@ if (is_file($aiHelperPath)) {
 $hrHelperPath = __DIR__ . '/../../app/includes/hr_documents.php';
 if (is_file($hrHelperPath)) {
     require_once $hrHelperPath;
+}
+
+// Retention registration hook (Phase 1/4 of the Document/Legal/
+// Contract/Retention rebuild) - defensive require, same pattern as
+// the two requires above.
+$retentionHelperPath = __DIR__ . '/../../app/includes/retention_helpers.php';
+if (is_file($retentionHelperPath)) {
+    require_once $retentionHelperPath;
 }
 
 $pageTitle = 'Document Management';
@@ -106,7 +126,42 @@ function t8_document_status_badge(string $status): string
     };
 }
 
-function t8_document_render_menu(array $doc, bool $isAdmin, string $statusFilter): void
+/**
+ * PHASE 4: registers a freshly uploaded document under retention,
+ * EXACTLY ONCE - same guard pattern as
+ * t8_contract_register_retention() (Phase 2) and
+ * t8_legal_register_retention() (Phase 3): checks
+ * t8_retention_fetch_for_entity() first, so calling this again for a
+ * document that already has a retention row (e.g. if a future code
+ * path re-invoked it) never clobbers a records officer's override.
+ *
+ * Basis is suggested from the document's CATEGORY, matching the
+ * confirmed retention matrix:
+ *   Finance / Compliance -> BIR RR No. 7-2024 (EOPT Act), 5 years
+ *   Human Resources      -> Labor Code / DOLE, 3 years
+ *   everything else      -> Internal policy, 5 years
+ * Clock starts at the document's own created_at (upload date).
+ */
+function t8_document_register_retention(PDO $pdo, int $documentId, ?string $categoryName, int $actorId): void
+{
+    if (!function_exists('t8_retention_register') || !function_exists('t8_retention_fetch_for_entity')) {
+        return; // retention_helpers.php not present yet (Phase 1 not deployed)
+    }
+    if (t8_retention_fetch_for_entity($pdo, 'document', $documentId) !== null) {
+        return; // already registered - never overwrite a manual override
+    }
+
+    [$basis, $years] = match ($categoryName) {
+        'Finance', 'Compliance' => ['BIR RR No. 7-2024 (EOPT Act) - financial/tax-relevant document', 5],
+        'Human Resources', 'HR' => ['Labor Code / DOLE - employment record', 3],
+        default => ['Internal policy - general administrative document', 5],
+    };
+
+    t8_retention_register($pdo, 'document', $documentId, $basis, $years, date('Y-m-d'), $actorId);
+    t8_audit_log($pdo, $actorId, 'document', $documentId, 'retention_registered');
+}
+
+function t8_document_render_menu(array $doc, bool $isAdmin, string $statusFilter, ?array $retentionRecord): void
 {
     $id = (int) $doc['id'];
     $title = (string) ($doc['title'] ?? '');
@@ -140,6 +195,11 @@ function t8_document_render_menu(array $doc, bool $isAdmin, string $statusFilter
             <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $id])) ?>">
                 <i class="fa-solid fa-file-lines"></i> View / Versions
             </a>
+            <?php if ($retentionRecord !== null): ?>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('retention', ['action' => 'view', 'id' => $retentionRecord['id']])) ?>">
+                    <i class="fa-solid fa-box-archive"></i> View Retention Record
+                </a>
+            <?php endif; ?>
             <?php if ($isAdmin && $statusFilter === 'active' && $doc['status'] === 'pending'): ?>
                 <div class="t8-row-menu-divider"></div>
                 <form method="post" action="<?= e(page_url('documents', ['action' => 'set_status'])) ?>">
@@ -407,6 +467,18 @@ switch ($action) {
                     }
 
                     t8_audit_log($pdo, $currentUserId, 'document', $documentId, 'create');
+
+                    // PHASE 4: register under retention immediately, using
+                    // the category name to pick a suggested basis/period.
+                    $categoryName = null;
+                    foreach ($categories as $cat) {
+                        if ((int) $cat['id'] === $categoryId) {
+                            $categoryName = (string) $cat['name'];
+                            break;
+                        }
+                    }
+                    t8_document_register_retention($pdo, $documentId, $categoryName, $currentUserId);
+
                     t8_flash_set('success', 'Document uploaded.');
                     redirect(page_url('documents'));
                 }
@@ -505,6 +577,12 @@ switch ($action) {
         $id = (int) ($_POST['id'] ?? 0);
         $document = t8_document_fetch($pdo, $id);
         if ($document) {
+            // NOTE: this is the document's own soft-delete flag (hides it
+            // from the active/archived browse toggle below), separate
+            // from its RETENTION record's own status - a document can be
+            // soft-deleted here while its retention record independently
+            // stays 'active' until its disposition date, same separation
+            // already used for Legal Cases (Phase 3) and their deleted_at.
             $sql = $action === 'archive'
                 ? 'UPDATE team8_documents SET deleted_at = NOW() WHERE id = :id'
                 : 'UPDATE team8_documents SET deleted_at = NULL WHERE id = :id';
@@ -637,6 +715,12 @@ if ($showVersions) {
         $aiSummaryText = $_SESSION['t8_ai_summary_' . $aiSummaryVersionId];
         unset($_SESSION['t8_ai_summary_' . $aiSummaryVersionId]);
     }
+
+    // PHASE 4: resolve this document's own retention record, if any,
+    // so the Version History screen can link straight to it.
+    $documentRetentionRecord = function_exists('t8_retention_fetch_for_entity')
+        ? t8_retention_fetch_for_entity($pdo, 'document', $documentId)
+        : null;
 }
 
 // The original module's landing list is now reached via ?action=browse
@@ -851,6 +935,7 @@ function t8_render_camera_capture(): void
                         <option value="<?= e((string) $cat['id']) ?>" <?= isset($_POST['category_id']) && (string) $_POST['category_id'] === (string) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option>
                     <?php endforeach; ?>
                 </select>
+                <span class="t8-help-text">Also determines the suggested retention basis/period applied automatically on upload.</span>
             </div>
 
             <div class="t8-field">
@@ -973,10 +1058,16 @@ function t8_render_camera_capture(): void
 
 <?php elseif ($showVersions): ?>
 
-    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4);">
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
         <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">
             <i class="fa-solid fa-arrow-left"></i> Back to Documents
         </a>
+        <?php if ($documentRetentionRecord !== null): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('retention', ['action' => 'view', 'id' => $documentRetentionRecord['id']])) ?>">
+                <i class="fa-solid fa-box-archive"></i> View Retention Record
+                (<span class="t8-badge <?= e(t8_retention_status_badge((string) $documentRetentionRecord['status'])) ?>" style="margin-left:4px;"><?= e(ucwords(str_replace('_', ' ', (string) $documentRetentionRecord['status']))) ?></span>)
+            </a>
+        <?php endif; ?>
     </div>
 
     <?php if ($aiSummaryText !== null): ?>
@@ -1091,6 +1182,11 @@ function t8_render_camera_capture(): void
                     </thead>
                     <tbody>
                         <?php foreach ($documents as $doc): ?>
+                            <?php
+                            $docRetentionRecord = function_exists('t8_retention_fetch_for_entity')
+                                ? t8_retention_fetch_for_entity($pdo, 'document', (int) $doc['id'])
+                                : null;
+                            ?>
                             <tr>
                                 <td><?= e($doc['title']) ?></td>
                                 <td><?= e($doc['document_type'] ?? '—') ?></td>
@@ -1098,7 +1194,7 @@ function t8_render_camera_capture(): void
                                 <td><span class="t8-badge <?= e(t8_document_status_badge((string) $doc['status'])) ?>"><?= e(ucwords(str_replace('_', ' ', (string) $doc['status']))) ?></span></td>
                                 <td><?= $doc['expiration_date'] ? e(format_date($doc['expiration_date'], 'M d, Y')) : '—' ?><?php if ($doc['expiration_date'] && strtotime((string) $doc['expiration_date']) <= strtotime('+30 days')): ?> <span class="t8-badge t8-badge-rejected"><?= strtotime((string) $doc['expiration_date']) < strtotime('today') ? 'Expired' : 'Expiring soon' ?></span><?php endif; ?></td>
                                 <td class="t8-row-actions">
-                                    <?php t8_document_render_menu($doc, $isAdmin, $statusFilter); ?>
+                                    <?php t8_document_render_menu($doc, $isAdmin, $statusFilter, $docRetentionRecord); ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
