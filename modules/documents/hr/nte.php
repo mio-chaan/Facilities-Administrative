@@ -219,7 +219,12 @@ if ($action === 'nte_new') {
                 $newId = (int) $pdo->lastInsertId();
 
                 t8_audit_log($pdo, $currentUserId, 'nte', $newId, 'create');
-                t8_hr_notify($pdo, (int) $incident['employee_id'], 'A Notice To Explain (' . $docNumber . ') has been issued to you. Deadline: ' . format_date($formValues['deadline'], 'M d, Y') . '.');
+                t8_hr_notify(
+                    $pdo,
+                    (int) $incident['employee_id'],
+                    'A Notice To Explain (' . $docNumber . ') has been issued to you. Deadline: ' . format_date($formValues['deadline'], 'M d, Y') . '.',
+                    page_url('documents', ['action' => 'nte_view', 'id' => $newId])
+                );
                 t8_flash_set('success', 'Notice To Explain ' . $docNumber . ' generated.');
                 redirect(page_url('documents', ['action' => 'nte_view', 'id' => $newId]));
             }
@@ -327,20 +332,15 @@ if ($action === 'nte_view') {
         </table>
 
         <?php if ($isAdmin && $nte['status'] === 'pending'): ?>
-            <div style="margin-top: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
-                <form method="post" action="<?= e(page_url('documents', ['action' => 'nte_status'])) ?>">
-                    <?= t8_csrf_field() ?>
-                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
-                    <input type="hidden" name="status" value="approved">
-                    <button class="t8-btn t8-btn-success t8-btn-sm" type="submit"><i class="fa-solid fa-check"></i> Approve / Issue</button>
-                </form>
-                <form method="post" action="<?= e(page_url('documents', ['action' => 'nte_status'])) ?>">
-                    <?= t8_csrf_field() ?>
-                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
-                    <input type="hidden" name="status" value="rejected">
-                    <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit"><i class="fa-solid fa-xmark"></i> Reject</button>
-                </form>
-            </div>
+            <form class="t8-hr-decision-form" method="post" action="<?= e(page_url('documents', ['action' => 'nte_status'])) ?>">
+                <?= t8_csrf_field() ?>
+                <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                <textarea class="t8-textarea" name="rejection_reason" rows="3" placeholder="Enter reason for rejection..."></textarea>
+                <div class="t8-hr-decision-actions">
+                    <button class="t8-btn t8-btn-success t8-btn-sm" type="submit" name="status" value="approved"><i class="fa-solid fa-check"></i> Approve / Issue</button>
+                    <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit" name="status" value="rejected"><i class="fa-solid fa-xmark"></i> Reject</button>
+                </div>
+            </form>
         <?php elseif ($isAdmin && $nte['status'] !== 'archived'): ?>
             <form method="post" action="<?= e(page_url('documents', ['action' => 'nte_status'])) ?>" style="margin-top: var(--t8-space-4);"
                   onsubmit="return confirm('Archive this notice?');">
@@ -349,6 +349,12 @@ if ($action === 'nte_view') {
                 <input type="hidden" name="status" value="archived">
                 <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit"><i class="fa-solid fa-box-archive"></i> Archive</button>
             </form>
+        <?php endif; ?>
+        <?php if ($nte['status'] === 'rejected'): ?>
+            <div class="t8-field" style="margin-top: var(--t8-space-4);">
+                <label class="t8-label">Rejection Reason</label>
+                <p><?= nl2br(e((string) ($nte['rejection_reason'] ?? '—'))) ?></p>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -384,17 +390,31 @@ if ($action === 'nte_status') {
 
     $id = (int) ($_POST['id'] ?? 0);
     $newStatus = (string) ($_POST['status'] ?? '');
+    $rejectionReason = trim((string) ($_POST['rejection_reason'] ?? ''));
     if (!in_array($newStatus, ['approved', 'rejected', 'archived'], true)) {
         t8_flash_set('danger', 'Invalid status.');
+        redirect(page_url('documents', ['action' => 'nte_view', 'id' => $id]));
+    }
+    if ($newStatus === 'rejected' && $rejectionReason === '') {
+        t8_flash_set('danger', 'A rejection reason is required.');
         redirect(page_url('documents', ['action' => 'nte_view', 'id' => $id]));
     }
 
     $nte = t8_hr_nte_fetch($pdo, $id);
     if ($nte) {
-        $pdo->prepare('UPDATE team8_notice_to_explain SET status = :status WHERE id = :id')
-            ->execute(['status' => $newStatus, 'id' => $id]);
+        $pdo->prepare('UPDATE team8_notice_to_explain SET status = :status, rejection_reason = :reason WHERE id = :id')
+            ->execute(['status' => $newStatus, 'reason' => $newStatus === 'rejected' ? $rejectionReason : null, 'id' => $id]);
         t8_audit_log($pdo, $currentUserId, 'nte', $id, $newStatus);
-        t8_hr_notify($pdo, (int) $nte['employee_id'], 'Your Notice To Explain ' . $nte['document_number'] . ' was marked ' . $newStatus . '.');
+        $notificationMessage = 'Your Notice To Explain ' . $nte['document_number'] . ' was marked ' . $newStatus . '.';
+        if ($newStatus === 'rejected') {
+            $notificationMessage .= ' Reason: ' . $rejectionReason;
+        }
+        t8_hr_notify(
+            $pdo,
+            (int) $nte['employee_id'],
+            $notificationMessage,
+            page_url('documents', ['action' => 'nte_view', 'id' => $id])
+        );
         t8_flash_set('success', 'Notice To Explain ' . $newStatus . '.');
     } else {
         t8_flash_set('danger', 'Notice To Explain not found.');

@@ -253,17 +253,14 @@ if ($action === 'memorandum_view') {
                         <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit"><i class="fa-solid fa-paper-plane"></i> Send for Approval</button>
                     </form>
                 <?php else: ?>
-                    <form method="post" action="<?= e(page_url('documents', ['action' => 'memorandum_status'])) ?>">
+                    <form class="t8-hr-decision-form" method="post" action="<?= e(page_url('documents', ['action' => 'memorandum_status'])) ?>">
                         <?= t8_csrf_field() ?>
                         <input type="hidden" name="id" value="<?= e((string) $id) ?>">
-                        <input type="hidden" name="status" value="approved">
-                        <button class="t8-btn t8-btn-success t8-btn-sm" type="submit"><i class="fa-solid fa-check"></i> Approve</button>
-                    </form>
-                    <form method="post" action="<?= e(page_url('documents', ['action' => 'memorandum_status'])) ?>">
-                        <?= t8_csrf_field() ?>
-                        <input type="hidden" name="id" value="<?= e((string) $id) ?>">
-                        <input type="hidden" name="status" value="rejected">
-                        <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit"><i class="fa-solid fa-xmark"></i> Reject</button>
+                        <textarea class="t8-textarea" name="rejection_reason" rows="3" placeholder="Enter reason for rejection..."></textarea>
+                        <div class="t8-hr-decision-actions">
+                            <button class="t8-btn t8-btn-success t8-btn-sm" type="submit" name="status" value="approved"><i class="fa-solid fa-check"></i> Approve</button>
+                            <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit" name="status" value="rejected"><i class="fa-solid fa-xmark"></i> Reject</button>
+                        </div>
                     </form>
                 <?php endif; ?>
             </div>
@@ -274,6 +271,12 @@ if ($action === 'memorandum_view') {
                 <input type="hidden" name="status" value="archived">
                 <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit"><i class="fa-solid fa-box-archive"></i> Archive</button>
             </form>
+        <?php endif; ?>
+        <?php if ($memo['status'] === 'rejected'): ?>
+            <div class="t8-field" style="margin-top: var(--t8-space-4);">
+                <label class="t8-label">Rejection Reason</label>
+                <p><?= nl2br(e((string) ($memo['rejection_reason'] ?? '—'))) ?></p>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -308,15 +311,53 @@ if ($action === 'memorandum_status') {
 
     $id = (int) ($_POST['id'] ?? 0);
     $newStatus = (string) ($_POST['status'] ?? '');
+    $rejectionReason = trim((string) ($_POST['rejection_reason'] ?? ''));
     if (!in_array($newStatus, T8_HR_STATUSES, true)) {
         t8_flash_set('danger', 'Invalid status.');
+        redirect(page_url('documents', ['action' => 'memorandum_view', 'id' => $id]));
+    }
+    if ($newStatus === 'rejected' && $rejectionReason === '') {
+        t8_flash_set('danger', 'A rejection reason is required.');
         redirect(page_url('documents', ['action' => 'memorandum_view', 'id' => $id]));
     }
 
     $memo = t8_hr_memorandum_fetch($pdo, $id);
     if ($memo) {
-        $pdo->prepare('UPDATE team8_memorandums SET status = :status WHERE id = :id')->execute(['status' => $newStatus, 'id' => $id]);
+        $pdo->prepare('UPDATE team8_memorandums SET status = :status, rejection_reason = :reason WHERE id = :id')
+            ->execute(['status' => $newStatus, 'reason' => $newStatus === 'rejected' ? $rejectionReason : null, 'id' => $id]);
         t8_audit_log($pdo, $currentUserId, 'memorandum', $id, $newStatus);
+        if ($newStatus === 'rejected') {
+            $recipientRows = t8_hr_memorandum_recipients($pdo, $id);
+            $recipientIds = [];
+            $allDepartments = false;
+            $departmentIds = [];
+            foreach ($recipientRows as $recipient) {
+                if ($recipient['recipient_type'] === 'all_departments') {
+                    $allDepartments = true;
+                    break;
+                }
+                if ($recipient['department_id'] !== null) {
+                    $departmentIds[] = (int) $recipient['department_id'];
+                }
+            }
+            if ($allDepartments) {
+                $recipientIds = $pdo->query('SELECT id FROM users')->fetchAll(PDO::FETCH_COLUMN);
+            } elseif ($departmentIds !== []) {
+                $placeholders = implode(',', array_fill(0, count($departmentIds), '?'));
+                $recipientStmt = $pdo->prepare("SELECT id FROM users WHERE department_id IN ($placeholders)");
+                $recipientStmt->execute(array_values(array_unique($departmentIds)));
+                $recipientIds = $recipientStmt->fetchAll(PDO::FETCH_COLUMN);
+            }
+            $notificationMessage = 'The ' . ($memo['kind'] === 'warning_letter' ? 'warning letter' : 'memorandum') . ' ' . $memo['document_number'] . ' was rejected. Reason: ' . $rejectionReason;
+            foreach (array_unique(array_map('intval', $recipientIds)) as $recipientId) {
+                t8_hr_notify(
+                    $pdo,
+                    $recipientId,
+                    $notificationMessage,
+                    page_url('documents', ['action' => 'memorandum_view', 'id' => $id])
+                );
+            }
+        }
         t8_flash_set('success', 'Document marked ' . $newStatus . '.');
     } else {
         t8_flash_set('danger', 'Document not found.');

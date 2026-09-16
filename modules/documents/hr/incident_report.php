@@ -262,20 +262,15 @@ if ($action === 'incident_report_view') {
         </table>
 
         <?php if ($isAdmin && $report['status'] === 'pending'): ?>
-            <div style="margin-top: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
-                <form method="post" action="<?= e(page_url('documents', ['action' => 'incident_report_status'])) ?>">
-                    <?= t8_csrf_field() ?>
-                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
-                    <input type="hidden" name="status" value="approved">
-                    <button class="t8-btn t8-btn-success t8-btn-sm" type="submit"><i class="fa-solid fa-check"></i> Approve</button>
-                </form>
-                <form method="post" action="<?= e(page_url('documents', ['action' => 'incident_report_status'])) ?>">
-                    <?= t8_csrf_field() ?>
-                    <input type="hidden" name="id" value="<?= e((string) $id) ?>">
-                    <input type="hidden" name="status" value="rejected">
-                    <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit"><i class="fa-solid fa-xmark"></i> Reject</button>
-                </form>
-            </div>
+            <form class="t8-hr-decision-form" method="post" action="<?= e(page_url('documents', ['action' => 'incident_report_status'])) ?>">
+                <?= t8_csrf_field() ?>
+                <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                <textarea class="t8-textarea" name="rejection_reason" rows="3" placeholder="Enter reason for rejection..."></textarea>
+                <div class="t8-hr-decision-actions">
+                    <button class="t8-btn t8-btn-success t8-btn-sm" type="submit" name="status" value="approved"><i class="fa-solid fa-check"></i> Approve</button>
+                    <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit" name="status" value="rejected"><i class="fa-solid fa-xmark"></i> Reject</button>
+                </div>
+            </form>
         <?php elseif ($isAdmin && $report['status'] !== 'archived'): ?>
             <form method="post" action="<?= e(page_url('documents', ['action' => 'incident_report_status'])) ?>" style="margin-top: var(--t8-space-4);"
                   onsubmit="return confirm('Archive this incident report?');">
@@ -284,6 +279,12 @@ if ($action === 'incident_report_view') {
                 <input type="hidden" name="status" value="archived">
                 <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit"><i class="fa-solid fa-box-archive"></i> Archive</button>
             </form>
+        <?php endif; ?>
+        <?php if ($report['status'] === 'rejected'): ?>
+            <div class="t8-field" style="margin-top: var(--t8-space-4);">
+                <label class="t8-label">Rejection Reason</label>
+                <p><?= nl2br(e((string) ($report['rejection_reason'] ?? '—'))) ?></p>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -319,17 +320,31 @@ if ($action === 'incident_report_status') {
 
     $id = (int) ($_POST['id'] ?? 0);
     $newStatus = (string) ($_POST['status'] ?? '');
+    $rejectionReason = trim((string) ($_POST['rejection_reason'] ?? ''));
     if (!in_array($newStatus, ['approved', 'rejected', 'archived'], true)) {
         t8_flash_set('danger', 'Invalid status.');
+        redirect(page_url('documents', ['action' => 'incident_report_view', 'id' => $id]));
+    }
+    if ($newStatus === 'rejected' && $rejectionReason === '') {
+        t8_flash_set('danger', 'A rejection reason is required.');
         redirect(page_url('documents', ['action' => 'incident_report_view', 'id' => $id]));
     }
 
     $report = t8_hr_incident_report_fetch($pdo, $id);
     if ($report) {
-        $pdo->prepare('UPDATE team8_incident_reports SET status = :status WHERE id = :id')
-            ->execute(['status' => $newStatus, 'id' => $id]);
+        $pdo->prepare('UPDATE team8_incident_reports SET status = :status, rejection_reason = :reason WHERE id = :id')
+            ->execute(['status' => $newStatus, 'reason' => $newStatus === 'rejected' ? $rejectionReason : null, 'id' => $id]);
         t8_audit_log($pdo, $currentUserId, 'incident_report', $id, $newStatus);
-        t8_hr_notify($pdo, (int) $report['employee_id'], 'Your incident report ' . $report['document_number'] . ' was marked ' . $newStatus . '.');
+        $notificationMessage = 'Your incident report ' . $report['document_number'] . ' was marked ' . $newStatus . '.';
+        if ($newStatus === 'rejected') {
+            $notificationMessage .= ' Reason: ' . $rejectionReason;
+        }
+        t8_hr_notify(
+            $pdo,
+            (int) $report['employee_id'],
+            $notificationMessage,
+            page_url('documents', ['action' => 'incident_report_view', 'id' => $id])
+        );
         t8_flash_set('success', 'Incident report ' . $newStatus . '.');
     } else {
         t8_flash_set('danger', 'Incident report not found.');

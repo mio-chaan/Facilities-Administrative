@@ -25,7 +25,8 @@
 - `team8_documents.file_path` is the current file, while `team8_document_versions.file_path` preserves each historical file.
 - Visitor status values are `scheduled`, `checked_in`, `checked_out`, `cancelled`, and `expired`.
 - A reservation's free-text reason is stored in `team8_reservations.description`; approver notes are stored in `team8_reservation_approvals.remarks`.
-- `schema.sql` is the complete baseline for new installations. Apply the dated scripts in `database/migrations/` to upgrade an existing database.
+- `schema.sql` is the complete final schema for new installations. Import this file only; do not import the dated migration files afterward.
+- Apply the dated scripts in `database/migrations/` only when upgrading an existing database that already contains older Team 8 tables. Those scripts preserve and backfill existing data and are not required for a fresh database.
 
 ## Setup
 

@@ -177,20 +177,15 @@ if ($action === 'certificate_view') {
         <?php endif; ?>
 
         <?php if ($cert['status'] === 'pending'): ?>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <form method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>">
-                        <?= t8_csrf_field() ?>
-                        <input type="hidden" name="id" value="<?= e((string) $id) ?>">
-                        <input type="hidden" name="status" value="approved">
-                        <button class="t8-btn t8-btn-success t8-btn-sm" type="submit"><i class="fa-solid fa-check"></i> Approve</button>
-                </form>
-                <form method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>">
-                        <?= t8_csrf_field() ?>
-                        <input type="hidden" name="id" value="<?= e((string) $id) ?>">
-                        <input type="hidden" name="status" value="rejected">
-                        <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit"><i class="fa-solid fa-xmark"></i> Reject</button>
-                </form>
-            </div>
+            <form class="t8-hr-decision-form" method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>">
+                <?= t8_csrf_field() ?>
+                <input type="hidden" name="id" value="<?= e((string) $id) ?>">
+                <textarea class="t8-textarea" name="rejection_reason" rows="3" placeholder="Enter reason for rejection..."></textarea>
+                <div class="t8-hr-decision-actions">
+                    <button class="t8-btn t8-btn-success t8-btn-sm" type="submit" name="status" value="approved"><i class="fa-solid fa-check"></i> Approve</button>
+                    <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit" name="status" value="rejected"><i class="fa-solid fa-xmark"></i> Reject</button>
+                </div>
+            </form>
         <?php elseif ($cert['status'] !== 'archived'): ?>
             <form method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>" onsubmit="return confirm('Archive this certificate?');">
                 <?= t8_csrf_field() ?>
@@ -198,6 +193,12 @@ if ($action === 'certificate_view') {
                 <input type="hidden" name="status" value="archived">
                 <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit"><i class="fa-solid fa-box-archive"></i> Archive</button>
             </form>
+        <?php endif; ?>
+        <?php if ($cert['status'] === 'rejected'): ?>
+            <div class="t8-field" style="margin-top: var(--t8-space-4);">
+                <label class="t8-label">Rejection Reason</label>
+                <p><?= nl2br(e((string) ($cert['rejection_reason'] ?? '—'))) ?></p>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -232,17 +233,32 @@ if ($action === 'certificate_status') {
 
     $id = (int) ($_POST['id'] ?? 0);
     $newStatus = (string) ($_POST['status'] ?? '');
+    $rejectionReason = trim((string) ($_POST['rejection_reason'] ?? ''));
     if (!in_array($newStatus, T8_HR_STATUSES, true)) {
         t8_flash_set('danger', 'Invalid status.');
+        redirect(page_url('documents', ['action' => 'certificate_view', 'id' => $id]));
+    }
+    if ($newStatus === 'rejected' && $rejectionReason === '') {
+        t8_flash_set('danger', 'A rejection reason is required.');
         redirect(page_url('documents', ['action' => 'certificate_view', 'id' => $id]));
     }
 
     $cert = t8_hr_certificate_fetch($pdo, $id);
     if ($cert) {
-        $pdo->prepare('UPDATE team8_certificates SET status = :status WHERE id = :id')->execute(['status' => $newStatus, 'id' => $id]);
+        $pdo->prepare('UPDATE team8_certificates SET status = :status, rejection_reason = :reason WHERE id = :id')
+            ->execute(['status' => $newStatus, 'reason' => $newStatus === 'rejected' ? $rejectionReason : null, 'id' => $id]);
         t8_audit_log($pdo, $currentUserId, 'certificate', $id, $newStatus);
+        $notificationMessage = 'Your certificate ' . $cert['document_number'] . ' was marked ' . $newStatus . '.';
+        if ($newStatus === 'rejected') {
+            $notificationMessage .= ' Reason: ' . $rejectionReason;
+        }
         foreach ($cert['recipients'] as $recipient) {
-            t8_hr_notify($pdo, (int) $recipient['employee_id'], 'Your certificate ' . $cert['document_number'] . ' was marked ' . $newStatus . '.');
+            t8_hr_notify(
+                $pdo,
+                (int) $recipient['employee_id'],
+                $notificationMessage,
+                page_url('documents', ['action' => 'certificate_view', 'id' => $id])
+            );
         }
         t8_flash_set('success', 'Certificate ' . $newStatus . '.');
     } else {

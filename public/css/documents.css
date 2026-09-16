@@ -254,6 +254,29 @@
 .t8-hr-readonly-item span { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--t8-text-muted); }
 .t8-hr-readonly-item strong { font-size: 0.92rem; color: var(--t8-ink); }
 
+.t8-hr-decision-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: var(--t8-space-4);
+    max-width: 640px;
+}
+.t8-hr-decision-form .t8-textarea {
+    min-height: 110px;
+    resize: vertical;
+    background: #fff;
+}
+.t8-hr-decision-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+}
+.t8-hr-decision-actions .t8-btn {
+    min-width: 128px;
+    justify-content: center;
+}
+
 /* ---- Department-backed memorandum recipients ---- */
 .t8-recipient-picker { position: relative; }
 .t8-recipient-trigger {

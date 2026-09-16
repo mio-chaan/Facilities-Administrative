@@ -25,6 +25,7 @@
 declare(strict_types=1);
 
 const T8_HR_STATUSES = ['draft', 'pending', 'approved', 'rejected', 'archived'];
+const T8_HR_CURRENT_STATUSES = ['draft', 'pending', 'approved'];
 
 const T8_INCIDENT_TYPES = [
     'Tardiness', 'Absence', 'Misconduct', 'Policy Violation',
@@ -268,11 +269,19 @@ if (!function_exists('t8_hr_status_badge')) {
 
 if (!function_exists('t8_hr_notify')) {
     /** Reuses the existing shared `notifications` table/bell widget. */
-    function t8_hr_notify(PDO $pdo, int $userId, string $message): void
+    function t8_hr_notify(PDO $pdo, int $userId, string $message, ?string $targetUrl = null): void
     {
         try {
-            $pdo->prepare('INSERT INTO notifications (user_id, message, status) VALUES (:user_id, :message, "unread")')
-                ->execute(['user_id' => $userId, 'message' => $message]);
+            $supportsTargetUrl = function_exists('t8_notification_targets_supported')
+                ? t8_notification_targets_supported($pdo)
+                : (bool) $pdo->query("SHOW COLUMNS FROM notifications LIKE 'target_url'")->fetch(PDO::FETCH_ASSOC);
+            if ($supportsTargetUrl) {
+                $pdo->prepare('INSERT INTO notifications (user_id, message, target_url, status) VALUES (:user_id, :message, :target_url, "unread")')
+                    ->execute(['user_id' => $userId, 'message' => $message, 'target_url' => $targetUrl]);
+            } else {
+                $pdo->prepare('INSERT INTO notifications (user_id, message, status) VALUES (:user_id, :message, "unread")')
+                    ->execute(['user_id' => $userId, 'message' => $message]);
+            }
         } catch (PDOException $e) {
             // A failed notification must never break the request that triggered it.
             error_log('HR document notification failed: ' . $e->getMessage());
@@ -539,17 +548,17 @@ if (!function_exists('t8_hr_dashboard_stats')) {
         ];
 
         try {
-            $stats['total_documents'] = (int) $pdo->query("SELECT COUNT(*) FROM team8_documents WHERE deleted_at IS NULL")->fetchColumn();
-
             $generated = 0;
             $archived = (int) $pdo->query("SELECT COUNT(*) FROM team8_documents WHERE deleted_at IS NOT NULL")->fetchColumn();
             // BUG FIX: team8_explanations was missing from this list, so
             // explanations that an admin archived via explanation_review
             // never showed up in "Generated Documents" or "Archived" here.
             foreach (['team8_incident_reports', 'team8_notice_to_explain', 'team8_explanations', 'team8_memorandums', 'team8_certificates'] as $table) {
-                $generated += (int) $pdo->query("SELECT COUNT(*) FROM {$table} WHERE status != 'archived'")->fetchColumn();
+                $generated += (int) $pdo->query("SELECT COUNT(*) FROM {$table} WHERE status IN ('draft', 'pending', 'approved')")->fetchColumn();
                 $archived  += (int) $pdo->query("SELECT COUNT(*) FROM {$table} WHERE status = 'archived'")->fetchColumn();
             }
+            $uploaded = (int) $pdo->query("SELECT COUNT(*) FROM team8_documents WHERE deleted_at IS NULL AND status IN ('draft', 'pending', 'approved')")->fetchColumn();
+            $stats['total_documents'] = $uploaded + $generated;
             $stats['generated_documents'] = $generated;
             $stats['archived'] = $archived;
 
@@ -591,8 +600,10 @@ if (!function_exists('t8_hr_recent_documents')) {
 
         try {
             $uploads = $pdo->query(
-                "SELECT id, title AS label, 'upload' AS doc_type, 'approved' AS status, updated_at AS ts
-                 FROM team8_documents WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 20"
+                "SELECT id, title AS label, 'upload' AS doc_type, status, created_at AS ts
+                 FROM team8_documents
+                 WHERE deleted_at IS NULL AND status IN ('draft', 'pending', 'approved')
+                 ORDER BY created_at DESC, id DESC LIMIT 20"
             )->fetchAll(PDO::FETCH_ASSOC);
             foreach ($uploads as $row) {
                 $items[] = $row + ['url_action' => 'versions'];
@@ -600,12 +611,16 @@ if (!function_exists('t8_hr_recent_documents')) {
 
             if ($isAdmin) {
                 $incidentSql = "SELECT id, document_number AS label, 'incident_report' AS doc_type, status, created_at AS ts
-                                 FROM team8_incident_reports ORDER BY created_at DESC LIMIT 20";
+                                 FROM team8_incident_reports
+                                 WHERE status IN ('draft', 'pending', 'approved')
+                                 ORDER BY created_at DESC, id DESC LIMIT 20";
                 $incidents = $pdo->query($incidentSql)->fetchAll(PDO::FETCH_ASSOC);
             } else {
                 $stmt = $pdo->prepare(
                     "SELECT id, document_number AS label, 'incident_report' AS doc_type, status, created_at AS ts
-                     FROM team8_incident_reports WHERE employee_id = :uid ORDER BY created_at DESC LIMIT 20"
+                     FROM team8_incident_reports
+                     WHERE employee_id = :uid AND status IN ('draft', 'pending', 'approved')
+                     ORDER BY created_at DESC, id DESC LIMIT 20"
                 );
                 $stmt->execute(['uid' => $currentUserId]);
                 $incidents = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -617,12 +632,16 @@ if (!function_exists('t8_hr_recent_documents')) {
             if ($isAdmin) {
                 $ntes = $pdo->query(
                     "SELECT id, document_number AS label, 'nte' AS doc_type, status, created_at AS ts
-                     FROM team8_notice_to_explain ORDER BY created_at DESC LIMIT 20"
+                     FROM team8_notice_to_explain
+                     WHERE status IN ('draft', 'pending', 'approved')
+                     ORDER BY created_at DESC, id DESC LIMIT 20"
                 )->fetchAll(PDO::FETCH_ASSOC);
             } else {
                 $stmt = $pdo->prepare(
                     "SELECT id, document_number AS label, 'nte' AS doc_type, status, created_at AS ts
-                     FROM team8_notice_to_explain WHERE employee_id = :uid ORDER BY created_at DESC LIMIT 20"
+                     FROM team8_notice_to_explain
+                     WHERE employee_id = :uid AND status IN ('draft', 'pending', 'approved')
+                     ORDER BY created_at DESC, id DESC LIMIT 20"
                 );
                 $stmt->execute(['uid' => $currentUserId]);
                 $ntes = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -633,9 +652,11 @@ if (!function_exists('t8_hr_recent_documents')) {
 
             if ($isAdmin) {
                 $memos = $pdo->query(
-                    "SELECT id, CONCAT(IF(kind='warning_letter','Warning Letter: ','Memo: '), title) AS label,
+                        "SELECT id, CONCAT(IF(kind='warning_letter','Warning Letter: ','Memo: '), title) AS label,
                             kind AS doc_type, status, created_at AS ts
-                     FROM team8_memorandums ORDER BY created_at DESC LIMIT 20"
+                         FROM team8_memorandums
+                         WHERE status IN ('draft', 'pending', 'approved')
+                         ORDER BY created_at DESC, id DESC LIMIT 20"
                 )->fetchAll(PDO::FETCH_ASSOC);
             } else {
                 $stmt = $pdo->prepare(
@@ -643,9 +664,9 @@ if (!function_exists('t8_hr_recent_documents')) {
                             m.kind AS doc_type, m.status, m.created_at AS ts
                      FROM team8_memorandums m
                      JOIN team8_memorandum_recipients mr ON mr.memorandum_id = m.id
-                                         WHERE m.status = 'approved'
+                                         WHERE m.status IN ('draft', 'pending', 'approved')
                                              AND (mr.recipient_type = 'all_departments' OR mr.department_id = :department_id)
-                     ORDER BY m.created_at DESC LIMIT 20"
+                     ORDER BY m.created_at DESC, m.id DESC LIMIT 20"
                 );
                 $stmt->execute(['department_id' => (int) ($_SESSION['department_id'] ?? 0)]);
                 $memos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -657,14 +678,18 @@ if (!function_exists('t8_hr_recent_documents')) {
             if ($isAdmin) {
                 $certs = $pdo->query(
                     "SELECT id, document_number AS label, 'certificate' AS doc_type, status, created_at AS ts
-                     FROM team8_certificates ORDER BY created_at DESC LIMIT 20"
+                     FROM team8_certificates
+                     WHERE status IN ('draft', 'pending', 'approved')
+                     ORDER BY created_at DESC, id DESC LIMIT 20"
                 )->fetchAll(PDO::FETCH_ASSOC);
             } else {
                 $stmt = $pdo->prepare(
                     "SELECT id, document_number AS label, 'certificate' AS doc_type, status, created_at AS ts
                      FROM team8_certificates c
                      JOIN team8_certificate_recipients cr ON cr.certificate_id = c.id
-                     WHERE cr.employee_id = :uid ORDER BY c.created_at DESC LIMIT 20"
+                                         WHERE cr.employee_id = :uid
+                                             AND c.status IN ('draft', 'pending', 'approved')
+                                         ORDER BY c.created_at DESC, c.id DESC LIMIT 20"
                 );
                 $stmt->execute(['uid' => $currentUserId]);
                 $certs = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -676,7 +701,12 @@ if (!function_exists('t8_hr_recent_documents')) {
             return [];
         }
 
-        usort($items, static fn ($a, $b) => strtotime((string) $b['ts']) <=> strtotime((string) $a['ts']));
+        usort($items, static function (array $a, array $b): int {
+            $timestampComparison = strtotime((string) $b['ts']) <=> strtotime((string) $a['ts']);
+            return $timestampComparison !== 0
+                ? $timestampComparison
+                : ((int) $b['id'] <=> (int) $a['id']);
+        });
 
         return array_slice($items, 0, $limit);
     }

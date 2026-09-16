@@ -163,7 +163,7 @@ if ($action === 'explanation_view') {
                 <?= t8_csrf_field() ?>
                 <input type="hidden" name="id" value="<?= e((string) $id) ?>">
                 <div class="t8-field">
-                    <label class="t8-label" for="admin_remarks">Remarks <span class="t8-help-text">(optional)</span></label>
+                    <label class="t8-label" for="admin_remarks">Remarks <span class="t8-help-text">(required when rejecting)</span></label>
                     <textarea class="t8-textarea" id="admin_remarks" name="admin_remarks" rows="3"></textarea>
                 </div>
                 <button class="t8-btn t8-btn-success t8-btn-sm" type="submit" name="status" value="approved"><i class="fa-solid fa-check"></i> Approve</button>
@@ -200,6 +200,10 @@ if ($action === 'explanation_review') {
         t8_flash_set('danger', 'Invalid status.');
         redirect(page_url('documents', ['action' => 'explanation_view', 'id' => $id]));
     }
+    if ($newStatus === 'rejected' && $remarks === '') {
+        t8_flash_set('danger', 'A rejection reason is required.');
+        redirect(page_url('documents', ['action' => 'explanation_view', 'id' => $id]));
+    }
 
     $explanation = t8_hr_explanation_fetch($pdo, $id);
     if ($explanation) {
@@ -212,7 +216,16 @@ if ($action === 'explanation_review') {
             'id'       => $id,
         ]);
         t8_audit_log($pdo, $currentUserId, 'explanation', $id, $newStatus);
-        t8_hr_notify($pdo, (int) $explanation['employee_id'], 'Your explanation for ' . $explanation['nte_number'] . ' was marked ' . $newStatus . '.');
+        $notificationMessage = 'Your explanation for ' . $explanation['nte_number'] . ' was marked ' . $newStatus . '.';
+        if ($newStatus === 'rejected') {
+            $notificationMessage .= ' Reason: ' . $remarks;
+        }
+        t8_hr_notify(
+            $pdo,
+            (int) $explanation['employee_id'],
+            $notificationMessage,
+            page_url('documents', ['action' => 'explanation_view', 'id' => $id])
+        );
         t8_flash_set('success', 'Explanation ' . $newStatus . '.');
     } else {
         t8_flash_set('danger', 'Explanation letter not found.');
