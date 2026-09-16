@@ -128,6 +128,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var resultsContainer = document.getElementById('t8DocumentsResults');
 
     if (!filterForm || !resultsContainer) {
+        initRecipientPickers();
         return;
     }
 
@@ -195,4 +196,73 @@ document.addEventListener('DOMContentLoaded', function () {
         event.preventDefault();
         applyDocumentsFilter();
     });
+
+    // ---- Memorandum / Warning Letter recipient picker ----
+    function initRecipientPickers() {
+        document.querySelectorAll('[data-recipient-picker]').forEach(function (picker) {
+        var trigger = picker.querySelector('[data-recipient-trigger]');
+        var panel = picker.querySelector('[data-recipient-panel]');
+        var search = picker.querySelector('[data-recipient-search]');
+        var checkboxes = Array.prototype.slice.call(picker.querySelectorAll('[data-recipient-checkbox]'));
+        var allDepartments = picker.querySelector('[value="all_departments"]');
+        var summary = picker.querySelector('[data-recipient-summary]');
+
+        if (!trigger || !panel || !summary) return;
+
+        function selectedLabels() {
+            return checkboxes.filter(function (checkbox) { return checkbox.checked; }).map(function (checkbox) {
+                return checkbox.parentElement.querySelector('span').textContent.trim();
+            });
+        }
+
+        function syncPicker() {
+            var selected = selectedLabels();
+            summary.textContent = selected.length ? selected.join(', ') : 'Select departments';
+            if (allDepartments && allDepartments.checked) {
+                checkboxes.forEach(function (checkbox) {
+                    if (checkbox !== allDepartments) checkbox.checked = false;
+                });
+            }
+        }
+
+        trigger.addEventListener('click', function () {
+            var isOpen = !panel.hidden;
+            panel.hidden = isOpen;
+            trigger.setAttribute('aria-expanded', String(!isOpen));
+            if (!isOpen && search) search.focus();
+        });
+        checkboxes.forEach(function (checkbox) {
+            checkbox.addEventListener('change', function () {
+                if (checkbox === allDepartments && checkbox.checked) {
+                    checkboxes.forEach(function (other) { if (other !== checkbox) other.checked = false; });
+                } else if (checkbox !== allDepartments && checkbox.checked && allDepartments) {
+                    allDepartments.checked = false;
+                }
+                syncPicker();
+            });
+        });
+        if (search) {
+            search.addEventListener('input', function () {
+                var query = search.value.trim().toLowerCase();
+                picker.querySelectorAll('[data-recipient-option]').forEach(function (option) {
+                    option.hidden = query !== '' && option.textContent.toLowerCase().indexOf(query) === -1;
+                });
+            });
+        }
+        document.addEventListener('click', function (event) {
+            if (!picker.contains(event.target)) {
+                panel.hidden = true;
+                trigger.setAttribute('aria-expanded', 'false');
+            }
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape') {
+                panel.hidden = true;
+                trigger.setAttribute('aria-expanded', 'false');
+            }
+        });
+        syncPicker();
+        });
+    }
+    initRecipientPickers();
 });

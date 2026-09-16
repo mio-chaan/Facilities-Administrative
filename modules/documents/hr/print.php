@@ -85,7 +85,7 @@ switch ($type) {
         $bodyHtml = '
             <table class="print-table">
                 <tr><th>Title</th><td>' . e($row['title']) . '</td></tr>
-                <tr><th>Recipients</th><td>' . e($row['recipients']) . '</td></tr>
+                <tr><th>Recipients</th><td>' . e(implode(', ', $row['recipient_labels'] ?? [])) . '</td></tr>
             </table>
             <h3>Content</h3>
             <p>' . nl2br(e((string) $row['content'])) . '</p>'

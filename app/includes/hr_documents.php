@@ -81,6 +81,103 @@ if (!function_exists('t8_hr_current_employee')) {
     }
 }
 
+if (!function_exists('t8_hr_departments')) {
+    function t8_hr_departments(PDO $pdo): array
+    {
+        return $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+}
+
+if (!function_exists('t8_hr_recipient_selection')) {
+    function t8_hr_recipient_selection(PDO $pdo, array $values): array
+    {
+        $values = array_values(array_unique(array_map('strval', $values)));
+        if ($values === []) {
+            return ['rows' => [], 'labels' => [], 'error' => 'Recipients are required.'];
+        }
+
+        if (in_array('all_departments', $values, true)) {
+            if (count($values) !== 1) {
+                return ['rows' => [], 'labels' => [], 'error' => 'Choose All Departments or specific departments, not both.'];
+            }
+            return ['rows' => [['recipient_type' => 'all_departments', 'department_id' => null]], 'labels' => ['All Departments'], 'error' => null];
+        }
+
+        $ids = [];
+        foreach ($values as $value) {
+            if (!ctype_digit($value) || (int) $value < 1) {
+                return ['rows' => [], 'labels' => [], 'error' => 'One or more selected departments is invalid.'];
+            }
+            $ids[] = (int) $value;
+        }
+        $ids = array_values(array_unique($ids));
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare("SELECT id, name FROM departments WHERE id IN ($placeholders) ORDER BY name");
+        $stmt->execute($ids);
+        $departments = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if (count($departments) !== count($ids)) {
+            return ['rows' => [], 'labels' => [], 'error' => 'One or more selected departments could not be found.'];
+        }
+
+        $rows = [];
+        $labels = [];
+        foreach ($departments as $department) {
+            $rows[] = ['recipient_type' => 'department', 'department_id' => (int) $department['id']];
+            $labels[] = (string) $department['name'];
+        }
+        return ['rows' => $rows, 'labels' => $labels, 'error' => null];
+    }
+}
+
+if (!function_exists('t8_hr_memorandum_recipients')) {
+    function t8_hr_memorandum_recipients(PDO $pdo, int $memorandumId): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT r.recipient_type, r.department_id, d.name AS department_name
+             FROM team8_memorandum_recipients r
+             LEFT JOIN departments d ON d.id = r.department_id
+             WHERE r.memorandum_id = :id
+             ORDER BY r.recipient_type DESC, d.name'
+        );
+        $stmt->execute(['id' => $memorandumId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+}
+
+if (!function_exists('t8_hr_memorandum_recipient_labels')) {
+    function t8_hr_memorandum_recipient_labels(PDO $pdo, int $memorandumId): array
+    {
+        $labels = [];
+        foreach (t8_hr_memorandum_recipients($pdo, $memorandumId) as $row) {
+            $labels[] = $row['recipient_type'] === 'all_departments' ? 'All Departments' : (string) $row['department_name'];
+        }
+        return $labels;
+    }
+}
+
+if (!function_exists('t8_hr_memorandum_visible_to_current_user')) {
+    function t8_hr_memorandum_visible_to_current_user(PDO $pdo, int $memorandumId): bool
+    {
+        if (t8_current_role() === 'admin') {
+            return true;
+        }
+        $departmentId = $_SESSION['department_id'] ?? null;
+        if ($departmentId === null) {
+            return false;
+        }
+        $stmt = $pdo->prepare(
+                        "SELECT COUNT(*)
+                         FROM team8_memorandum_recipients r
+                         JOIN team8_memorandums m ON m.id = r.memorandum_id
+                         WHERE r.memorandum_id = :id
+                             AND m.status = 'approved'
+                             AND (r.recipient_type = 'all_departments' OR r.department_id = :department_id)"
+        );
+        $stmt->execute(['id' => $memorandumId, 'department_id' => (int) $departmentId]);
+        return (int) $stmt->fetchColumn() > 0;
+    }
+}
+
 if (!function_exists('t8_hr_generate_doc_number')) {
     /** Sequential, human-readable document number, e.g. "IR-2026-000042". */
     function t8_hr_generate_doc_number(PDO $pdo, string $prefix, string $table): string
@@ -315,6 +412,9 @@ if (!function_exists('t8_hr_explanation_fetch')) {
 if (!function_exists('t8_hr_memorandum_fetch')) {
     function t8_hr_memorandum_fetch(PDO $pdo, int $id): ?array
     {
+        if (!t8_hr_memorandum_visible_to_current_user($pdo, $id)) {
+            return null;
+        }
         $stmt = $pdo->prepare(
             'SELECT m.*, p.full_name AS prepared_by_name
              FROM team8_memorandums m
@@ -323,6 +423,9 @@ if (!function_exists('t8_hr_memorandum_fetch')) {
         );
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $row['recipient_labels'] = t8_hr_memorandum_recipient_labels($pdo, $id);
+        }
         return $row ?: null;
     }
 }
@@ -393,9 +496,9 @@ if (!function_exists('t8_hr_recent_documents')) {
      * Built in PHP (not a SQL UNION) since the source tables have
      * unrelated column shapes and id spaces.
      *
-     * PRIVACY: uploads and memorandums are broadcast-style and stay
-     * visible to everyone (matching their existing, non-owner-scoped
-     * behavior elsewhere in this module). Incident reports, notices,
+    * PRIVACY: uploads stay visible to everyone. Memorandums and warning
+    * letters are limited to their normalized recipient departments.
+    * Incident reports, notices,
      * and certificates concern one specific employee, so a non-admin
      * viewer only sees their OWN — this mirrors the same ownership
      * check enforced server-side on the *_view actions themselves,
@@ -448,11 +551,25 @@ if (!function_exists('t8_hr_recent_documents')) {
                 $items[] = $row + ['url_action' => 'nte_view'];
             }
 
-            $memos = $pdo->query(
-                "SELECT id, CONCAT(IF(kind='warning_letter','Warning Letter: ','Memo: '), title) AS label,
-                        kind AS doc_type, status, created_at AS ts
-                 FROM team8_memorandums ORDER BY created_at DESC LIMIT 20"
-            )->fetchAll(PDO::FETCH_ASSOC);
+            if ($isAdmin) {
+                $memos = $pdo->query(
+                    "SELECT id, CONCAT(IF(kind='warning_letter','Warning Letter: ','Memo: '), title) AS label,
+                            kind AS doc_type, status, created_at AS ts
+                     FROM team8_memorandums ORDER BY created_at DESC LIMIT 20"
+                )->fetchAll(PDO::FETCH_ASSOC);
+            } else {
+                $stmt = $pdo->prepare(
+                    "SELECT DISTINCT m.id, CONCAT(IF(m.kind='warning_letter','Warning Letter: ','Memo: '), m.title) AS label,
+                            m.kind AS doc_type, m.status, m.created_at AS ts
+                     FROM team8_memorandums m
+                     JOIN team8_memorandum_recipients mr ON mr.memorandum_id = m.id
+                                         WHERE m.status = 'approved'
+                                             AND (mr.recipient_type = 'all_departments' OR mr.department_id = :department_id)
+                     ORDER BY m.created_at DESC LIMIT 20"
+                );
+                $stmt->execute(['department_id' => (int) ($_SESSION['department_id'] ?? 0)]);
+                $memos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            }
             foreach ($memos as $row) {
                 $items[] = $row + ['url_action' => 'memorandum_view'];
             }

@@ -15,7 +15,9 @@
 
 declare(strict_types=1);
 
-t8_require_role(['admin']);
+if ($action !== 'memorandum_view') {
+    t8_require_role(['admin']);
+}
 
 if ($action === 'memorandum_new' || $action === 'memorandum_edit') {
     $editId = $action === 'memorandum_edit' ? (int) ($_GET['id'] ?? 0) : 0;
@@ -28,15 +30,22 @@ if ($action === 'memorandum_new' || $action === 'memorandum_edit') {
     $kind = $existing['kind'] ?? ((string) ($_GET['kind'] ?? $_POST['kind'] ?? 'memorandum'));
     $kind = $kind === 'warning_letter' ? 'warning_letter' : 'memorandum';
     $label = $kind === 'warning_letter' ? 'Warning Letter' : 'Memorandum';
+    $departments = t8_hr_departments($pdo);
+    $recipientValues = $existing !== null
+        ? array_map(
+            static fn (array $row): string => $row['recipient_type'] === 'all_departments' ? 'all_departments' : (string) $row['department_id'],
+            t8_hr_memorandum_recipients($pdo, $editId)
+        )
+        : [];
 
     $formValues = $existing !== null
-        ? ['title' => $existing['title'], 'recipients' => $existing['recipients'], 'content' => $existing['content'], 'remarks' => (string) ($existing['remarks'] ?? '')]
-        : ['title' => '', 'recipients' => '', 'content' => '', 'remarks' => ''];
+        ? ['title' => $existing['title'], 'content' => $existing['content'], 'remarks' => (string) ($existing['remarks'] ?? '')]
+        : ['title' => '', 'content' => '', 'remarks' => ''];
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $recipientValues = isset($_POST['recipients']) && is_array($_POST['recipients']) ? array_values($_POST['recipients']) : [];
         $formValues = [
             'title'      => trim((string) ($_POST['title'] ?? '')),
-            'recipients' => trim((string) ($_POST['recipients'] ?? '')),
             'content'    => trim((string) ($_POST['content'] ?? '')),
             'remarks'    => trim((string) ($_POST['remarks'] ?? '')),
         ];
@@ -45,22 +54,41 @@ if ($action === 'memorandum_new' || $action === 'memorandum_edit') {
             $errors[] = 'Your session expired. Please try again.';
         } else {
             if ($formValues['title'] === '') { $errors[] = 'Title is required.'; }
-            if ($formValues['recipients'] === '') { $errors[] = 'Recipients are required.'; }
             if ($formValues['content'] === '') { $errors[] = 'Content is required.'; }
+            $recipientSelection = t8_hr_recipient_selection($pdo, $recipientValues);
+            if ($recipientSelection['error'] !== null) { $errors[] = $recipientSelection['error']; }
 
             if (!$errors && $action === 'memorandum_new') {
                 $docNumber = t8_hr_generate_doc_number($pdo, $kind === 'warning_letter' ? 'WL' : 'MEMO', 'team8_memorandums');
-                $stmt = $pdo->prepare(
-                    'INSERT INTO team8_memorandums (document_number, kind, title, recipients, content, remarks, prepared_by, status)
-                     VALUES (:document_number, :kind, :title, :recipients, :content, :remarks, :prepared_by, "draft")'
-                );
-                $stmt->execute([
-                    'document_number' => $docNumber, 'kind' => $kind,
-                    'title' => $formValues['title'], 'recipients' => $formValues['recipients'],
-                    'content' => $formValues['content'], 'remarks' => $formValues['remarks'] !== '' ? $formValues['remarks'] : null,
-                    'prepared_by' => $currentUserId,
-                ]);
-                $newId = (int) $pdo->lastInsertId();
+                $pdo->beginTransaction();
+                try {
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO team8_memorandums (document_number, kind, title, recipients, content, remarks, prepared_by, status)
+                         VALUES (:document_number, :kind, :title, :recipients, :content, :remarks, :prepared_by, "draft")'
+                    );
+                    $stmt->execute([
+                        'document_number' => $docNumber, 'kind' => $kind,
+                        'title' => $formValues['title'], 'recipients' => implode(', ', $recipientSelection['labels']),
+                        'content' => $formValues['content'], 'remarks' => $formValues['remarks'] !== '' ? $formValues['remarks'] : null,
+                        'prepared_by' => $currentUserId,
+                    ]);
+                    $newId = (int) $pdo->lastInsertId();
+                    $recipientStmt = $pdo->prepare(
+                        'INSERT INTO team8_memorandum_recipients (memorandum_id, recipient_type, department_id)
+                         VALUES (:memorandum_id, :recipient_type, :department_id)'
+                    );
+                    foreach ($recipientSelection['rows'] as $recipient) {
+                        $recipientStmt->execute([
+                            'memorandum_id' => $newId,
+                            'recipient_type' => $recipient['recipient_type'],
+                            'department_id' => $recipient['department_id'],
+                        ]);
+                    }
+                    $pdo->commit();
+                } catch (Throwable $exception) {
+                    $pdo->rollBack();
+                    throw $exception;
+                }
                 t8_audit_log($pdo, $currentUserId, 'memorandum', $newId, 'create');
                 t8_flash_set('success', $label . ' ' . $docNumber . ' created as a draft.');
                 redirect(page_url('documents', ['action' => 'memorandum_view', 'id' => $newId]));
@@ -72,13 +100,32 @@ if ($action === 'memorandum_new' || $action === 'memorandum_edit') {
                     $pdo->prepare('UPDATE team8_memorandums SET current_version = :v WHERE id = :id')
                         ->execute(['v' => $nextVersion + 1, 'id' => $editId]);
                 }
-                $pdo->prepare(
-                    'UPDATE team8_memorandums SET title = :title, recipients = :recipients, content = :content, remarks = :remarks WHERE id = :id'
-                )->execute([
-                    'title' => $formValues['title'], 'recipients' => $formValues['recipients'],
-                    'content' => $formValues['content'], 'remarks' => $formValues['remarks'] !== '' ? $formValues['remarks'] : null,
-                    'id' => $editId,
-                ]);
+                $pdo->beginTransaction();
+                try {
+                    $pdo->prepare(
+                        'UPDATE team8_memorandums SET title = :title, recipients = :recipients, content = :content, remarks = :remarks WHERE id = :id'
+                    )->execute([
+                        'title' => $formValues['title'], 'recipients' => implode(', ', $recipientSelection['labels']),
+                        'content' => $formValues['content'], 'remarks' => $formValues['remarks'] !== '' ? $formValues['remarks'] : null,
+                        'id' => $editId,
+                    ]);
+                    $pdo->prepare('DELETE FROM team8_memorandum_recipients WHERE memorandum_id = :id')->execute(['id' => $editId]);
+                    $recipientStmt = $pdo->prepare(
+                        'INSERT INTO team8_memorandum_recipients (memorandum_id, recipient_type, department_id)
+                         VALUES (:memorandum_id, :recipient_type, :department_id)'
+                    );
+                    foreach ($recipientSelection['rows'] as $recipient) {
+                        $recipientStmt->execute([
+                            'memorandum_id' => $editId,
+                            'recipient_type' => $recipient['recipient_type'],
+                            'department_id' => $recipient['department_id'],
+                        ]);
+                    }
+                    $pdo->commit();
+                } catch (Throwable $exception) {
+                    $pdo->rollBack();
+                    throw $exception;
+                }
                 t8_audit_log($pdo, $currentUserId, 'memorandum', $editId, 'update');
                 t8_flash_set('success', $label . ' updated.');
                 redirect(page_url('documents', ['action' => 'memorandum_view', 'id' => $editId]));
@@ -113,8 +160,27 @@ if ($action === 'memorandum_new' || $action === 'memorandum_edit') {
                 <input class="t8-input" type="text" id="title" name="title" value="<?= e($formValues['title']) ?>" required>
             </div>
             <div class="t8-field">
-                <label class="t8-label" for="recipients">Recipients</label>
-                <input class="t8-input" type="text" id="recipients" name="recipients" value="<?= e($formValues['recipients']) ?>" placeholder="e.g. All Employees, or a specific name/department" required>
+                <span class="t8-label" id="recipients-label">Recipients</span>
+                <div class="t8-recipient-picker" data-recipient-picker>
+                    <button class="t8-input t8-recipient-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-labelledby="recipients-label" data-recipient-trigger>
+                        <span data-recipient-summary><?= $recipientValues === [] ? 'Select departments' : e(implode(', ', $recipientSelection['labels'] ?? $existing['recipient_labels'] ?? [])) ?></span>
+                        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                    </button>
+                    <div class="t8-recipient-panel" data-recipient-panel hidden>
+                        <input class="t8-input t8-recipient-search" type="search" placeholder="Search departments..." aria-label="Search departments" data-recipient-search>
+                        <label class="t8-recipient-option" data-recipient-option>
+                            <input type="checkbox" name="recipients[]" value="all_departments" data-recipient-checkbox <?= in_array('all_departments', $recipientValues, true) ? 'checked' : '' ?>>
+                            <span>All Departments</span>
+                        </label>
+                        <?php foreach ($departments as $department): ?>
+                            <label class="t8-recipient-option" data-recipient-option data-recipient-label="<?= e(strtolower($department['name'])) ?>">
+                                <input type="checkbox" name="recipients[]" value="<?= e((string) $department['id']) ?>" data-recipient-checkbox <?= in_array((string) $department['id'], $recipientValues, true) ? 'checked' : '' ?>>
+                                <span><?= e($department['name']) ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <span class="t8-help-text">Choose All Departments or one or more departments.</span>
             </div>
             <div class="t8-field">
                 <label class="t8-label" for="content">Content</label>
@@ -161,7 +227,7 @@ if ($action === 'memorandum_view') {
 
         <div class="t8-hr-readonly-block">
             <div class="t8-hr-readonly-item"><span>Title</span><strong><?= e($memo['title']) ?></strong></div>
-            <div class="t8-hr-readonly-item"><span>Recipients</span><strong><?= e($memo['recipients']) ?></strong></div>
+            <div class="t8-hr-readonly-item"><span>Recipients</span><strong><?= e(implode(', ', $memo['recipient_labels'] ?? [])) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Prepared By</span><strong><?= e($memo['prepared_by_name']) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Date</span><strong><?= e(format_date((string) $memo['created_at'], 'M d, Y')) ?></strong></div>
         </div>
