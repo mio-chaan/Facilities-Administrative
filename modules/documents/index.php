@@ -259,6 +259,115 @@ function t8_document_all_versions(PDO $pdo, int $documentId): array
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+/**
+ * Returns archived HR-generated documents in the same display shape used by
+ * the uploaded-document archive. Archived HR records are admin-only here,
+ * matching the existing certificate and memorandum visibility rules.
+ */
+function t8_document_archived_hr_records(PDO $pdo, bool $isAdmin): array
+{
+    if (!$isAdmin) {
+        return [];
+    }
+
+    $records = [];
+    $sources = [
+        [
+            'table' => 'team8_incident_reports',
+            'source' => 'Incident Report',
+            'title_sql' => 'h.document_number',
+            'type_sql' => 'h.incident_type',
+            'subject_sql' => 'u.full_name',
+            'date_sql' => 'h.created_at',
+            'view_action' => 'incident_report_view',
+            'print_type' => 'incident_report',
+            'join' => 'JOIN users u ON u.id = h.employee_id',
+        ],
+        [
+            'table' => 'team8_notice_to_explain',
+            'source' => 'Notice To Explain',
+            'title_sql' => 'h.document_number',
+            'type_sql' => "'Notice To Explain'",
+            'subject_sql' => 'u.full_name',
+            'date_sql' => 'h.created_at',
+            'view_action' => 'nte_view',
+            'print_type' => 'nte',
+            'join' => 'JOIN users u ON u.id = h.employee_id',
+        ],
+        [
+            'table' => 'team8_explanations',
+            'source' => 'Explanation Letter',
+            'title_sql' => 'n.document_number',
+            'type_sql' => "'Explanation Letter'",
+            'subject_sql' => 'u.full_name',
+            'date_sql' => 'h.submitted_at',
+            'view_action' => 'explanation_view',
+            'print_type' => null,
+            'join' => 'JOIN users u ON u.id = h.employee_id JOIN team8_notice_to_explain n ON n.id = h.nte_id',
+        ],
+        [
+            'table' => 'team8_memorandums',
+            'source' => null,
+            'title_sql' => 'h.document_number',
+            'type_sql' => "CASE WHEN h.kind = 'warning_letter' THEN 'Warning Letter' ELSE 'Memorandum' END",
+            'subject_sql' => 'p.full_name',
+            'date_sql' => 'h.created_at',
+            'view_action' => 'memorandum_view',
+            'print_type' => 'memorandum',
+            'join' => 'JOIN users p ON p.id = h.prepared_by',
+        ],
+        [
+            'table' => 'team8_certificates',
+            'source' => 'Certificate',
+            'title_sql' => 'h.document_number',
+            'type_sql' => "CASE h.certificate_type WHEN 'employment' THEN 'Certificate of Employment' WHEN 'recognition' THEN 'Certificate of Recognition' WHEN 'attendance' THEN 'Certificate of Attendance' ELSE 'Certificate' END",
+            'subject_sql' => 'p.full_name',
+            'date_sql' => 'h.created_at',
+            'view_action' => 'certificate_view',
+            'print_type' => 'certificate',
+            'join' => 'JOIN users p ON p.id = h.prepared_by',
+        ],
+    ];
+
+    foreach ($sources as $source) {
+        $stmt = $pdo->query(
+            'SELECT h.id, h.status, ' . $source['date_sql'] . ' AS archive_date, '
+            . $source['title_sql'] . ' AS archive_title, '
+            . $source['type_sql'] . ' AS archive_type, '
+            . $source['subject_sql'] . ' AS archive_subject '
+            . 'FROM ' . $source['table'] . ' h '
+            . $source['join'] . " WHERE h.status = 'archived'"
+        );
+
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $sourceLabel = $source['source'] ?? ((string) $row['archive_type']);
+            $viewUrl = page_url('documents', [
+                'action' => $source['view_action'],
+                'id' => (int) $row['id'],
+            ]);
+            $printUrl = $source['print_type'] !== null
+                ? page_url('documents', [
+                    'action' => 'hr_print',
+                    'type' => $source['print_type'],
+                    'id' => (int) $row['id'],
+                ])
+                : null;
+
+            $records[] = [
+                'archive_title' => (string) $row['archive_title'],
+                'archive_type' => $sourceLabel,
+                'archive_subject' => (string) ($row['archive_subject'] ?? '—'),
+                'status' => (string) $row['status'],
+                'archived_at' => (string) $row['archive_date'],
+                'view_url' => $viewUrl,
+                'print_url' => $printUrl,
+            ];
+        }
+    }
+
+    return $records;
+}
+
 /** Validates $_FILES['file']; returns an error string, or '' if OK. */
 function t8_document_validate_upload(array $file): string
 {
@@ -761,6 +870,9 @@ if ($showList) {
     );
     $documentsStmt->execute($filterParams);
     $documents = $documentsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $archivedHrRecords = $statusFilter === 'archived'
+        ? t8_document_archived_hr_records($pdo, $isAdmin)
+        : [];
 }
 
 if (!$showCreateForm && !$showUploadVersionForm && !$showVersions && !$showList) {
@@ -1163,9 +1275,62 @@ function t8_render_camera_capture(): void
         <div class="t8-card-header">
             <h2 class="t8-card-title"><?= $statusFilter === 'archived' ? 'Archived Documents' : ($isAdmin ? 'All Documents' : 'My Documents') ?></h2>
         </div>
-        <?php if ($documents === []): ?>
+        <?php if ($documents === [] && $archivedHrRecords === []): ?>
             <div class="t8-empty">
                 <?= $statusFilter === 'archived' ? 'No archived documents.' : 'No documents uploaded yet.' ?>
+            </div>
+        <?php elseif ($statusFilter === 'archived'): ?>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead>
+                        <tr>
+                            <th>Title / Number</th>
+                            <th>Source / Type</th>
+                            <th>Owner / Subject</th>
+                            <th>Status</th>
+                            <th>Archived Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($documents as $doc): ?>
+                            <?php
+                            $docRetentionRecord = function_exists('t8_retention_fetch_for_entity')
+                                ? t8_retention_fetch_for_entity($pdo, 'document', (int) $doc['id'])
+                                : null;
+                            ?>
+                            <tr>
+                                <td><?= e($doc['title']) ?></td>
+                                <td><?= e($doc['document_type'] ?? 'Uploaded File') ?></td>
+                                <td><?= e($doc['uploaded_by_name'] ?? '—') ?></td>
+                                <td><span class="t8-badge t8-badge-archived">Archived</span></td>
+                                <td><?= e(format_date((string) ($doc['updated_at'] ?? $doc['created_at']), 'M d, Y')) ?></td>
+                                <td class="t8-row-actions">
+                                    <?php t8_document_render_menu($doc, $isAdmin, $statusFilter, $docRetentionRecord); ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php foreach ($archivedHrRecords as $record): ?>
+                            <tr>
+                                <td><?= e($record['archive_title']) ?></td>
+                                <td><?= e($record['archive_type']) ?></td>
+                                <td><?= e($record['archive_subject']) ?></td>
+                                <td><span class="t8-badge t8-badge-archived">Archived</span></td>
+                                <td><?= e(format_date($record['archived_at'], 'M d, Y')) ?></td>
+                                <td class="t8-row-actions">
+                                    <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e($record['view_url']) ?>">
+                                        <i class="fa-solid fa-eye"></i> View
+                                    </a>
+                                    <?php if ($record['print_url'] !== null): ?>
+                                        <a class="t8-btn t8-btn-outline t8-btn-sm" target="_blank" href="<?= e($record['print_url']) ?>">
+                                            <i class="fa-solid fa-print"></i> Print
+                                        </a>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
             </div>
         <?php else: ?>
             <div class="t8-table-wrap">
