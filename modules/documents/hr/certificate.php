@@ -5,9 +5,8 @@
  *          form / POST create, admin only), certificate_view (GET),
  *          certificate_status (POST approve/reject/archive).
  *
- * Employee information (name/department) is never duplicated onto
- * the certificate row — only employee_id is stored, resolved via
- * JOIN at view/print time (see t8_hr_certificate_fetch()).
+ * Employee information is resolved from normalized certificate recipient
+ * rows at view/print time (see t8_hr_certificate_fetch()).
  */
 
 declare(strict_types=1);
@@ -38,42 +37,54 @@ if ($action === 'certificate_new') {
     }
 
     $employees = $pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC);
-    $formValues = ['employee_id' => '', 'details' => ''];
+    $employeeValues = [];
+    $recipientSelection = ['labels' => []];
+    $formValues = ['details' => ''];
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $employeeValues = isset($_POST['employees']) && is_array($_POST['employees']) ? array_values($_POST['employees']) : [];
         $formValues = [
-            'employee_id' => (string) ($_POST['employee_id'] ?? ''),
             'details'     => trim((string) ($_POST['details'] ?? '')),
         ];
 
         if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
             $errors[] = 'Your session expired. Please try again.';
         } else {
-            $employeeId = (int) $formValues['employee_id'];
-            $validEmployee = false;
-            foreach ($employees as $emp) {
-                if ((int) $emp['id'] === $employeeId) { $validEmployee = true; break; }
-            }
-            if (!$validEmployee) {
-                $errors[] = 'Please select a valid employee.';
-            }
+            $recipientSelection = t8_hr_certificate_recipient_selection($pdo, $employeeValues);
+            if ($recipientSelection['error'] !== null) { $errors[] = $recipientSelection['error']; }
 
             if (!$errors) {
                 $docNumber = t8_hr_generate_doc_number($pdo, 'CERT-' . strtoupper(substr($type, 0, 3)), 'team8_certificates');
-                $stmt = $pdo->prepare(
-                    'INSERT INTO team8_certificates (document_number, certificate_type, employee_id, prepared_by, details, status)
-                     VALUES (:document_number, :certificate_type, :employee_id, :prepared_by, :details, "draft")'
-                );
-                $stmt->execute([
-                    'document_number'  => $docNumber,
-                    'certificate_type' => $type,
-                    'employee_id'      => $employeeId,
-                    'prepared_by'      => $currentUserId,
-                    'details'          => $formValues['details'] !== '' ? $formValues['details'] : null,
-                ]);
-                $newId = (int) $pdo->lastInsertId();
+                $pdo->beginTransaction();
+                try {
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO team8_certificates (document_number, certificate_type, employee_id, prepared_by, details, status)
+                         VALUES (:document_number, :certificate_type, :employee_id, :prepared_by, :details, "approved")'
+                    );
+                    $stmt->execute([
+                        'document_number'  => $docNumber,
+                        'certificate_type' => $type,
+                        'employee_id'      => (int) $recipientSelection['rows'][0]['employee_id'],
+                        'prepared_by'      => $currentUserId,
+                        'details'          => $formValues['details'] !== '' ? $formValues['details'] : null,
+                    ]);
+                    $newId = (int) $pdo->lastInsertId();
+                    $recipientStmt = $pdo->prepare(
+                        'INSERT INTO team8_certificate_recipients (certificate_id, employee_id)
+                         VALUES (:certificate_id, :employee_id)'
+                    );
+                    foreach ($recipientSelection['rows'] as $recipient) {
+                        $recipientStmt->execute(['certificate_id' => $newId, 'employee_id' => $recipient['employee_id']]);
+                    }
+                    $pdo->commit();
+                } catch (Throwable $exception) {
+                    $pdo->rollBack();
+                    throw $exception;
+                }
                 t8_audit_log($pdo, $currentUserId, 'certificate', $newId, 'create');
-                t8_hr_notify($pdo, $employeeId, 'A ' . T8_CERTIFICATE_TYPES[$type] . ' (' . $docNumber . ') has been generated for you.');
+                foreach ($recipientSelection['rows'] as $recipient) {
+                    t8_hr_notify($pdo, (int) $recipient['employee_id'], 'A ' . T8_CERTIFICATE_TYPES[$type] . ' (' . $docNumber . ') has been approved for you.');
+                }
                 t8_flash_set('success', T8_CERTIFICATE_TYPES[$type] . ' ' . $docNumber . ' created.');
                 redirect(page_url('documents', ['action' => 'certificate_view', 'id' => $newId]));
             }
@@ -96,14 +107,23 @@ if ($action === 'certificate_new') {
             <input type="hidden" name="certificate_type" value="<?= e($type) ?>">
 
             <div class="t8-field">
-                <label class="t8-label" for="employee_id">Employee</label>
-                <select class="t8-select" id="employee_id" name="employee_id" required>
-                    <option value="">Select an employee…</option>
-                    <?php foreach ($employees as $emp): ?>
-                        <option value="<?= e((string) $emp['id']) ?>" <?= (string) $emp['id'] === $formValues['employee_id'] ? 'selected' : '' ?>><?= e($emp['full_name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-                <span class="t8-help-text">Employee name and department are pulled automatically — nothing is retyped.</span>
+                <span class="t8-label" id="employees-label">Employees</span>
+                <div class="t8-recipient-picker" data-recipient-picker data-empty-label="Select employees">
+                    <button class="t8-input t8-recipient-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-labelledby="employees-label" data-recipient-trigger>
+                        <span data-recipient-summary><?= $employeeValues === [] ? 'Select employees' : e(implode(', ', $recipientSelection['labels'] ?? [])) ?></span>
+                        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                    </button>
+                    <div class="t8-recipient-panel" data-recipient-panel hidden>
+                        <input class="t8-input t8-recipient-search" type="search" placeholder="Search employees..." aria-label="Search employees" data-recipient-search>
+                        <?php foreach ($employees as $employee): ?>
+                            <label class="t8-recipient-option" data-recipient-option data-recipient-label="<?= e(strtolower($employee['full_name'])) ?>">
+                                <input type="checkbox" name="employees[]" value="<?= e((string) $employee['id']) ?>" data-recipient-checkbox <?= in_array((string) $employee['id'], array_map('strval', $employeeValues), true) ? 'checked' : '' ?>>
+                                <span><?= e($employee['full_name']) ?></span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <span class="t8-help-text">Select one or more employees. Each employee will receive a personalized certificate.</span>
             </div>
 
             <div class="t8-field">
@@ -130,9 +150,11 @@ if ($action === 'certificate_view') {
     ?>
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
         <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>"><i class="fa-solid fa-arrow-left"></i> Back</a>
-        <a class="t8-btn t8-btn-outline" target="_blank" href="<?= e(page_url('documents', ['action' => 'hr_print', 'type' => 'certificate', 'id' => $id])) ?>">
-            <i class="fa-solid fa-print"></i> Print
-        </a>
+        <?php foreach ($cert['recipients'] as $recipient): ?>
+            <a class="t8-btn t8-btn-outline" target="_blank" href="<?= e(page_url('documents', ['action' => 'hr_print', 'type' => 'certificate', 'id' => $id, 'employee_id' => $recipient['employee_id']])) ?>">
+                <i class="fa-solid fa-print"></i> Print <?= e($recipient['employee_name']) ?>
+            </a>
+        <?php endforeach; ?>
     </div>
 
     <div class="t8-card">
@@ -142,8 +164,7 @@ if ($action === 'certificate_view') {
         </div>
 
         <div class="t8-hr-readonly-block">
-            <div class="t8-hr-readonly-item"><span>Employee</span><strong><?= e($cert['employee_name']) ?></strong></div>
-            <div class="t8-hr-readonly-item"><span>Department</span><strong><?= e($cert['department_name'] ?? '—') ?></strong></div>
+            <div class="t8-hr-readonly-item"><span>Employees</span><strong><?= e(implode(', ', $cert['recipient_labels'])) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Prepared By</span><strong><?= e($cert['prepared_by_name']) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Date</span><strong><?= e(format_date((string) $cert['created_at'], 'M d, Y')) ?></strong></div>
         </div>
@@ -155,29 +176,20 @@ if ($action === 'certificate_view') {
             </div>
         <?php endif; ?>
 
-        <?php if ($cert['status'] === 'draft' || $cert['status'] === 'pending'): ?>
+        <?php if ($cert['status'] === 'pending'): ?>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <?php if ($cert['status'] === 'draft'): ?>
-                    <form method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>">
-                        <?= t8_csrf_field() ?>
-                        <input type="hidden" name="id" value="<?= e((string) $id) ?>">
-                        <input type="hidden" name="status" value="pending">
-                        <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit"><i class="fa-solid fa-paper-plane"></i> Send for Approval</button>
-                    </form>
-                <?php else: ?>
-                    <form method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>">
+                <form method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>">
                         <?= t8_csrf_field() ?>
                         <input type="hidden" name="id" value="<?= e((string) $id) ?>">
                         <input type="hidden" name="status" value="approved">
                         <button class="t8-btn t8-btn-success t8-btn-sm" type="submit"><i class="fa-solid fa-check"></i> Approve</button>
-                    </form>
-                    <form method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>">
+                </form>
+                <form method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>">
                         <?= t8_csrf_field() ?>
                         <input type="hidden" name="id" value="<?= e((string) $id) ?>">
                         <input type="hidden" name="status" value="rejected">
                         <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit"><i class="fa-solid fa-xmark"></i> Reject</button>
-                    </form>
-                <?php endif; ?>
+                </form>
             </div>
         <?php elseif ($cert['status'] !== 'archived'): ?>
             <form method="post" action="<?= e(page_url('documents', ['action' => 'certificate_status'])) ?>" onsubmit="return confirm('Archive this certificate?');">
@@ -229,7 +241,9 @@ if ($action === 'certificate_status') {
     if ($cert) {
         $pdo->prepare('UPDATE team8_certificates SET status = :status WHERE id = :id')->execute(['status' => $newStatus, 'id' => $id]);
         t8_audit_log($pdo, $currentUserId, 'certificate', $id, $newStatus);
-        t8_hr_notify($pdo, (int) $cert['employee_id'], 'Your certificate ' . $cert['document_number'] . ' was marked ' . $newStatus . '.');
+        foreach ($cert['recipients'] as $recipient) {
+            t8_hr_notify($pdo, (int) $recipient['employee_id'], 'Your certificate ' . $cert['document_number'] . ' was marked ' . $newStatus . '.');
+        }
         t8_flash_set('success', 'Certificate ' . $newStatus . '.');
     } else {
         t8_flash_set('danger', 'Certificate not found.');

@@ -14,7 +14,8 @@
 | `team8_explanations` | Submitted by the NTE's own employee in reply to a notice (`nte_id` FK). |
 | `team8_memorandums` | Admin-authored memos; also backs **Warning Letters** via the `kind` column (`memorandum` \| `warning_letter`) — the task spec gave Warning Letter no distinct field set, so it reuses this table instead of a near-duplicate one. |
 | `team8_memorandum_recipients` | Normalized audience rows for memorandums and warning letters. Each row targets `all_departments` or one shared `departments` row. |
-| `team8_certificates` | Admin-issued certificates (`certificate_type`: `employment` \| `recognition` \| `attendance`), issued to an employee chosen from the `users` directory. |
+| `team8_certificates` | Admin-issued certificates (`certificate_type`: `employment` \| `recognition` \| `attendance`), with the legacy primary employee column retained for compatibility. New certificates are approved immediately. |
+| `team8_certificate_recipients` | Normalized employee recipients for certificates. One certificate can target multiple users, and each recipient gets a personalized print copy. |
 | `team8_hr_document_versions` | Shared, polymorphic version-history table (`doc_type` + `doc_id`) used by all four document types above. |
 
 ## Status model
@@ -29,9 +30,12 @@ rest of the schema.
 
 Every table stores only `employee_id` / `prepared_by` / `reviewed_by`
 FKs into the shared `users` table (and `department_id` where
-relevant). Names/departments are always resolved via `JOIN` at read
-time in `app/includes/hr_documents.php`'s `t8_hr_*_fetch()` helpers —
-never copied onto the row itself.
+relevant). Certificate recipients are stored in
+`team8_certificate_recipients`; the legacy `team8_certificates.employee_id`
+column remains only for compatibility with existing rows. Names/departments
+are always resolved via `JOIN` at read time in
+`app/includes/hr_documents.php`'s `t8_hr_*_fetch()` helpers — never copied
+onto the row itself.
 
 ## Workflow
 
@@ -48,16 +52,19 @@ NTE, an NTE links forward to its explanation).
 
 Memorandum and warning-letter recipients are selected from the shared
 `departments` table. Administrators can manage and view every document.
-Employees can view and print only approved documents targeted to their
-department, or approved documents with an `all_departments` recipient row.
-This authorization is enforced server-side for dashboard results, direct
-view URLs, and print URLs.
+Memorandum visibility is limited to approved documents targeted to an
+employee's department, or approved documents with an `all_departments`
+recipient row. Certificate management and printing remain admin-only; each
+certificate recipient is used for notifications and personalized print output.
+Authorization is enforced server-side for dashboard results, direct view
+URLs, and print URLs.
 
 ## Setup
 
 ```bash
 mysql -u root -p capstone_shared_db < database/schema.sql
 mysql -u root -p capstone_shared_db < database/migrations/2026_08_02_hr_document_automation.sql
+mysql -u root -p capstone_shared_db < database/migrations/2026_09_16_certificate_recipients.sql
 ```
 
 Safe to run on a fresh clone or an existing local database — every

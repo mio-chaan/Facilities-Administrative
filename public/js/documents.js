@@ -197,7 +197,7 @@ document.addEventListener('DOMContentLoaded', function () {
         applyDocumentsFilter();
     });
 
-    // ---- Memorandum / Warning Letter recipient picker ----
+    // ---- Memorandum and certificate recipient picker ----
     function initRecipientPickers() {
         document.querySelectorAll('[data-recipient-picker]').forEach(function (picker) {
         var trigger = picker.querySelector('[data-recipient-trigger]');
@@ -206,6 +206,7 @@ document.addEventListener('DOMContentLoaded', function () {
         var checkboxes = Array.prototype.slice.call(picker.querySelectorAll('[data-recipient-checkbox]'));
         var allDepartments = picker.querySelector('[value="all_departments"]');
         var summary = picker.querySelector('[data-recipient-summary]');
+        var emptyLabel = picker.getAttribute('data-empty-label') || 'Select departments';
 
         if (!trigger || !panel || !summary) return;
 
@@ -217,7 +218,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         function syncPicker() {
             var selected = selectedLabels();
-            summary.textContent = selected.length ? selected.join(', ') : 'Select departments';
+            summary.textContent = selected.length ? selected.join(', ') : emptyLabel;
             if (allDepartments && allDepartments.checked) {
                 checkboxes.forEach(function (checkbox) {
                     if (checkbox !== allDepartments) checkbox.checked = false;

@@ -98,6 +98,15 @@ switch ($type) {
             http_response_code(404);
             exit('Document not found.');
         }
+        $employeeId = (int) ($_GET['employee_id'] ?? 0);
+        if ($employeeId < 1) {
+            $employeeId = (int) ($row['employee_id'] ?? 0);
+        }
+        $recipient = t8_hr_certificate_recipient_fetch($pdo, $id, $employeeId);
+        if (!$recipient) {
+            http_response_code(404);
+            exit('Certificate recipient not found.');
+        }
         $docNumber = $row['document_number'];
         $title = T8_CERTIFICATE_TYPES[$row['certificate_type']] ?? 'Certificate';
         $preparedByName = $row['prepared_by_name'];
@@ -105,8 +114,8 @@ switch ($type) {
         $bodyHtml = '
             <div class="print-certificate">
                 <p>This is to certify that</p>
-                <h2>' . e($row['employee_name']) . '</h2>
-                <p>of the ' . e((string) ($row['department_name'] ?? '—')) . ' department</p>
+                <h2>' . e($recipient['employee_name']) . '</h2>
+                <p>of the ' . e((string) ($recipient['department_name'] ?? '—')) . ' department</p>
                 <p>' . nl2br(e((string) ($row['details'] ?? 'is issued this certificate in good standing.'))) . '</p>
             </div>';
         break;

@@ -17,7 +17,7 @@
 | Records Retention and Compliance | `team8_retention_schedules`, `team8_records`, `team8_compliance_checks` |
 | Legal Management | `team8_legal_cases`, `team8_legal_documents` |
 | Contract Management | `team8_contracts`, `team8_parties`, `team8_contract_parties`, `team8_contract_documents`, `team8_contract_history`, `team8_contract_obligations` |
-| HR Document Automation | `team8_incident_reports`, `team8_notice_to_explain`, `team8_explanations`, `team8_memorandums`, `team8_memorandum_recipients`, `team8_certificates`, `team8_hr_document_versions` |
+| HR Document Automation | `team8_incident_reports`, `team8_notice_to_explain`, `team8_explanations`, `team8_memorandums`, `team8_memorandum_recipients`, `team8_certificates`, `team8_certificate_recipients`, `team8_hr_document_versions` |
 
 ## Design notes
 

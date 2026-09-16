@@ -47,6 +47,8 @@
 .t8-docs-kpi strong { display: block; margin: 2px 0; color: var(--t8-ink); font-size: 1.4rem; line-height: 1.1; }
 .t8-docs-kpi div:last-child { min-width: 0; }
 .t8-docs-kpi span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t8-docs-kpi-link { color: inherit; text-decoration: none; transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
+.t8-docs-kpi-link:hover, .t8-docs-kpi-link:focus-visible { border-color: var(--t8-primary); box-shadow: 0 8px 18px rgba(44, 32, 32, .12); transform: translateY(-1px); outline: none; }
 
 /* ---- Document Form Grid Layout ---- */
 .t8-document-form-grid {

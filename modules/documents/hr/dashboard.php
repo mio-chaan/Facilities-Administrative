@@ -22,7 +22,7 @@ $recentDocuments = t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 8);
     </div>
 
     <div class="t8-docs-kpi-grid" aria-label="Document summary">
-        <div class="t8-docs-kpi t8-docs-kpi-red"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-file-lines"></i></div><div><span>Total Documents</span><strong><?= e((string) $hrStats['total_documents']) ?></strong><small>All active records</small></div></div>
+        <a class="t8-docs-kpi t8-docs-kpi-red t8-docs-kpi-link" href="<?= e(page_url('documents', ['action' => 'browse'])) ?>" aria-label="Browse all documents"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-file-lines"></i></div><div><span>Total Documents</span><strong><?= e((string) $hrStats['total_documents']) ?></strong><small>All active records</small></div></a>
         <div class="t8-docs-kpi t8-docs-kpi-orange"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-clock"></i></div><div><span>Pending Actions</span><strong><?= e((string) ($hrStats['pending_incidents'] + $hrStats['pending_nte'] + $hrStats['pending_explanations'] + $hrStats['pending_approval'])) ?></strong><small>Needs attention</small></div></div>
         <div class="t8-docs-kpi t8-docs-kpi-gray"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-box-archive"></i></div><div><span>Archived</span><strong><?= e((string) $hrStats['archived']) ?></strong><small>Retained records</small></div></div>
         <div class="t8-docs-kpi t8-docs-kpi-purple"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-layer-group"></i></div><div><span>Templates</span><strong><?= e((string) $hrStats['templates']) ?></strong><small>Ready to generate</small></div></div>
@@ -57,8 +57,14 @@ $recentDocuments = t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 8);
             <div class="t8-card">
                 <div class="t8-card-header"><h2 class="t8-card-title">Pending Actions</h2></div>
                 <div class="t8-docs-stat-list">
-                    <a class="t8-docs-stat" href="<?= e(page_url('documents', ['action' => 'incident_report_new'])) ?>"><span><i class="fa-solid fa-triangle-exclamation"></i> Pending Incident Reports</span><strong><?= e((string) $hrStats['pending_incidents']) ?></strong></a>
-                    <a class="t8-docs-stat" href="<?= e(page_url('documents', ['action' => 'nte_new'])) ?>"><span><i class="fa-solid fa-file-circle-question"></i> Pending NTE</span><strong><?= e((string) $hrStats['pending_nte']) ?></strong></a>
+                    <?php $pendingIncidentUrl = $hrStats['pending_incident_id'] !== null
+                        ? page_url('documents', ['action' => 'incident_report_view', 'id' => $hrStats['pending_incident_id']])
+                        : page_url('documents', ['action' => 'incident_report_new']); ?>
+                    <a class="t8-docs-stat" href="<?= e($pendingIncidentUrl) ?>"><span><i class="fa-solid fa-triangle-exclamation"></i> Pending Incident Reports</span><strong><?= e((string) $hrStats['pending_incidents']) ?></strong></a>
+                    <?php $pendingNteUrl = $hrStats['pending_nte_id'] !== null
+                        ? page_url('documents', ['action' => 'nte_view', 'id' => $hrStats['pending_nte_id']])
+                        : page_url('documents', ['action' => 'nte_new']); ?>
+                    <a class="t8-docs-stat" href="<?= e($pendingNteUrl) ?>"><span><i class="fa-solid fa-file-circle-question"></i> Pending NTE</span><strong><?= e((string) $hrStats['pending_nte']) ?></strong></a>
                     <a class="t8-docs-stat" href="<?= e(page_url('documents')) ?>"><span><i class="fa-solid fa-pen-to-square"></i> Pending Explanations</span><strong><?= e((string) $hrStats['pending_explanations']) ?></strong></a>
                     <a class="t8-docs-stat" href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'pending'])) ?>"><span><i class="fa-solid fa-check"></i> Pending Approval</span><strong><?= e((string) $hrStats['pending_approval']) ?></strong></a>
                 </div>
@@ -91,9 +97,4 @@ $recentDocuments = t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 8);
         </div>
     </div>
 
-    <div class="t8-card-header" style="margin-bottom: var(--t8-space-2);">
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'browse'])) ?>">
-            <i class="fa-solid fa-folder-open"></i> Browse All Uploaded Documents
-        </a>
-    </div>
 </div>

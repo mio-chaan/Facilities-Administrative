@@ -178,6 +178,68 @@ if (!function_exists('t8_hr_memorandum_visible_to_current_user')) {
     }
 }
 
+if (!function_exists('t8_hr_certificate_recipient_selection')) {
+    function t8_hr_certificate_recipient_selection(PDO $pdo, array $values): array
+    {
+        $values = array_values(array_unique(array_map('strval', $values)));
+        if ($values === []) {
+            return ['rows' => [], 'labels' => [], 'error' => 'Employees are required.'];
+        }
+
+        $ids = [];
+        foreach ($values as $value) {
+            if (!ctype_digit($value) || (int) $value < 1) {
+                return ['rows' => [], 'labels' => [], 'error' => 'One or more selected employees is invalid.'];
+            }
+            $ids[] = (int) $value;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare("SELECT id, full_name FROM users WHERE id IN ($placeholders) ORDER BY full_name");
+        $stmt->execute($ids);
+        $employees = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if (count($employees) !== count($ids)) {
+            return ['rows' => [], 'labels' => [], 'error' => 'One or more selected employees could not be found.'];
+        }
+
+        $rows = [];
+        $labels = [];
+        foreach ($employees as $employee) {
+            $rows[] = ['employee_id' => (int) $employee['id']];
+            $labels[] = (string) $employee['full_name'];
+        }
+        return ['rows' => $rows, 'labels' => $labels, 'error' => null];
+    }
+}
+
+if (!function_exists('t8_hr_certificate_recipients')) {
+    function t8_hr_certificate_recipients(PDO $pdo, int $certificateId): array
+    {
+        $stmt = $pdo->prepare(
+            'SELECT r.employee_id, u.full_name AS employee_name, u.department_id, d.name AS department_name
+             FROM team8_certificate_recipients r
+             JOIN users u ON u.id = r.employee_id
+             LEFT JOIN departments d ON d.id = u.department_id
+             WHERE r.certificate_id = :id
+             ORDER BY u.full_name'
+        );
+        $stmt->execute(['id' => $certificateId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+}
+
+if (!function_exists('t8_hr_certificate_recipient_fetch')) {
+    function t8_hr_certificate_recipient_fetch(PDO $pdo, int $certificateId, int $employeeId): ?array
+    {
+        foreach (t8_hr_certificate_recipients($pdo, $certificateId) as $recipient) {
+            if ((int) $recipient['employee_id'] === $employeeId) {
+                return $recipient;
+            }
+        }
+        return null;
+    }
+}
+
 if (!function_exists('t8_hr_generate_doc_number')) {
     /** Sequential, human-readable document number, e.g. "IR-2026-000042". */
     function t8_hr_generate_doc_number(PDO $pdo, string $prefix, string $table): string
@@ -434,15 +496,27 @@ if (!function_exists('t8_hr_certificate_fetch')) {
     function t8_hr_certificate_fetch(PDO $pdo, int $id): ?array
     {
         $stmt = $pdo->prepare(
-            'SELECT c.*, e.full_name AS employee_name, e.department_id, d.name AS department_name, p.full_name AS prepared_by_name
+            'SELECT c.*, p.full_name AS prepared_by_name
              FROM team8_certificates c
-             JOIN users e ON e.id = c.employee_id
-             LEFT JOIN departments d ON d.id = e.department_id
              JOIN users p ON p.id = c.prepared_by
              WHERE c.id = :id LIMIT 1'
         );
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $row['recipients'] = t8_hr_certificate_recipients($pdo, $id);
+            $row['recipient_labels'] = array_map(
+                static fn (array $recipient): string => (string) $recipient['employee_name'],
+                $row['recipients']
+            );
+            $primary = $row['recipients'][0] ?? null;
+            if ($primary !== null) {
+                $row['employee_id'] = (int) $primary['employee_id'];
+                $row['employee_name'] = $primary['employee_name'];
+                $row['department_id'] = $primary['department_id'];
+                $row['department_name'] = $primary['department_name'];
+            }
+        }
         return $row ?: null;
     }
 }
@@ -457,7 +531,9 @@ if (!function_exists('t8_hr_dashboard_stats')) {
             'archived'            => 0,
             'templates'           => 5, // Incident Report, NTE, Memorandum, Warning Letter, Certificate (see hr/generate.php)
             'pending_incidents'   => 0,
+            'pending_incident_id' => null,
             'pending_nte'         => 0,
+            'pending_nte_id'      => null,
             'pending_explanations' => 0,
             'pending_approval'    => 0,
         ];
@@ -477,8 +553,12 @@ if (!function_exists('t8_hr_dashboard_stats')) {
             $stats['generated_documents'] = $generated;
             $stats['archived'] = $archived;
 
-            $stats['pending_incidents']    = (int) $pdo->query("SELECT COUNT(*) FROM team8_incident_reports WHERE status = 'pending'")->fetchColumn();
-            $stats['pending_nte']          = (int) $pdo->query("SELECT COUNT(*) FROM team8_notice_to_explain WHERE status = 'pending'")->fetchColumn();
+            $stats['pending_incidents'] = (int) $pdo->query("SELECT COUNT(*) FROM team8_incident_reports WHERE status = 'pending'")->fetchColumn();
+            $pendingIncidentId = $pdo->query("SELECT id FROM team8_incident_reports WHERE status = 'pending' ORDER BY created_at ASC, id ASC LIMIT 1")->fetchColumn();
+            $stats['pending_incident_id'] = $pendingIncidentId !== false ? (int) $pendingIncidentId : null;
+            $stats['pending_nte'] = (int) $pdo->query("SELECT COUNT(*) FROM team8_notice_to_explain WHERE status = 'pending'")->fetchColumn();
+            $pendingNteId = $pdo->query("SELECT id FROM team8_notice_to_explain WHERE status = 'pending' ORDER BY created_at ASC, id ASC LIMIT 1")->fetchColumn();
+            $stats['pending_nte_id'] = $pendingNteId !== false ? (int) $pendingNteId : null;
             $stats['pending_explanations'] = (int) $pdo->query("SELECT COUNT(*) FROM team8_explanations WHERE status = 'pending'")->fetchColumn();
             $stats['pending_approval']     = (int) $pdo->query("SELECT COUNT(*) FROM team8_documents WHERE status = 'pending' AND deleted_at IS NULL")->fetchColumn();
         } catch (PDOException $e) {
@@ -582,7 +662,9 @@ if (!function_exists('t8_hr_recent_documents')) {
             } else {
                 $stmt = $pdo->prepare(
                     "SELECT id, document_number AS label, 'certificate' AS doc_type, status, created_at AS ts
-                     FROM team8_certificates WHERE employee_id = :uid ORDER BY created_at DESC LIMIT 20"
+                     FROM team8_certificates c
+                     JOIN team8_certificate_recipients cr ON cr.certificate_id = c.id
+                     WHERE cr.employee_id = :uid ORDER BY c.created_at DESC LIMIT 20"
                 );
                 $stmt->execute(['uid' => $currentUserId]);
                 $certs = $stmt->fetchAll(PDO::FETCH_ASSOC);
