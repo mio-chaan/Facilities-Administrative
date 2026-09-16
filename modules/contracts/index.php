@@ -849,14 +849,15 @@ switch ($action) {
                     }
                     $stored = t8_contract_upload($_FILES['contract_file'], $documentTitle, $version);
                     if (!$documentId) {
-                        $pdo->prepare('INSERT INTO team8_documents (uploaded_by, owner_id, title, file_path, current_version, status) VALUES (:uploaded_by, :owner_id, :title, :file_path, 1, "pending")')->execute([
+                        $pdo->prepare('INSERT INTO team8_documents (uploaded_by, owner_id, title, file_path, current_version, status) VALUES (:uploaded_by, :owner_id, :title, :file_path, 1, :status)')->execute([
                             'uploaded_by' => $currentUserId, 'owner_id' => $contract['owner_id'], 'title' => $documentTitle, 'file_path' => $stored['file_path'],
+                            'status' => $isAdmin ? 'approved' : 'pending',
                         ]);
                         $documentId = (int) $pdo->lastInsertId();
                         $pdo->prepare('INSERT INTO team8_document_versions (document_id, version_no, file_path, file_size, checksum) VALUES (:document_id, 1, :file_path, :file_size, :checksum)')->execute(['document_id' => $documentId] + $stored);
                     } else {
                         $pdo->prepare('INSERT INTO team8_document_versions (document_id, version_no, file_path, file_size, checksum) VALUES (:document_id, :version_no, :file_path, :file_size, :checksum)')->execute(['document_id' => $documentId, 'version_no' => $version] + $stored);
-                        $pdo->prepare('UPDATE team8_documents SET file_path = :file_path, current_version = :version WHERE id = :id')->execute(['file_path' => $stored['file_path'], 'version' => $version, 'id' => $documentId]);
+                        $pdo->prepare('UPDATE team8_documents SET file_path = :file_path, current_version = :version, status = :status WHERE id = :id')->execute(['file_path' => $stored['file_path'], 'version' => $version, 'status' => $isAdmin ? 'approved' : 'pending', 'id' => $documentId]);
                     }
                     $pdo->prepare('INSERT IGNORE INTO team8_contract_documents (contract_id, document_id) VALUES (:contract_id, :document_id)')->execute(['contract_id' => $contractId, 'document_id' => $documentId]);
                     t8_audit_log($pdo, $currentUserId, 'contract', $contractId, 'upload_document', null, 'v' . $version);

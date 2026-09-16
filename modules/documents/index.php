@@ -396,11 +396,13 @@ function t8_document_rejected_hr_records(PDO $pdo, bool $isAdmin): array
 
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $records[] = [
+                'id' => (int) $row['id'],
                 'title' => (string) $row['document_title'],
                 'type' => (string) $row['document_type'],
                 'subject' => (string) ($row['document_subject'] ?? '—'),
                 'status' => 'rejected',
                 'date' => (string) $row['document_date'],
+                'url_action' => $source['action'],
                 'view_url' => page_url('documents', ['action' => $source['action'], 'id' => (int) $row['id']]),
             ];
         }
@@ -678,7 +680,7 @@ switch ($action) {
                         'checksum'    => $stored['checksum'],
                     ]);
                     $versionUpdateSql = $documentHasStatus
-                        ? "UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, status = 'pending', updated_at = NOW() WHERE id = :id"
+                        ? "UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, status = '" . ($isAdmin ? 'approved' : 'pending') . "', updated_at = NOW() WHERE id = :id"
                         : 'UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, updated_at = NOW() WHERE id = :id';
                     $pdo->prepare($versionUpdateSql)->execute([
                         'file_path'  => $stored['file_path'],
@@ -895,7 +897,7 @@ $showList = !$showCreateForm && !$showUploadVersionForm && !$showVersions && $ac
 if ($showList) {
     $hasMetadata = t8_document_has_column($pdo, 'department_id') && t8_document_has_column($pdo, 'owner_id');
     $statusFilter = ($_GET['status'] ?? 'active') === 'archived' ? 'archived' : 'active';
-    $allDocumentsView = $statusFilter === 'active' && ($_GET['view'] ?? '') === 'all';
+    $allDocumentsView = $statusFilter === 'active';
     $whereClause = $statusFilter === 'archived' ? 'd.deleted_at IS NOT NULL' : 'd.deleted_at IS NULL';
     $scopeSql = $isAdmin ? '' : ' AND d.uploaded_by = :user_id';
     $search = trim((string) ($_GET['q'] ?? ''));
@@ -928,9 +930,36 @@ if ($showList) {
     );
     $documentsStmt->execute($filterParams);
     $documents = $documentsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $rejectedHrRecords = $statusFilter === 'active' && $reviewFilter === 'rejected'
+        ? t8_document_rejected_hr_records($pdo, $isAdmin)
+        : [];
     $allActiveDocuments = $allDocumentsView
         ? t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 5000)
         : [];
+    if ($allDocumentsView && $reviewFilter === 'rejected') {
+        $allActiveDocuments = [];
+        foreach ($documents as $document) {
+            $allActiveDocuments[] = [
+                'id' => (int) $document['id'],
+                'label' => (string) $document['title'],
+                'doc_type' => 'upload',
+                'status' => 'rejected',
+                'ts' => (string) $document['updated_at'],
+                'url_action' => 'versions',
+            ];
+        }
+        foreach ($rejectedHrRecords as $record) {
+            $allActiveDocuments[] = [
+                'id' => (int) $record['id'],
+                'label' => (string) $record['title'],
+                'doc_type' => (string) $record['type'],
+                'status' => 'rejected',
+                'ts' => (string) $record['date'],
+                'url_action' => (string) $record['url_action'],
+            ];
+        }
+        usort($allActiveDocuments, static fn (array $a, array $b): int => strtotime((string) $b['ts']) <=> strtotime((string) $a['ts']));
+    }
     if ($allDocumentsView && $search !== '') {
         $searchNeedle = strtolower($search);
         $allActiveDocuments = array_values(array_filter(
@@ -938,11 +967,14 @@ if ($showList) {
             static fn (array $document): bool => str_contains(strtolower((string) $document['label']), $searchNeedle)
         ));
     }
+    if ($allDocumentsView && in_array($reviewFilter, ['pending', 'approved', 'returned_for_revision'], true)) {
+        $allActiveDocuments = array_values(array_filter(
+            $allActiveDocuments,
+            static fn (array $document): bool => (string) $document['status'] === $reviewFilter
+        ));
+    }
     $archivedHrRecords = $statusFilter === 'archived'
         ? t8_document_archived_hr_records($pdo, $isAdmin)
-        : [];
-    $rejectedHrRecords = $statusFilter === 'active' && $reviewFilter === 'rejected'
-        ? t8_document_rejected_hr_records($pdo, $isAdmin)
         : [];
 }
 
@@ -1337,10 +1369,21 @@ function t8_render_camera_capture(): void
         <?php endif; ?>
     </div>
 
+    <form id="t8DocumentsFilterForm" method="get" class="t8-card" style="margin-bottom:var(--t8-space-4); padding:var(--t8-space-4);">
+        <input type="hidden" name="page" value="documents">
+        <input type="hidden" name="action" value="browse">
+        <?php if (!$isAdmin): ?><p class="t8-help-text" style="margin-top:0;">My Documents: <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'pending'])) ?>">Pending</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'approved'])) ?>">Approved</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'returned_for_revision'])) ?>">Returned for Revision</a></p><?php endif; ?>
+        <div class="t8-documents-filters">
+            <label>Search<input class="t8-input" type="search" name="q" value="<?= e($search) ?>" placeholder="Title, type, uploader"></label>
+            <label>Category<select class="t8-select" name="category_id"><option value="">All categories</option><?php foreach ($categories as $cat): ?><option value="<?= e((string) $cat['id']) ?>" <?= $categoryFilter === (int) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Review status<select class="t8-select" name="review_status"><option value="">All statuses</option><option value="pending" <?= $reviewFilter === 'pending' ? 'selected' : '' ?>>Pending</option><option value="approved" <?= $reviewFilter === 'approved' ? 'selected' : '' ?>>Approved</option><option value="rejected" <?= $reviewFilter === 'rejected' ? 'selected' : '' ?>>Rejected</option><option value="returned_for_revision" <?= $reviewFilter === 'returned_for_revision' ? 'selected' : '' ?>>Returned for Revision</option></select></label>
+        </div>
+    </form>
+
     <?php if ($allDocumentsView): ?>
         <div id="t8DocumentsResults" class="t8-card" style="margin-bottom:var(--t8-space-4);">
             <div class="t8-card-header">
-                <h2 class="t8-card-title">All Active Documents</h2>
+                <h2 class="t8-card-title"><?= $reviewFilter === 'rejected' ? 'Rejected Documents' : 'All Active Documents' ?></h2>
             </div>
             <?php if ($allActiveDocuments === []): ?>
                 <div class="t8-empty">No active documents found.</div>
@@ -1376,17 +1419,6 @@ function t8_render_camera_capture(): void
             <?php endif; ?>
         </div>
     <?php else: ?>
-
-    <form id="t8DocumentsFilterForm" method="get" class="t8-card" style="margin-bottom:var(--t8-space-4); padding:var(--t8-space-4);">
-        <input type="hidden" name="page" value="documents">
-        <input type="hidden" name="action" value="browse">
-        <?php if (!$isAdmin): ?><p class="t8-help-text" style="margin-top:0;">My Documents: <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'pending'])) ?>">Pending</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'approved'])) ?>">Approved</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'returned_for_revision'])) ?>">Returned for Revision</a></p><?php endif; ?>
-        <div class="t8-documents-filters">
-            <label>Search<input class="t8-input" type="search" name="q" value="<?= e($search) ?>" placeholder="Title, type, uploader"></label>
-            <label>Category<select class="t8-select" name="category_id"><option value="">All categories</option><?php foreach ($categories as $cat): ?><option value="<?= e((string) $cat['id']) ?>" <?= $categoryFilter === (int) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option><?php endforeach; ?></select></label>
-            <label>Review status<select class="t8-select" name="review_status"><option value="">All statuses</option><option value="pending" <?= $reviewFilter === 'pending' ? 'selected' : '' ?>>Pending</option><option value="approved" <?= $reviewFilter === 'approved' ? 'selected' : '' ?>>Approved</option><option value="rejected" <?= $reviewFilter === 'rejected' ? 'selected' : '' ?>>Rejected</option><option value="returned_for_revision" <?= $reviewFilter === 'returned_for_revision' ? 'selected' : '' ?>>Returned for Revision</option></select></label>
-        </div>
-    </form>
 
     <div id="t8DocumentsResults" class="t8-card">
         <div class="t8-card-header">
