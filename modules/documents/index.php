@@ -213,7 +213,14 @@ function t8_document_register_retention(PDO $pdo, int $documentId, ?string $cate
     t8_audit_log($pdo, $actorId, 'document', $documentId, 'retention_registered');
 }
 
-function t8_document_render_menu(array $doc, bool $isAdmin, string $statusFilter, ?array $retentionRecord): void
+function t8_document_render_menu(
+    array $doc,
+    bool $isAdmin,
+    string $statusFilter,
+    ?array $retentionRecord,
+    ?int $latestVersionId = null,
+    bool $showVersionsLink = true
+): void
 {
     $id = (int) $doc['id'];
     $title = (string) ($doc['title'] ?? '');
@@ -244,9 +251,23 @@ function t8_document_render_menu(array $doc, bool $isAdmin, string $statusFilter
             <button type="button" class="t8-row-menu-item t8-row-view-details" role="menuitem">
                 <i class="fa-solid fa-eye"></i> View Details
             </button>
-            <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $id])) ?>">
-                <i class="fa-solid fa-file-lines"></i> View / Versions
-            </a>
+            <?php if ($showVersionsLink): ?>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $id])) ?>">
+                    <i class="fa-solid fa-file-lines"></i> View / Versions
+                </a>
+            <?php endif; ?>
+            <?php if ($latestVersionId !== null): ?>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $latestVersionId])) ?>">
+                    <i class="fa-solid fa-download"></i> Download Latest Version
+                </a>
+                <form method="post" action="<?= e(page_url('documents', ['action' => 'summarize'])) ?>">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="version_id" value="<?= e((string) $latestVersionId) ?>">
+                    <button class="t8-row-menu-item" type="submit" role="menuitem">
+                        <i class="fa-solid fa-robot"></i> AI Summarize Latest
+                    </button>
+                </form>
+            <?php endif; ?>
             <?php if ($retentionRecord !== null): ?>
                 <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('retention', ['action' => 'view', 'id' => $retentionRecord['id']])) ?>">
                     <i class="fa-solid fa-box-archive"></i> View Retention Record
@@ -322,6 +343,36 @@ function t8_document_render_feed_menu(array $item): void
             </a>
         </div>
     </div>
+    <?php
+}
+
+function t8_render_document_detail_modal(): void
+{
+    ?>
+    <dialog id="t8DocumentDetailModal" class="t8-detail-modal">
+        <div class="t8-detail-header">
+            <div>
+                <h2 data-detail-field="title">Document</h2>
+            </div>
+            <button type="button" class="t8-detail-close" data-close-detail-modal aria-label="Close">&times;</button>
+        </div>
+        <div class="t8-detail-body">
+            <div class="t8-detail-grid">
+                <div class="t8-detail-item"><span>Document Type</span><strong data-detail-field="document-type">—</strong></div>
+                <div class="t8-detail-item"><span>Version</span><strong data-detail-field="version">—</strong></div>
+                <div class="t8-detail-item"><span>Status</span><strong data-detail-field="status">—</strong></div>
+                <div class="t8-detail-item"><span>Expiration</span><strong data-detail-field="expiration">—</strong></div>
+                <div class="t8-detail-item"><span>Department</span><strong data-detail-field="department">—</strong></div>
+                <div class="t8-detail-item"><span>Owner</span><strong data-detail-field="owner">—</strong></div>
+                <div class="t8-detail-item"><span>Category</span><strong data-detail-field="category">—</strong></div>
+                <div class="t8-detail-item"><span>Last Updated</span><strong data-detail-field="last-updated">—</strong></div>
+                <div class="t8-detail-item full"><span>Uploaded By</span><strong data-detail-field="uploaded-by">—</strong></div>
+            </div>
+        </div>
+        <div class="t8-detail-footer">
+            <button type="button" class="t8-btn t8-btn-outline" data-close-detail-modal>Close</button>
+        </div>
+    </dialog>
     <?php
 }
 
@@ -1388,7 +1439,6 @@ function t8_render_camera_capture(): void
         <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">
             <i class="fa-solid fa-arrow-left"></i> Back to Documents
         </a>
-        <?php t8_document_render_menu($document, $isAdmin, 'active', $documentRetentionRecord); ?>
     </div>
 
     <?php if ($aiSummaryText !== null): ?>
@@ -1436,17 +1486,28 @@ function t8_render_camera_capture(): void
                             </td>
                             <td><?= e(t8_format_filesize((int) $v['file_size'])) ?></td>
                             <td><?= e(format_date($v['uploaded_at'], 'M d, Y g:i A')) ?></td>
-                            <td style="display:flex; gap:8px; flex-wrap:wrap;">
-                                <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $v['id']])) ?>">
-                                    <i class="fa-solid fa-download"></i> Download
-                                </a>
-                                <form method="post" action="<?= e(page_url('documents', ['action' => 'summarize'])) ?>" style="display:inline;">
-                                    <?= t8_csrf_field() ?>
-                                    <input type="hidden" name="version_id" value="<?= e((string) $v['id']) ?>">
-                                    <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit">
-                                        <i class="fa-solid fa-robot"></i> AI Summarize
-                                    </button>
-                                </form>
+                            <td class="t8-row-actions t8-version-actions">
+                                <?php if ($i === 0): ?>
+                                    <?php t8_document_render_menu($document, $isAdmin, 'active', $documentRetentionRecord, (int) $v['id'], false); ?>
+                                <?php else: ?>
+                                    <div class="t8-row-menu">
+                                        <button type="button" class="t8-row-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions">
+                                            <i class="fa-solid fa-ellipsis-vertical"></i>
+                                        </button>
+                                        <div class="t8-row-menu-panel" role="menu">
+                                            <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $v['id']])) ?>">
+                                                <i class="fa-solid fa-download"></i> Download
+                                            </a>
+                                            <form method="post" action="<?= e(page_url('documents', ['action' => 'summarize'])) ?>">
+                                                <?= t8_csrf_field() ?>
+                                                <input type="hidden" name="version_id" value="<?= e((string) $v['id']) ?>">
+                                                <button class="t8-row-menu-item" type="submit" role="menuitem">
+                                                    <i class="fa-solid fa-robot"></i> AI Summarize
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -1454,6 +1515,8 @@ function t8_render_camera_capture(): void
             </table>
         </div>
     </div>
+
+    <?php t8_render_document_detail_modal(); ?>
 
 <?php elseif ($showList): ?>
 
@@ -1647,29 +1710,6 @@ function t8_render_camera_capture(): void
     </div>
     <?php endif; ?>
 
-    <dialog id="t8DocumentDetailModal" class="t8-detail-modal">
-        <div class="t8-detail-header">
-            <div>
-                <h2 data-detail-field="title">Document</h2>
-            </div>
-            <button type="button" class="t8-detail-close" data-close-detail-modal aria-label="Close">&times;</button>
-        </div>
-        <div class="t8-detail-body">
-            <div class="t8-detail-grid">
-                <div class="t8-detail-item"><span>Document Type</span><strong data-detail-field="document-type">—</strong></div>
-                <div class="t8-detail-item"><span>Version</span><strong data-detail-field="version">—</strong></div>
-                <div class="t8-detail-item"><span>Status</span><strong data-detail-field="status">—</strong></div>
-                <div class="t8-detail-item"><span>Expiration</span><strong data-detail-field="expiration">—</strong></div>
-                <div class="t8-detail-item"><span>Department</span><strong data-detail-field="department">—</strong></div>
-                <div class="t8-detail-item"><span>Owner</span><strong data-detail-field="owner">—</strong></div>
-                <div class="t8-detail-item"><span>Category</span><strong data-detail-field="category">—</strong></div>
-                <div class="t8-detail-item"><span>Last Updated</span><strong data-detail-field="last-updated">—</strong></div>
-                <div class="t8-detail-item full"><span>Uploaded By</span><strong data-detail-field="uploaded-by">—</strong></div>
-            </div>
-        </div>
-        <div class="t8-detail-footer">
-            <button type="button" class="t8-btn t8-btn-outline" data-close-detail-modal>Close</button>
-        </div>
-    </dialog>
+    <?php t8_render_document_detail_modal(); ?>
 
 <?php endif; ?>
