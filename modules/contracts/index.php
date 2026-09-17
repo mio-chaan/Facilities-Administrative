@@ -74,6 +74,9 @@ if (!defined('T8_OBLIGATION_STATUSES')) {
 if (!defined('T8_CONTRACT_CURRENCIES')) {
     define('T8_CONTRACT_CURRENCIES', ['PHP', 'USD', 'JPY', 'KRW', 'EUR']);
 }
+if (!defined('T8_CONTRACT_TYPES')) {
+    define('T8_CONTRACT_TYPES', ['Service Agreement', 'Supplier/Vendor Agreement', 'Employment Contract', 'Lease Agreement', 'Partnership Agreement', 'Non-Disclosure Agreement', 'Maintenance Agreement', 'Purchase Agreement', 'Other']);
+}
 if (!defined('T8_CONTRACT_PAYMENT_FREQUENCIES')) {
     define('T8_CONTRACT_PAYMENT_FREQUENCIES', ['One-time', 'Monthly', 'Quarterly', 'Semi-annually', 'Annually', 'Per milestone', 'Other']);
 }
@@ -396,6 +399,76 @@ function t8_contract_render_menu(array $c, bool $isAdmin, bool $archivedFilter, 
         </div>
     </div>
     <?php
+}
+
+if (defined('T8_CONTRACTS_AJAX_FILTER')) {
+    header('Content-Type: application/json');
+
+    $archivedFilter = ($_GET['archived'] ?? '0') === '1';
+    $search = trim((string) ($_GET['search'] ?? ''));
+    $statusFilter = trim((string) ($_GET['status'] ?? ''));
+    $typeFilter = trim((string) ($_GET['contract_type'] ?? ''));
+    $where = $archivedFilter ? 'c.deleted_at IS NOT NULL' : 'c.deleted_at IS NULL';
+    $listParams = [];
+    if ($search !== '') {
+        $where .= ' AND (c.contract_number LIKE :search_number OR c.title LIKE :search_title OR c.description LIKE :search_description OR EXISTS (SELECT 1 FROM team8_contract_parties cp JOIN team8_parties p ON p.id = cp.party_id WHERE cp.contract_id = c.id AND p.name LIKE :party_search))';
+        $searchTerm = '%' . $search . '%';
+        $listParams['search_number'] = $searchTerm;
+        $listParams['search_title'] = $searchTerm;
+        $listParams['search_description'] = $searchTerm;
+        $listParams['party_search'] = '%' . $search . '%';
+    }
+    if ($statusFilter !== '' && in_array($statusFilter, T8_CONTRACT_STATUSES, true)) {
+        $where .= ' AND c.status = :status';
+        $listParams['status'] = $statusFilter;
+    }
+    if ($typeFilter !== '') {
+        $where .= ' AND c.contract_type = :contract_type';
+        $listParams['contract_type'] = $typeFilter;
+    }
+    $scope = $isAdmin ? '' : ($contractHasMetadata ? ' AND (c.owner_id = :user_id OR c.department_id = :department_id)' : ' AND c.owner_id = :user_id');
+    if (!$isAdmin) {
+        $listParams += $contractHasMetadata
+            ? ['user_id' => $currentUserId, 'department_id' => $_SESSION['department_id'] ?? 0]
+            : ['user_id' => $currentUserId];
+    }
+    $fromSql = ' FROM team8_contracts c JOIN users u ON u.id = c.owner_id ' . ($contractHasMetadata ? 'LEFT JOIN departments d ON d.id = c.department_id ' : '');
+    $countStmt = $pdo->prepare('SELECT COUNT(*)' . $fromSql . " WHERE $where$scope");
+    $countStmt->execute($listParams);
+    $total = (int) $countStmt->fetchColumn();
+    $contractsStmt = $pdo->prepare(
+        "SELECT c.*, u.full_name AS owner_name" . ($contractHasMetadata ? ', d.name AS department_name' : '') . $fromSql . " WHERE $where$scope ORDER BY c.start_date DESC"
+    );
+    $contractsStmt->execute($listParams);
+    $contracts = $contractsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    ob_start();
+    if ($contracts === []) {
+        ?><tr><td colspan="<?= $contractHasMetadata ? '10' : '9' ?>" class="t8-table-empty-row"><?= $search !== '' || $statusFilter !== '' || $typeFilter !== '' ? 'No matching contracts.' : ($archivedFilter ? 'No archived contracts.' : 'No contracts yet.') ?></td></tr><?php
+    } else {
+        foreach ($contracts as $c) {
+            $isMonitoring = t8_contract_is_monitoring($pdo, $c);
+            $retentionRecord = function_exists('t8_retention_fetch_for_entity')
+                ? t8_retention_fetch_for_entity($pdo, 'contract', (int) $c['id'])
+                : null;
+            ?>
+            <tr>
+                <td><?= e((string) $c['contract_number']) ?></td>
+                <td><?= e($c['title']) ?></td>
+                <td><?= e((string) ($c['contract_type'] ?? '—')) ?></td>
+                <?php if ($contractHasMetadata): ?><td><?= e((string) ($c['department_name'] ?? '—')) ?></td><?php endif; ?>
+                <td><?= e($c['owner_name']) ?></td>
+                <td><?= e(format_date($c['start_date'], 'M d, Y')) ?></td>
+                <td><?= $c['end_date'] ? e(format_date($c['end_date'], 'M d, Y')) : '—' ?></td>
+                <td><?= $c['amount'] !== null ? e((string) ($c['currency'] ?? 'PHP') . ' ' . number_format((float) $c['amount'], 2)) : '—' ?></td>
+                <td><span class="t8-badge <?= t8_contract_status_badge($c['status']) ?>"><?= e(ucwords(str_replace('_', ' ', $c['status']))) ?></span><?php if ($isMonitoring): ?><span class="t8-badge-monitoring" title="Within 90 days of end date, termination date, renewal date, or a pending obligation">Monitoring</span><?php endif; ?></td>
+                <td style="text-align:right;"><?php t8_contract_render_menu($c, $isAdmin, $archivedFilter, $isMonitoring, $retentionRecord); ?></td>
+            </tr>
+            <?php
+        }
+    }
+    echo json_encode(['html' => (string) ob_get_clean(), 'total' => $total, 'count' => count($contracts)]);
+    exit;
 }
 
 $owners = $pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC);
@@ -949,7 +1022,7 @@ if ($showList) {
     $typeFilter = trim((string) ($_GET['contract_type'] ?? ''));
     $where = $archivedFilter ? 'c.deleted_at IS NOT NULL' : 'c.deleted_at IS NULL';
     $listParams = [];
-    if ($search !== '') { $where .= ' AND (c.contract_number LIKE :search OR c.title LIKE :search OR c.description LIKE :search OR EXISTS (SELECT 1 FROM team8_contract_parties cp JOIN team8_parties p ON p.id = cp.party_id WHERE cp.contract_id = c.id AND p.name LIKE :party_search))'; $listParams['search'] = '%' . $search . '%'; $listParams['party_search'] = '%' . $search . '%'; }
+    if ($search !== '') { $where .= ' AND (c.contract_number LIKE :search_number OR c.title LIKE :search_title OR c.description LIKE :search_description OR EXISTS (SELECT 1 FROM team8_contract_parties cp JOIN team8_parties p ON p.id = cp.party_id WHERE cp.contract_id = c.id AND p.name LIKE :party_search))'; $searchTerm = '%' . $search . '%'; $listParams['search_number'] = $searchTerm; $listParams['search_title'] = $searchTerm; $listParams['search_description'] = $searchTerm; $listParams['party_search'] = $searchTerm; }
     if ($statusFilter !== '' && in_array($statusFilter, T8_CONTRACT_STATUSES, true)) { $where .= ' AND c.status = :status'; $listParams['status'] = $statusFilter; }
     if ($typeFilter !== '') { $where .= ' AND c.contract_type = :contract_type'; $listParams['contract_type'] = $typeFilter; }
     $scope = $isAdmin ? '' : ($contractHasMetadata ? ' AND (c.owner_id = :user_id OR c.department_id = :department_id)' : ' AND c.owner_id = :user_id');
@@ -1000,7 +1073,7 @@ if ($showList) {
                 <label class="t8-label" for="contract_type">Contract Type</label>
                 <select class="t8-select" id="contract_type" name="contract_type">
                     <option value="">Select type</option>
-                    <?php foreach (['Service Agreement', 'Supplier/Vendor Agreement', 'Employment Contract', 'Lease Agreement', 'Partnership Agreement', 'Non-Disclosure Agreement', 'Maintenance Agreement', 'Purchase Agreement', 'Other'] as $type): ?>
+                    <?php foreach (T8_CONTRACT_TYPES as $type): ?>
                         <option value="<?= e($type) ?>" <?= $formValues['contract_type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -1327,23 +1400,23 @@ if ($showList) {
         <div class="t8-card-header">
             <h2 class="t8-card-title"><?= $archivedFilter ? 'Archived Contracts' : 'Contracts' ?></h2>
         </div>
-        <form method="get" action="<?= e(base_url('index.php')) ?>" class="t8-card-header" style="display:flex; gap:8px; flex-wrap:wrap; align-items:end;">
+        <form method="get" action="<?= e(base_url('index.php')) ?>" class="t8-contract-filters" id="t8ContractsFilterForm" data-contract-filter-table="t8ContractsTable">
             <input type="hidden" name="page" value="contracts">
-            <div class="t8-field"><label class="t8-label" for="search">Search</label><input class="t8-input" id="search" name="search" value="<?= e($search) ?>" placeholder="Number, title, party"></div>
-            <div class="t8-field"><label class="t8-label" for="status_filter">Status</label><select class="t8-select" id="status_filter" name="status"><option value="">All statuses</option><?php foreach (T8_CONTRACT_STATUSES as $status): ?><option value="<?= e($status) ?>" <?= $statusFilter === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?></select></div>
-            <div class="t8-field"><label class="t8-label" for="contract_type_filter">Type</label><input class="t8-input" id="contract_type_filter" name="contract_type" value="<?= e($typeFilter) ?>"></div>
-            <?php if ($archivedFilter): ?><input type="hidden" name="archived" value="1"><?php endif; ?><button class="t8-btn t8-btn-outline" type="submit"><i class="fa-solid fa-filter"></i> Filter</button>
+            <div class="t8-field"><label class="t8-label" for="search">Search</label><input class="t8-input" id="search" name="search" data-contract-search value="<?= e($search) ?>" placeholder="Number, title, party"></div>
+            <div class="t8-field"><label class="t8-label" for="status_filter">Status</label><select class="t8-select" id="status_filter" name="status" data-contract-status><option value="">All statuses</option><?php foreach (T8_CONTRACT_STATUSES as $status): ?><option value="<?= e($status) ?>" <?= $statusFilter === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?></select></div>
+            <div class="t8-field"><label class="t8-label" for="contract_type_filter">Type</label><select class="t8-select" id="contract_type_filter" name="contract_type" data-contract-type><option value="">All types</option><?php foreach (T8_CONTRACT_TYPES as $type): ?><option value="<?= e($type) ?>" <?= $typeFilter === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></div>
+            <?php if ($archivedFilter): ?><input type="hidden" name="archived" value="1"><?php endif; ?>
         </form>
-        <?php if ($contracts === []): ?>
-            <div class="t8-empty"><?= $archivedFilter ? 'No archived contracts.' : 'No contracts yet.' ?></div>
-        <?php else: ?>
-            <div class="t8-table-wrap">
-                <table class="t8-table">
+        <div class="t8-table-wrap">
+                <table class="t8-table" id="t8ContractsTable">
                     <thead>
                         <tr><th>Contract No.</th><th>Title</th><th>Type</th><?php if ($contractHasMetadata): ?><th>Department</th><?php endif; ?><th>Responsible Person</th><th>Start</th><th>End</th><th>Value</th><th>Status</th><th>Actions</th></tr>
                     </thead>
-                    <tbody>
-                        <?php foreach ($contracts as $c): ?>
+                    <tbody data-contract-results>
+                        <?php if ($contracts === []): ?>
+                            <tr><td colspan="<?= $contractHasMetadata ? '10' : '9' ?>" class="t8-table-empty-row"><?= $archivedFilter ? 'No archived contracts.' : 'No contracts yet.' ?></td></tr>
+                        <?php else: ?>
+                            <?php foreach ($contracts as $c): ?>
                             <?php
                             $isMonitoring = t8_contract_is_monitoring($pdo, $c);
                             $retentionRecord = function_exists('t8_retention_fetch_for_entity')
@@ -1367,11 +1440,11 @@ if ($showList) {
                                     <?php t8_contract_render_menu($c, $isAdmin, $archivedFilter, $isMonitoring, $retentionRecord); ?>
                                 </td>
                             </tr>
-                        <?php endforeach; ?>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
                     </tbody>
                 </table>
-            </div>
-        <?php endif; ?>
+        </div>
     </div>
 
     <!--

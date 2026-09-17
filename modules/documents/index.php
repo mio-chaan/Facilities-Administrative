@@ -19,6 +19,20 @@
  *   etc.) are a different entity model entirely and are out of scope
  *   for this rebuild's "Documents" retention entity type.
  *
+ * STATUS/APPROVAL FIX (2026-09-17):
+ *   Every non-admin upload used to be stamped 'pending' unconditionally,
+ *   regardless of what kind of document it was - but only some
+ *   categories were ever meant to be reviewed, so anything else's
+ *   'pending' row had no reviewer ever routed to it and sat stuck
+ *   forever. T8_DOC_CATEGORIES_REQUIRING_APPROVAL / 
+ *   t8_document_requires_approval() below now decide this from the
+ *   document's category: categories that carry compliance/legal/
+ *   financial weight keep the existing Pending -> Approved/Returned
+ *   admin review workflow (see 'set_status' below and
+ *   t8_document_render_menu()'s Approve/Return buttons); everything
+ *   else is approved immediately on create/upload since there is no
+ *   review step for it to wait in.
+ *
  * Routing:
  *   ?action=dashboard (default)         -> modules/documents/hr/dashboard.php
  *   ?action=browse                      -> the original upload list/table (below)
@@ -66,6 +80,34 @@ $action = $_GET['action'] ?? 'dashboard';
 $errors = [];
 
 const T8_DOC_ALLOWED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'png', 'jpg', 'jpeg'];
+
+/**
+ * Categories whose documents must go through the Pending -> Approved /
+ * Returned admin review step (see t8_document_render_menu()'s Approve/
+ * Return buttons and the 'set_status' action below).
+ *
+ * Anything NOT in this list has no review step to be routed into, so
+ * it is approved immediately on create/upload instead of being
+ * stamped 'pending' with nowhere to go - that mismatch (every upload
+ * marked pending regardless of category, but only some categories
+ * ever having a reviewer look at them) is what previously left
+ * documents stuck in Pending indefinitely.
+ */
+const T8_DOC_CATEGORIES_REQUIRING_APPROVAL = [
+    'Compliance',
+    'Legal',
+    'Contracts',
+    'Finance',
+    'Human Resources',
+    'HR',
+];
+
+/** True if $categoryName's documents must go through admin review. */
+function t8_document_requires_approval(?string $categoryName): bool
+{
+    return $categoryName !== null
+        && in_array($categoryName, T8_DOC_CATEGORIES_REQUIRING_APPROVAL, true);
+}
 
 function t8_document_has_column(PDO $pdo, string $column): bool
 {
@@ -542,6 +584,18 @@ switch ($action) {
             $ownerId = $isAdmin && (string) ($_POST['owner_id'] ?? '') !== '' ? (int) $_POST['owner_id'] : $currentUserId;
             $expirationDate = trim((string) ($_POST['expiration_date'] ?? ''));
 
+            // Resolved once here - reused both for the status decision
+            // below (STATUS/APPROVAL FIX) and for retention
+            // registration after the insert, instead of being looked
+            // up twice.
+            $categoryName = null;
+            foreach ($categories as $cat) {
+                if ((int) $cat['id'] === $categoryId) {
+                    $categoryName = (string) $cat['name'];
+                    break;
+                }
+            }
+
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
@@ -585,7 +639,15 @@ switch ($action) {
                     if ($documentHasStatus) {
                         $insertColumns[] = 'status';
                         $insertValues[] = ':status';
-                        $insertParams['status'] = $isAdmin ? 'approved' : 'pending';
+                        // STATUS/APPROVAL FIX: admins still publish
+                        // immediately. A non-admin upload is only ever
+                        // 'pending' when its category actually has a
+                        // review step to send it to (see
+                        // T8_DOC_CATEGORIES_REQUIRING_APPROVAL above) -
+                        // otherwise it's approved right away instead of
+                        // being stranded with no reviewer looking for it.
+                        $requiresApproval = t8_document_requires_approval($categoryName);
+                        $insertParams['status'] = ($isAdmin || !$requiresApproval) ? 'approved' : 'pending';
                     }
                     if ($documentHasExpiration) {
                         $insertColumns[] = 'expiration_date';
@@ -622,14 +684,8 @@ switch ($action) {
                     t8_audit_log($pdo, $currentUserId, 'document', $documentId, 'create');
 
                     // PHASE 4: register under retention immediately, using
-                    // the category name to pick a suggested basis/period.
-                    $categoryName = null;
-                    foreach ($categories as $cat) {
-                        if ((int) $cat['id'] === $categoryId) {
-                            $categoryName = (string) $cat['name'];
-                            break;
-                        }
-                    }
+                    // the category name (already resolved above) to pick
+                    // a suggested basis/period.
                     t8_document_register_retention($pdo, $documentId, $categoryName, $currentUserId);
 
                     t8_flash_set('success', 'Document uploaded.');
@@ -669,6 +725,15 @@ switch ($action) {
 
                     $stored = t8_document_store_upload($_FILES['file'], $document['title'], $nextVersion);
 
+                    // STATUS/APPROVAL FIX: a re-upload follows the same
+                    // rule as a fresh upload - only route back into
+                    // 'pending' when the document's own category
+                    // actually has a review step (t8_document_fetch()
+                    // already joins category_name onto $document).
+                    $reuploadStatus = ($isAdmin || !t8_document_requires_approval($document['category_name'] ?? null))
+                        ? 'approved'
+                        : 'pending';
+
                     $pdo->prepare(
                         'INSERT INTO team8_document_versions (document_id, version_no, file_path, file_size, checksum)
                          VALUES (:document_id, :version_no, :file_path, :file_size, :checksum)'
@@ -680,7 +745,7 @@ switch ($action) {
                         'checksum'    => $stored['checksum'],
                     ]);
                     $versionUpdateSql = $documentHasStatus
-                        ? "UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, status = '" . ($isAdmin ? 'approved' : 'pending') . "', updated_at = NOW() WHERE id = :id"
+                        ? "UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, status = '" . $reuploadStatus . "', updated_at = NOW() WHERE id = :id"
                         : 'UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, updated_at = NOW() WHERE id = :id';
                     $pdo->prepare($versionUpdateSql)->execute([
                         'file_path'  => $stored['file_path'],
@@ -1150,7 +1215,7 @@ function t8_render_camera_capture(): void
                         <option value="<?= e((string) $cat['id']) ?>" <?= isset($_POST['category_id']) && (string) $_POST['category_id'] === (string) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option>
                     <?php endforeach; ?>
                 </select>
-                <span class="t8-help-text">Also determines the suggested retention basis/period applied automatically on upload.</span>
+                <span class="t8-help-text">Also determines the suggested retention basis/period, and whether this document needs admin approval before it's applied automatically on upload.</span>
             </div>
 
             <div class="t8-field">

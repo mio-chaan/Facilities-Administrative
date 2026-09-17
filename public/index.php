@@ -361,6 +361,12 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
     exit;
 }
 
+if (isset($_GET['ajax_filter']) && $_GET['page'] === 'contracts') {
+    define('T8_CONTRACTS_AJAX_FILTER', true);
+    require dirname(__DIR__) . '/modules/contracts/index.php';
+    exit;
+}
+
 // Handle AJAX filter requests for audit logs
 if (isset($_GET['ajax_filter']) && $_GET['page'] === 'audit') {
     header('Content-Type: application/json');
