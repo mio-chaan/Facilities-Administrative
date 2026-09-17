@@ -391,7 +391,6 @@ CREATE TABLE team8_contracts (
     currency        CHAR(3) NOT NULL DEFAULT 'PHP',
     payment_terms   VARCHAR(255) NULL,
     payment_frequency VARCHAR(50) NULL,
-    payment_schedule TEXT NULL,
     deposit_amount  DECIMAL(14,2) NULL,
     financial_notes TEXT NULL,
     notice_period_days INT NULL,
