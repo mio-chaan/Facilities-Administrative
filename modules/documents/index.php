@@ -112,8 +112,17 @@ function t8_document_requires_approval(?string $categoryName): bool
 function t8_document_has_column(PDO $pdo, string $column): bool
 {
     try {
-        $stmt = $pdo->prepare("SHOW COLUMNS FROM team8_documents LIKE :column");
-        $stmt->execute(['column' => $column]);
+        // MariaDB does not support PDO placeholders in SHOW COLUMNS LIKE.
+        // information_schema keeps the check parameterized and portable.
+        $stmt = $pdo->prepare(
+            'SELECT 1
+             FROM information_schema.columns
+             WHERE table_schema = DATABASE()
+               AND table_name = :table_name
+               AND column_name = :column_name
+             LIMIT 1'
+        );
+        $stmt->execute(['table_name' => 'team8_documents', 'column_name' => $column]);
         return (bool) $stmt->fetch(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         return false;
@@ -122,6 +131,7 @@ function t8_document_has_column(PDO $pdo, string $column): bool
 
 $documentHasMetadata = t8_document_has_column($pdo, 'department_id') && t8_document_has_column($pdo, 'owner_id');
 $documentHasStatus = t8_document_has_column($pdo, 'status');
+$documentHasReviewReason = t8_document_has_column($pdo, 'review_reason');
 $documentHasExpiration = t8_document_has_column($pdo, 'expiration_date');
 
 function t8_documents_dir(): string
@@ -258,7 +268,7 @@ function t8_document_render_menu(array $doc, bool $isAdmin, string $statusFilter
                     <input type="hidden" name="status" value="returned_for_revision">
                     <textarea class="t8-textarea" name="review_reason" rows="2" placeholder="Reason for return" required></textarea>
                     <button class="t8-row-menu-item t8-danger" type="submit" role="menuitem">
-                        <i class="fa-solid fa-rotate-left"></i> Return
+                        <i class="fa-solid fa-rotate-left"></i> Reject / Return
                     </button>
                 </form>
             <?php endif; ?>
@@ -281,6 +291,35 @@ function t8_document_render_menu(array $doc, bool $isAdmin, string $statusFilter
                     </button>
                 </form>
             <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}
+
+/** Render the shared meatball menu for generated HR records in the feed. */
+function t8_document_render_feed_menu(array $item): void
+{
+    $title = (string) ($item['label'] ?? 'Document');
+    $documentType = t8_hr_doc_type_label((string) ($item['doc_type'] ?? ''));
+    $status = ucwords(str_replace('_', ' ', (string) ($item['status'] ?? 'pending')));
+    $date = format_date((string) ($item['ts'] ?? ''), 'M d, Y');
+    ?>
+    <div class="t8-row-menu">
+        <button type="button" class="t8-row-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions"
+                data-detail-modal="t8DocumentDetailModal"
+                data-title="<?= e($title) ?>"
+                data-document-type="<?= e($documentType) ?>"
+                data-status="<?= e($status) ?>"
+                data-last-updated="<?= e($date) ?>">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+        </button>
+        <div class="t8-row-menu-panel" role="menu">
+            <button type="button" class="t8-row-menu-item t8-row-view-details" role="menuitem">
+                <i class="fa-solid fa-eye"></i> View Details
+            </button>
+            <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('documents', ['action' => $item['url_action'], 'id' => (int) $item['id']])) ?>">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> Open Document
+            </a>
         </div>
     </div>
     <?php
@@ -775,9 +814,16 @@ switch ($action) {
         } elseif ($status === 'returned_for_revision' && $reviewReason === '') {
             t8_flash_set('danger', 'A reason is required when returning a document.');
         } else {
-                $document = t8_document_fetch($pdo, $id);
+            $document = t8_document_fetch($pdo, $id);
+            if ($documentHasReviewReason) {
                 $pdo->prepare('UPDATE team8_documents SET status = :status, review_reason = :reason WHERE id = :id')
                     ->execute(['status' => $status, 'reason' => $status === 'returned_for_revision' ? $reviewReason : null, 'id' => $id]);
+            } else {
+                // Keep approval usable on installations that have the status
+                // migration but not the later review_reason migration yet.
+                $pdo->prepare('UPDATE team8_documents SET status = :status WHERE id = :id')
+                    ->execute(['status' => $status, 'id' => $id]);
+            }
             t8_audit_log($pdo, $currentUserId, 'document', $id, $status);
                 if ($status === 'returned_for_revision' && function_exists('t8_hr_notify')) {
                     t8_hr_notify(
@@ -1342,12 +1388,7 @@ function t8_render_camera_capture(): void
         <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">
             <i class="fa-solid fa-arrow-left"></i> Back to Documents
         </a>
-        <?php if ($documentRetentionRecord !== null): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('retention', ['action' => 'view', 'id' => $documentRetentionRecord['id']])) ?>">
-                <i class="fa-solid fa-box-archive"></i> View Retention Record
-                (<span class="t8-badge <?= e(t8_retention_status_badge((string) $documentRetentionRecord['status'])) ?>" style="margin-left:4px;"><?= e(ucwords(str_replace('_', ' ', (string) $documentRetentionRecord['status']))) ?></span>)
-            </a>
-        <?php endif; ?>
+        <?php t8_document_render_menu($document, $isAdmin, 'active', $documentRetentionRecord); ?>
     </div>
 
     <?php if ($aiSummaryText !== null): ?>
@@ -1472,9 +1513,17 @@ function t8_render_camera_capture(): void
                                     <td><span class="t8-badge <?= e(t8_hr_status_badge((string) $document['status'])) ?>"><?= e(ucfirst((string) $document['status'])) ?></span></td>
                                     <td><?= e(format_date((string) $document['ts'], 'M d, Y')) ?></td>
                                     <td class="t8-row-actions">
-                                        <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('documents', ['action' => $document['url_action'], 'id' => (int) $document['id']])) ?>">
-                                            <i class="fa-solid fa-eye"></i> View
-                                        </a>
+                                        <?php if ($document['doc_type'] === 'upload'):
+                                            $feedDocument = t8_document_fetch($pdo, (int) $document['id']);
+                                            $feedRetentionRecord = $feedDocument !== null && function_exists('t8_retention_fetch_for_entity')
+                                                ? t8_retention_fetch_for_entity($pdo, 'document', (int) $document['id'])
+                                                : null;
+                                            if ($feedDocument !== null):
+                                                t8_document_render_menu($feedDocument, $isAdmin, 'active', $feedRetentionRecord);
+                                            endif;
+                                        else: ?>
+                                            <?php t8_document_render_feed_menu($document); ?>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>

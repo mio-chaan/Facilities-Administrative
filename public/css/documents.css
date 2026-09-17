@@ -12,6 +12,10 @@
 .t8-documents-filters label { display:flex; flex-direction:column; gap:4px; font-size:.82rem; font-weight:700; color:var(--t8-text-muted); }
 .t8-documents-filters .t8-input, .t8-documents-filters .t8-select { min-width:180px; }
 
+/* Keep document row actions visually centered in the Actions column. */
+#t8DocumentsResults .t8-row-actions { justify-content: center; }
+#t8DocumentsResults .t8-table th:last-child { text-align: center; }
+
 /* ---- Hero / top section ---- */
 .t8-docs-hero {
     display: flex;
