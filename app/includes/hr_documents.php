@@ -538,7 +538,6 @@ if (!function_exists('t8_hr_dashboard_stats')) {
             'total_documents'     => 0,
             'generated_documents' => 0,
             'archived'            => 0,
-            'templates'           => 5, // Incident Report, NTE, Memorandum, Warning Letter, Certificate (see hr/generate.php)
             'pending_incidents'   => 0,
             'pending_incident_id' => null,
             'pending_nte'         => 0,

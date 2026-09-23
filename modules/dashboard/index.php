@@ -121,8 +121,6 @@ try {
     $dbError ??= 'Could not load all dashboard information - has database/schema.sql been imported yet?';
 }
 
-$t8UnreadNotifications = t8_unread_notification_count($pdo, t8_current_user_id());
-
 $activityIcons = [
     'login'      => 'fa-right-to-bracket',
     'logout'     => 'fa-right-from-bracket',
@@ -509,14 +507,6 @@ $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
                 <li class="t8-insight-item">
                     <span>Top facility: <strong><?= e($facilityUsage[0]['label'] ?? '—') ?></strong></span>
                     <span class="t8-tag t8-tag-info">Info</span>
-                </li>
-                <li class="t8-insight-item">
-                    <span>Unread notifications: <strong><?= e((string) $t8UnreadNotifications) ?></strong></span>
-                    <?php if ($t8UnreadNotifications > 0): ?>
-                        <span class="t8-tag t8-tag-review">Review</span>
-                    <?php else: ?>
-                        <span class="t8-tag t8-tag-info">Info</span>
-                    <?php endif; ?>
                 </li>
             </ul>
             <p id="t8ReservationInsight" class="t8-help-text" role="status" aria-live="polite" hidden></p>

@@ -25,7 +25,6 @@ $recentDocuments = t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 8);
         <a class="t8-docs-kpi t8-docs-kpi-red t8-docs-kpi-link" href="<?= e(page_url('documents', ['action' => 'browse'])) ?>" aria-label="Browse all active documents"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-file-lines"></i></div><div><span>Total Documents</span><strong><?= e((string) $hrStats['total_documents']) ?></strong><small>All active records</small></div></a>
         <div class="t8-docs-kpi t8-docs-kpi-orange"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-clock"></i></div><div><span>Pending Actions</span><strong><?= e((string) ($hrStats['pending_incidents'] + $hrStats['pending_nte'] + $hrStats['pending_explanations'] + $hrStats['pending_approval'])) ?></strong><small>Needs attention</small></div></div>
         <a class="t8-docs-kpi t8-docs-kpi-gray t8-docs-kpi-link" href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'archived'])) ?>" aria-label="View archived documents"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-box-archive"></i></div><div><span>Archived</span><strong><?= e((string) $hrStats['archived']) ?></strong><small>Retained records</small></div></a>
-        <div class="t8-docs-kpi t8-docs-kpi-purple"><div class="t8-docs-kpi-icon"><i class="fa-solid fa-layer-group"></i></div><div><span>Templates</span><strong><?= e((string) $hrStats['templates']) ?></strong><small>Ready to generate</small></div></div>
     </div>
 
     <div class="t8-docs-layout">

@@ -220,7 +220,7 @@ CREATE TABLE team8_visitors (
     person_to_visit         VARCHAR(150) NULL,
     purpose                 VARCHAR(255) NOT NULL,
     scheduled_date          DATETIME NOT NULL,
-    status                  VARCHAR(30) NOT NULL DEFAULT 'scheduled', -- scheduled | checked_in | checked_out | cancelled | expired
+    status                  VARCHAR(30) NOT NULL DEFAULT 'scheduled', -- scheduled | late | checked_in | checked_out | cancelled | expired
     check_in_time           DATETIME NULL,
     check_out_time          DATETIME NULL,
     logged_by               INT NOT NULL,

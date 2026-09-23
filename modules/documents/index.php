@@ -1058,17 +1058,27 @@ $showList = !$showCreateForm && !$showUploadVersionForm && !$showVersions && $ac
 
 if ($showList) {
     $hasMetadata = t8_document_has_column($pdo, 'department_id') && t8_document_has_column($pdo, 'owner_id');
-    $statusFilter = ($_GET['status'] ?? 'active') === 'archived' ? 'archived' : 'active';
-    $allDocumentsView = $statusFilter === 'active';
-    $whereClause = $statusFilter === 'archived' ? 'd.deleted_at IS NOT NULL' : 'd.deleted_at IS NULL';
+    $requestedStatus = (string) ($_GET['status'] ?? 'all');
+    $statusFilter = in_array($requestedStatus, ['all', 'active', 'rejected', 'archived'], true) ? $requestedStatus : 'all';
+    $reviewFilter = (string) ($_GET['review_status'] ?? '');
+    if ($reviewFilter === 'rejected') {
+        $statusFilter = 'rejected';
+    }
+    $allDocumentsView = $statusFilter !== 'archived';
+    $whereClause = match ($statusFilter) {
+        'archived' => 'd.deleted_at IS NOT NULL',
+        'active' => "d.deleted_at IS NULL AND d.status = 'approved'",
+        'rejected' => "d.deleted_at IS NULL AND d.status = 'returned_for_revision'",
+        default => "d.deleted_at IS NULL AND d.status IN ('draft', 'pending', 'approved')",
+    };
     $scopeSql = $isAdmin ? '' : ' AND d.uploaded_by = :user_id';
     $search = trim((string) ($_GET['q'] ?? ''));
     $categoryFilter = (int) ($_GET['category_id'] ?? 0);
-    $reviewFilter = (string) ($_GET['review_status'] ?? '');
     $filterSql = '';
     $filterParams = $isAdmin ? [] : ['user_id' => $currentUserId];
     if ($search !== '') {
-        $filterSql .= ' AND (d.title LIKE :search OR d.document_type LIKE :search OR u.full_name LIKE :search)';
+        $filterSql .= ' AND (d.title LIKE :search OR d.document_type LIKE :search OR c.name LIKE :search OR u.full_name LIKE :search'
+            . ($hasMetadata ? ' OR dep.name LIKE :search OR owner.full_name LIKE :search' : '') . ')';
         $filterParams['search'] = '%' . $search . '%';
     }
     if ($categoryFilter > 0) {
@@ -1092,14 +1102,49 @@ if ($showList) {
     );
     $documentsStmt->execute($filterParams);
     $documents = $documentsStmt->fetchAll(PDO::FETCH_ASSOC);
-    $rejectedHrRecords = $statusFilter === 'active' && $reviewFilter === 'rejected'
+    $rejectedHrRecords = $statusFilter === 'rejected'
         ? t8_document_rejected_hr_records($pdo, $isAdmin)
         : [];
-    $allActiveDocuments = $allDocumentsView
+    $documentCategories = [];
+    foreach ($documents as $document) {
+        $documentCategories[(int) $document['id']] = (string) ($document['category_name'] ?? 'Uploaded Document');
+    }
+    $searchNeedle = strtolower($search);
+    $allActiveDocuments = $allDocumentsView && $statusFilter !== 'rejected'
         ? t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 5000)
         : [];
-    if ($allDocumentsView && $reviewFilter === 'rejected') {
-        $allActiveDocuments = [];
+    if ($allDocumentsView) {
+        $allActiveDocuments = array_values(array_filter(
+            $allActiveDocuments,
+            static function (array $document) use ($statusFilter, $reviewFilter, $searchNeedle, $documentCategories): bool {
+                $status = (string) $document['status'];
+                if ((string) ($document['doc_type'] ?? '') === 'upload'
+                    && !isset($documentCategories[(int) $document['id']])) {
+                    return false;
+                }
+                if ($statusFilter === 'active' && $status !== 'approved') {
+                    return false;
+                }
+                if ($reviewFilter !== '' && $status !== $reviewFilter) {
+                    return false;
+                }
+                if ($searchNeedle !== '') {
+                    $searchText = strtolower(implode(' ', [
+                        (string) ($document['label'] ?? ''),
+                        t8_hr_doc_type_label((string) ($document['doc_type'] ?? '')),
+                        (string) ($document['doc_type'] ?? ''),
+                        (string) ($document['doc_type'] ?? '') === 'upload'
+                            ? ($documentCategories[(int) $document['id']] ?? '')
+                            : 'Human Resources',
+                    ]));
+                    if (!str_contains($searchText, $searchNeedle)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        ));
+    } else {
         foreach ($documents as $document) {
             $allActiveDocuments[] = [
                 'id' => (int) $document['id'],
@@ -1107,6 +1152,7 @@ if ($showList) {
                 'doc_type' => 'upload',
                 'status' => 'rejected',
                 'ts' => (string) $document['updated_at'],
+                'category' => $documentCategories[(int) $document['id']] ?? 'Uploaded Document',
                 'url_action' => 'versions',
             ];
         }
@@ -1117,23 +1163,21 @@ if ($showList) {
                 'doc_type' => (string) $record['type'],
                 'status' => 'rejected',
                 'ts' => (string) $record['date'],
+                'category' => 'Human Resources - ' . (string) $record['type'],
                 'url_action' => (string) $record['url_action'],
             ];
         }
+        if ($searchNeedle !== '') {
+            $allActiveDocuments = array_values(array_filter(
+                $allActiveDocuments,
+                static fn (array $document): bool => str_contains(strtolower(implode(' ', [
+                    (string) $document['label'],
+                    t8_hr_doc_type_label((string) $document['doc_type']),
+                    (string) ($document['category'] ?? ''),
+                ])), $searchNeedle)
+            ));
+        }
         usort($allActiveDocuments, static fn (array $a, array $b): int => strtotime((string) $b['ts']) <=> strtotime((string) $a['ts']));
-    }
-    if ($allDocumentsView && $search !== '') {
-        $searchNeedle = strtolower($search);
-        $allActiveDocuments = array_values(array_filter(
-            $allActiveDocuments,
-            static fn (array $document): bool => str_contains(strtolower((string) $document['label']), $searchNeedle)
-        ));
-    }
-    if ($allDocumentsView && in_array($reviewFilter, ['pending', 'approved', 'returned_for_revision'], true)) {
-        $allActiveDocuments = array_values(array_filter(
-            $allActiveDocuments,
-            static fn (array $document): bool => (string) $document['status'] === $reviewFilter
-        ));
     }
     $archivedHrRecords = $statusFilter === 'archived'
         ? t8_document_archived_hr_records($pdo, $isAdmin)
@@ -1527,41 +1571,33 @@ function t8_render_camera_capture(): void
         <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'create'])) ?>">
             <i class="fa-solid fa-upload"></i> Upload New Document
         </a>
-        <?php if ($statusFilter === 'active'): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'archived'])) ?>">
-                <i class="fa-solid fa-box-archive"></i> View Archived
-            </a>
-        <?php else: ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'browse'])) ?>">
-                <i class="fa-solid fa-list"></i> View Active
-            </a>
-        <?php endif; ?>
     </div>
 
     <form id="t8DocumentsFilterForm" method="get" class="t8-card" style="margin-bottom:var(--t8-space-4); padding:var(--t8-space-4);">
         <input type="hidden" name="page" value="documents">
         <input type="hidden" name="action" value="browse">
-        <?php if (!$isAdmin): ?><p class="t8-help-text" style="margin-top:0;">My Documents: <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'pending'])) ?>">Pending</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'approved'])) ?>">Approved</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'returned_for_revision'])) ?>">Returned for Revision</a></p><?php endif; ?>
+        <?php if (!$isAdmin): ?><p class="t8-help-text" style="margin-top:0;">My Documents: <a href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'all', 'review_status' => 'pending'])) ?>">Pending</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'active'])) ?>">Approved</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'rejected'])) ?>">Rejected</a></p><?php endif; ?>
         <div class="t8-documents-filters">
-            <label>Search<input class="t8-input" type="search" name="q" value="<?= e($search) ?>" placeholder="Title, type, uploader"></label>
+            <label>Search<input class="t8-input" type="search" name="q" value="<?= e($search) ?>" placeholder="Title, category, department, owner"></label>
             <label>Category<select class="t8-select" name="category_id"><option value="">All categories</option><?php foreach ($categories as $cat): ?><option value="<?= e((string) $cat['id']) ?>" <?= $categoryFilter === (int) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option><?php endforeach; ?></select></label>
-            <label>Review status<select class="t8-select" name="review_status"><option value="">All statuses</option><option value="pending" <?= $reviewFilter === 'pending' ? 'selected' : '' ?>>Pending</option><option value="approved" <?= $reviewFilter === 'approved' ? 'selected' : '' ?>>Approved</option><option value="rejected" <?= $reviewFilter === 'rejected' ? 'selected' : '' ?>>Rejected</option><option value="returned_for_revision" <?= $reviewFilter === 'returned_for_revision' ? 'selected' : '' ?>>Returned for Revision</option></select></label>
+            <label>Status<select class="t8-select" name="status"><option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>All</option><option value="active" <?= $statusFilter === 'active' ? 'selected' : '' ?>>Active</option><option value="rejected" <?= $statusFilter === 'rejected' ? 'selected' : '' ?>>Rejected</option><option value="archived" <?= $statusFilter === 'archived' ? 'selected' : '' ?>>Archived</option></select></label>
         </div>
     </form>
 
     <?php if ($allDocumentsView): ?>
         <div id="t8DocumentsResults" class="t8-card" style="margin-bottom:var(--t8-space-4);">
             <div class="t8-card-header">
-                <h2 class="t8-card-title"><?= $reviewFilter === 'rejected' ? 'Rejected Documents' : 'All Active Documents' ?></h2>
+                <h2 class="t8-card-title"><?= $statusFilter === 'rejected' ? 'Rejected Documents' : ($statusFilter === 'active' ? 'Active Documents' : 'All Active Documents') ?></h2>
             </div>
             <?php if ($allActiveDocuments === []): ?>
-                <div class="t8-empty">No active documents found.</div>
+                <div class="t8-empty">No <?= e($statusFilter === 'rejected' ? 'rejected' : ($statusFilter === 'active' ? 'active' : 'live')) ?> documents found.</div>
             <?php else: ?>
                 <div class="t8-table-wrap">
                     <table class="t8-table">
                         <thead>
                             <tr>
                                 <th>Title / Number</th>
+                                <th>Category</th>
                                 <th>Source / Type</th>
                                 <th>Status</th>
                                 <th>Date</th>
@@ -1572,6 +1608,7 @@ function t8_render_camera_capture(): void
                             <?php foreach ($allActiveDocuments as $document): ?>
                                 <tr>
                                     <td><?= e((string) $document['label']) ?></td>
+                                    <td><?= e((string) ($document['category'] ?? ((string) $document['doc_type'] === 'upload' ? ($documentCategories[(int) $document['id']] ?? 'Uploaded Document') : 'Human Resources - ' . t8_hr_doc_type_label((string) $document['doc_type'])))) ?></td>
                                     <td><?= e(t8_hr_doc_type_label((string) $document['doc_type'])) ?></td>
                                     <td><span class="t8-badge <?= e(t8_hr_status_badge((string) $document['status'])) ?>"><?= e(ucfirst((string) $document['status'])) ?></span></td>
                                     <td><?= e(format_date((string) $document['ts'], 'M d, Y')) ?></td>
