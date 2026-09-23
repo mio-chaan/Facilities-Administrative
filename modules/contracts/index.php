@@ -1109,10 +1109,30 @@ if ($showList) {
             </div>
 
             <div class="t8-field"><label class="t8-label" for="renewal_date">Renewal Date</label><input class="t8-input" type="date" id="renewal_date" name="renewal_date" value="<?= e($formValues['renewal_date']) ?>" data-t8-date-rule="future"></div>
-            <div class="t8-field"><label class="t8-label" for="amount">Contract Value</label><input class="t8-input" type="number" min="0" step="0.01" id="amount" name="amount" value="<?= e($formValues['amount']) ?>"></div>
-            <div class="t8-field"><label class="t8-label" for="currency">Currency</label><select class="t8-select" id="currency" name="currency" required><?php foreach (T8_CONTRACT_CURRENCIES as $currency): ?><option value="<?= e($currency) ?>" <?= $formValues['currency'] === $currency ? 'selected' : '' ?>><?= e($currency) ?></option><?php endforeach; ?></select></div>
-            <div class="t8-field"><label class="t8-label" for="payment_frequency">Payment Frequency</label><select class="t8-select" id="payment_frequency" name="payment_frequency"><option value="">Select frequency</option><?php foreach (T8_CONTRACT_PAYMENT_FREQUENCIES as $frequency): ?><option value="<?= e($frequency) ?>" <?= $formValues['payment_frequency'] === $frequency ? 'selected' : '' ?>><?= e($frequency) ?></option><?php endforeach; ?></select></div>
-            <div class="t8-field t8-form-span-2"><label class="t8-label" for="payment_terms">Payment Terms</label><input class="t8-input" type="text" id="payment_terms" name="payment_terms" value="<?= e($formValues['payment_terms']) ?>"></div>
+            <div class="t8-field">
+                <div class="t8-inline-form-row t8-inline-amount">
+                    <div class="t8-field t8-field-currency">
+                        <label class="t8-label" for="currency">Currency</label>
+                        <select class="t8-select" id="currency" name="currency" required><?php foreach (T8_CONTRACT_CURRENCIES as $currency): ?><option value="<?= e($currency) ?>" <?= $formValues['currency'] === $currency ? 'selected' : '' ?>><?= e($currency) ?></option><?php endforeach; ?></select>
+                    </div>
+                    <div class="t8-field t8-field-value">
+                        <label class="t8-label" for="amount">Contract Value</label>
+                        <input class="t8-input" type="number" min="0" step="0.01" id="amount" name="amount" value="<?= e($formValues['amount']) ?>">
+                    </div>
+                </div>
+            </div>
+            <div class="t8-field t8-form-span-2">
+                <div class="t8-inline-form-row">
+                    <div class="t8-field">
+                        <label class="t8-label" for="payment_frequency">Payment Frequency</label>
+                        <select class="t8-select" id="payment_frequency" name="payment_frequency"><option value="">Select frequency</option><?php foreach (T8_CONTRACT_PAYMENT_FREQUENCIES as $frequency): ?><option value="<?= e($frequency) ?>" <?= $formValues['payment_frequency'] === $frequency ? 'selected' : '' ?>><?= e($frequency) ?></option><?php endforeach; ?></select>
+                    </div>
+                    <div class="t8-field">
+                        <label class="t8-label" for="payment_terms">Payment Terms</label>
+                        <input class="t8-input" type="text" id="payment_terms" name="payment_terms" value="<?= e($formValues['payment_terms']) ?>">
+                    </div>
+                </div>
+            </div>
             <div class="t8-field"><label class="t8-label" for="deposit_amount">Deposit / Advance</label><input class="t8-input" type="number" min="0" step="0.01" id="deposit_amount" name="deposit_amount" value="<?= e($formValues['deposit_amount']) ?>"></div>
             <div class="t8-field"><label class="t8-label" for="notice_period_days">Notice Period (days)</label><input class="t8-input" type="number" min="0" id="notice_period_days" name="notice_period_days" value="<?= e($formValues['notice_period_days']) ?>"></div>
             <div class="t8-field t8-form-span-2"><label class="t8-label" for="financial_notes">Additional Notes</label><textarea class="t8-input" id="financial_notes" name="financial_notes" rows="2"><?= e($formValues['financial_notes']) ?></textarea></div>

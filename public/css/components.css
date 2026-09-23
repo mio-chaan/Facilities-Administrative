@@ -96,6 +96,28 @@
 .t8-contract-form-grid > .t8-form-actions {
     margin-bottom: 0;
 }
+.t8-contract-form-grid .t8-inline-form-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 24px;
+    width: 100%;
+    max-width: 100%;
+}
+.t8-contract-form-grid .t8-inline-form-row.t8-inline-amount {
+    grid-template-columns: 110px minmax(0, 1fr);
+}
+.t8-contract-form-grid .t8-inline-form-row > .t8-field {
+    margin-bottom: 0;
+    min-width: 0;
+}
+.t8-contract-form-grid .t8-inline-form-row.t8-inline-amount .t8-field:first-child {
+    width: 110px;
+}
+.t8-contract-form-grid .t8-inline-form-row .t8-input,
+.t8-contract-form-grid .t8-inline-form-row .t8-select {
+    width: 100%;
+    min-width: 0;
+}
 .t8-legal-form-actions,
 .t8-contract-form-actions {
     margin-top: 4px;

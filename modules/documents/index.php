@@ -1056,132 +1056,290 @@ if ($showVersions) {
 // being the default view - the default is now the HR dashboard above.
 $showList = !$showCreateForm && !$showUploadVersionForm && !$showVersions && $action === 'browse';
 
+/** Labels and routes for the sources shown on the unified browse page. */
+function t8_document_browse_sources(): array
+{
+    return [
+        'upload' => ['label' => 'Uploaded File', 'action' => 'versions'],
+        'incident_report' => ['label' => 'Incident Report', 'action' => 'incident_report_view'],
+        'nte' => ['label' => 'Notice To Explain', 'action' => 'nte_view'],
+        'explanation' => ['label' => 'Explanation Letter', 'action' => 'explanation_view'],
+        'memorandum' => ['label' => 'Memorandum', 'action' => 'memorandum_view'],
+        'warning_letter' => ['label' => 'Warning Letter', 'action' => 'memorandum_view'],
+        'certificate' => ['label' => 'Certificate', 'action' => 'certificate_view'],
+    ];
+}
+
+function t8_document_browse_status_label(string $status): string
+{
+    return ucwords(str_replace('_', ' ', $status));
+}
+
+/**
+ * Returns the status predicate for one source. The internal all_states
+ * value is used only while discovering valid filter options.
+ */
+function t8_document_browse_status_sql(string $alias, bool $isUpload, string $status, array &$params): string
+{
+    if ($status === '__all_states') {
+        return '1=1';
+    }
+
+    if ($isUpload) {
+        return match ($status) {
+            'all' => "$alias.deleted_at IS NULL AND $alias.status IN ('draft', 'pending', 'approved')",
+            'active' => "$alias.deleted_at IS NULL AND $alias.status = 'approved'",
+            'rejected' => "$alias.deleted_at IS NULL AND $alias.status = 'returned_for_revision'",
+            'archived' => "$alias.deleted_at IS NOT NULL",
+            'returned_for_revision' => "$alias.deleted_at IS NULL AND $alias.status = 'returned_for_revision'",
+            default => (function () use ($alias, $status, &$params): string {
+                $params[] = $status;
+                return "$alias.deleted_at IS NULL AND $alias.status = ?";
+            })(),
+        };
+    }
+
+    return match ($status) {
+        'all' => "$alias.status IN ('draft', 'pending', 'approved')",
+        'active' => "$alias.status = 'approved'",
+        'rejected' => "$alias.status = 'rejected'",
+        'archived' => "$alias.status = 'archived'",
+        'returned_for_revision' => '1=0',
+        default => (function () use ($alias, $status, &$params): string {
+            $params[] = $status;
+            return "$alias.status = ?";
+        })(),
+    };
+}
+
+/** Adds a case-insensitive, parameterized search predicate for static SQL expressions. */
+function t8_document_browse_search_sql(array $expressions, string $search, array &$params): string
+{
+    if ($search === '') {
+        return '';
+    }
+
+    $clauses = [];
+    $like = '%' . mb_strtolower($search) . '%';
+    foreach ($expressions as $expression) {
+        $clauses[] = "LOWER(COALESCE($expression, '')) LIKE ?";
+        $params[] = $like;
+    }
+    return ' AND (' . implode(' OR ', $clauses) . ')';
+}
+
+/** Search helper for HR sources; the normalized category label stays bound, not embedded in SQL. */
+function t8_document_browse_hr_search_sql(array $expressions, string $search, string $categoryLabel, array &$params): string
+{
+    if ($search === '') {
+        return '';
+    }
+
+    $clauses = [];
+    $like = '%' . mb_strtolower($search) . '%';
+    foreach ($expressions as $expression) {
+        $clauses[] = "LOWER(COALESCE($expression, '')) LIKE ?";
+        $params[] = $like;
+    }
+    $clauses[] = 'LOWER(?) LIKE ?';
+    $params[] = mb_strtolower($categoryLabel);
+    $params[] = $like;
+    return ' AND (' . implode(' OR ', $clauses) . ')';
+}
+
+/** Keeps the browse option-discovery query within the existing staff visibility rules. */
+function t8_document_browse_hr_option_scope_sql(string $alias, bool $isAdmin, string $status): string
+{
+    return !$isAdmin && $status === '__all_states'
+        ? " AND $alias.status IN ('draft', 'pending', 'approved')"
+        : '';
+}
+
+/**
+ * Fetches the browse list source by source. Every source query applies its
+ * own authorization and filters before its records are normalized and merged.
+ */
+function t8_document_browse_records(
+    PDO $pdo,
+    bool $isAdmin,
+    int $currentUserId,
+    ?int $currentDepartmentId,
+    bool $hasMetadata,
+    ?int $humanResourcesCategoryId,
+    string $humanResourcesCategoryLabel,
+    array $filters
+): array {
+    $sources = t8_document_browse_sources();
+    $search = (string) ($filters['search'] ?? '');
+    $status = (string) ($filters['status'] ?? 'all');
+    $categoryId = (int) ($filters['category_id'] ?? 0);
+    $sourceFilter = (string) ($filters['source_type'] ?? '');
+    $records = [];
+    $includeHr = $categoryId === 0 || ($humanResourcesCategoryId !== null && $categoryId === $humanResourcesCategoryId);
+
+    $append = static function (string $sql, array $params, string $sourceKey, ?int $categoryKey, string $categoryLabel) use ($pdo, &$records, $sources): void {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $records[] = [
+                'id' => (int) $row['id'],
+                'label' => (string) $row['label'],
+                'category_key' => array_key_exists('category_key', $row) && $row['category_key'] !== null
+                    ? (int) $row['category_key']
+                    : $categoryKey,
+                'category_label' => (string) ($row['category_label'] ?? $categoryLabel),
+                'source_key' => $sourceKey,
+                'source_label' => $sources[$sourceKey]['label'],
+                'status' => (string) $row['status'],
+                'status_label' => t8_document_browse_status_label((string) $row['status']),
+                'timestamp' => (string) $row['timestamp'],
+                // Legacy renderer aliases; the browse table itself now receives
+                // only records produced by this normalized pipeline.
+                'doc_type' => $sourceKey,
+                'ts' => (string) $row['timestamp'],
+                'category' => (string) ($row['category_label'] ?? $categoryLabel),
+                'url_action' => $sources[$sourceKey]['action'],
+                'is_upload' => $sourceKey === 'upload',
+            ];
+        }
+    };
+
+    if (($sourceFilter === '' || $sourceFilter === 'upload')) {
+        $params = [];
+        $where = t8_document_browse_status_sql('d', true, $status, $params);
+        if (!$isAdmin) {
+            $where .= ' AND d.uploaded_by = ?';
+            $params[] = $currentUserId;
+        }
+        if ($categoryId > 0) {
+            $where .= ' AND d.category_id = ?';
+            $params[] = $categoryId;
+        }
+        $where .= t8_document_browse_search_sql(
+            array_filter([
+                'd.title', 'd.document_type', 'c.name', 'u.full_name',
+                $hasMetadata ? 'dep.name' : null,
+                $hasMetadata ? 'owner.full_name' : null,
+                "'Uploaded File'",
+            ]),
+            $search,
+            $params
+        );
+        $append(
+            "SELECT d.id, d.title AS label, CASE WHEN d.deleted_at IS NOT NULL THEN 'archived' ELSE d.status END AS status, COALESCE(d.updated_at, d.created_at) AS timestamp,
+                    c.id AS category_key, COALESCE(c.name, 'Uncategorized') AS category_label
+             FROM team8_documents d
+             LEFT JOIN team8_document_categories c ON c.id = d.category_id
+             JOIN users u ON u.id = d.uploaded_by "
+             . ($hasMetadata ? 'LEFT JOIN departments dep ON dep.id = d.department_id LEFT JOIN users owner ON owner.id = d.owner_id ' : '')
+             . "WHERE $where",
+            $params,
+            'upload',
+            null,
+            ''
+        );
+    }
+
+    // HR source queries share one normalized Human Resources category.
+    if ($includeHr && ($isAdmin || !in_array($status, ['archived', 'rejected'], true))) {
+        $hrCategoryLabel = $humanResourcesCategoryLabel;
+        $hrCategoryKey = $humanResourcesCategoryId;
+        $hrAllowed = static fn (string $key): bool => $sourceFilter === '' || $sourceFilter === $key;
+
+        if ($hrAllowed('incident_report')) {
+            $params = [];
+            $where = t8_document_browse_status_sql('ir', false, $status, $params);
+            $where .= t8_document_browse_hr_option_scope_sql('ir', $isAdmin, $status);
+            if (!$isAdmin) { $where .= ' AND ir.employee_id = ?'; $params[] = $currentUserId; }
+            $where .= t8_document_browse_hr_search_sql(['ir.document_number', 'ir.incident_type', 'employee.full_name', 'dep.name', "'Incident Report'"], $search, $hrCategoryLabel, $params);
+            $append("SELECT ir.id, ir.document_number AS label, ir.status, COALESCE(ir.updated_at, ir.created_at) AS timestamp FROM team8_incident_reports ir JOIN users employee ON employee.id = ir.employee_id LEFT JOIN departments dep ON dep.id = ir.department_id WHERE $where", $params, 'incident_report', $hrCategoryKey, $hrCategoryLabel);
+        }
+        if ($hrAllowed('nte')) {
+            $params = [];
+            $where = t8_document_browse_status_sql('n', false, $status, $params);
+            $where .= t8_document_browse_hr_option_scope_sql('n', $isAdmin, $status);
+            if (!$isAdmin) { $where .= ' AND n.employee_id = ?'; $params[] = $currentUserId; }
+            $where .= t8_document_browse_hr_search_sql(['n.document_number', 'employee.full_name', 'dep.name', "'Notice To Explain'"], $search, $hrCategoryLabel, $params);
+            $append("SELECT n.id, n.document_number AS label, n.status, COALESCE(n.updated_at, n.created_at) AS timestamp FROM team8_notice_to_explain n JOIN users employee ON employee.id = n.employee_id LEFT JOIN departments dep ON dep.id = employee.department_id WHERE $where", $params, 'nte', $hrCategoryKey, $hrCategoryLabel);
+        }
+        if ($hrAllowed('explanation')) {
+            $params = [];
+            $where = t8_document_browse_status_sql('e', false, $status, $params);
+            $where .= t8_document_browse_hr_option_scope_sql('e', $isAdmin, $status);
+            if (!$isAdmin) { $where .= ' AND e.employee_id = ?'; $params[] = $currentUserId; }
+            $where .= t8_document_browse_hr_search_sql(['n.document_number', 'employee.full_name', 'dep.name', "'Explanation Letter'"], $search, $hrCategoryLabel, $params);
+            $append("SELECT e.id, CONCAT('Explanation for ', n.document_number) AS label, e.status, COALESCE(e.updated_at, e.submitted_at) AS timestamp FROM team8_explanations e JOIN team8_notice_to_explain n ON n.id = e.nte_id JOIN users employee ON employee.id = e.employee_id LEFT JOIN departments dep ON dep.id = employee.department_id WHERE $where", $params, 'explanation', $hrCategoryKey, $hrCategoryLabel);
+        }
+        foreach (['memorandum', 'warning_letter'] as $memoKey) {
+            if (!$hrAllowed($memoKey)) { continue; }
+            $params = [];
+            $where = t8_document_browse_status_sql('m', false, $status, $params) . " AND m.kind = '" . $memoKey . "'";
+            $where .= t8_document_browse_hr_option_scope_sql('m', $isAdmin, $status);
+            $join = '';
+            if (!$isAdmin) {
+                $join = ' JOIN team8_memorandum_recipients mr ON mr.memorandum_id = m.id ';
+                $where .= " AND (mr.recipient_type = 'all_departments' OR mr.department_id = ?)";
+                $params[] = $currentDepartmentId ?? 0;
+            }
+            $where .= t8_document_browse_hr_search_sql(['m.document_number', 'm.title', 'm.kind', "'$memoKey'"], $search, $hrCategoryLabel, $params);
+            $append("SELECT DISTINCT m.id, CONCAT(m.document_number, ' — ', m.title) AS label, m.status, COALESCE(m.updated_at, m.created_at) AS timestamp FROM team8_memorandums m $join WHERE $where", $params, $memoKey, $hrCategoryKey, $hrCategoryLabel);
+        }
+        if ($hrAllowed('certificate')) {
+            $params = [];
+            $where = t8_document_browse_status_sql('c', false, $status, $params);
+            $where .= t8_document_browse_hr_option_scope_sql('c', $isAdmin, $status);
+            $join = ' JOIN users employee ON employee.id = c.employee_id LEFT JOIN departments dep ON dep.id = employee.department_id ';
+            if (!$isAdmin) { $join .= ' JOIN team8_certificate_recipients cr ON cr.certificate_id = c.id '; $where .= ' AND cr.employee_id = ?'; $params[] = $currentUserId; }
+            $where .= t8_document_browse_hr_search_sql(['c.document_number', 'c.certificate_type', 'employee.full_name', 'dep.name', "'Certificate'"], $search, $hrCategoryLabel, $params);
+            $append("SELECT DISTINCT c.id, c.document_number AS label, c.status, COALESCE(c.updated_at, c.created_at) AS timestamp FROM team8_certificates c $join WHERE $where", $params, 'certificate', $hrCategoryKey, $hrCategoryLabel);
+        }
+    }
+
+    usort($records, static fn (array $a, array $b): int => strtotime($b['timestamp']) <=> strtotime($a['timestamp'])
+        ?: strcmp((string) $a['source_key'], (string) $b['source_key'])
+        ?: ((int) $b['id'] <=> (int) $a['id']));
+    return $records;
+}
+
 if ($showList) {
     $hasMetadata = t8_document_has_column($pdo, 'department_id') && t8_document_has_column($pdo, 'owner_id');
-    $requestedStatus = (string) ($_GET['status'] ?? 'all');
-    $statusFilter = in_array($requestedStatus, ['all', 'active', 'rejected', 'archived'], true) ? $requestedStatus : 'all';
-    $reviewFilter = (string) ($_GET['review_status'] ?? '');
-    if ($reviewFilter === 'rejected') {
-        $statusFilter = 'rejected';
-    }
-    $allDocumentsView = $statusFilter !== 'archived';
-    $whereClause = match ($statusFilter) {
-        'archived' => 'd.deleted_at IS NOT NULL',
-        'active' => "d.deleted_at IS NULL AND d.status = 'approved'",
-        'rejected' => "d.deleted_at IS NULL AND d.status = 'returned_for_revision'",
-        default => "d.deleted_at IS NULL AND d.status IN ('draft', 'pending', 'approved')",
-    };
-    $scopeSql = $isAdmin ? '' : ' AND d.uploaded_by = :user_id';
     $search = trim((string) ($_GET['q'] ?? ''));
     $categoryFilter = (int) ($_GET['category_id'] ?? 0);
-    $filterSql = '';
-    $filterParams = $isAdmin ? [] : ['user_id' => $currentUserId];
-    if ($search !== '') {
-        $filterSql .= ' AND (d.title LIKE :search OR d.document_type LIKE :search OR c.name LIKE :search OR u.full_name LIKE :search'
-            . ($hasMetadata ? ' OR dep.name LIKE :search OR owner.full_name LIKE :search' : '') . ')';
-        $filterParams['search'] = '%' . $search . '%';
+    $validCategoryIds = array_map(static fn (array $category): int => (int) $category['id'], $categories);
+    if (!in_array($categoryFilter, $validCategoryIds, true)) {
+        $categoryFilter = 0;
     }
-    if ($categoryFilter > 0) {
-        $filterSql .= ' AND d.category_id = :category_id';
-        $filterParams['category_id'] = $categoryFilter;
+    $humanResourcesCategoryId = null;
+    $humanResourcesCategoryLabel = 'Human Resources';
+    foreach ($categories as $category) {
+        if (strcasecmp((string) $category['name'], 'Human Resources') === 0) {
+            $humanResourcesCategoryId = (int) $category['id'];
+            $humanResourcesCategoryLabel = (string) $category['name'];
+            break;
+        }
     }
-    if (in_array($reviewFilter, ['pending', 'approved', 'returned_for_revision'], true)) {
-        $filterSql .= ' AND d.status = :review_status';
-        $filterParams['review_status'] = $reviewFilter;
-    } elseif ($reviewFilter === 'rejected') {
-        $filterSql .= " AND d.status = 'returned_for_revision'";
-    }
-    $documentsStmt = $pdo->prepare(
-        "SELECT d.*, c.name AS category_name, u.full_name AS uploaded_by_name" . ($hasMetadata ? ", dep.name AS department_name, owner.full_name AS owner_name" : '') . "
-         FROM team8_documents d
-         LEFT JOIN team8_document_categories c ON c.id = d.category_id
-         JOIN users u ON u.id = d.uploaded_by
-         " . ($hasMetadata ? 'LEFT JOIN departments dep ON dep.id = d.department_id LEFT JOIN users owner ON owner.id = d.owner_id' : '') . "
-         WHERE $whereClause$scopeSql$filterSql
-         ORDER BY d.updated_at DESC"
-    );
-    $documentsStmt->execute($filterParams);
-    $documents = $documentsStmt->fetchAll(PDO::FETCH_ASSOC);
-    $rejectedHrRecords = $statusFilter === 'rejected'
-        ? t8_document_rejected_hr_records($pdo, $isAdmin)
-        : [];
+
+    $currentDepartmentId = isset($_SESSION['department_id']) ? (int) $_SESSION['department_id'] : null;
+    $optionRecords = t8_document_browse_records($pdo, $isAdmin, (int) $currentUserId, $currentDepartmentId, $hasMetadata, $humanResourcesCategoryId, $humanResourcesCategoryLabel, [
+        'status' => '__all_states', 'search' => '', 'category_id' => 0, 'source_type' => '',
+    ]);
+    $availableSourceKeys = array_values(array_unique(array_column($optionRecords, 'source_key')));
+    $availableStatuses = array_values(array_unique(array_column($optionRecords, 'status')));
+    $requestedStatus = trim((string) ($_GET['status'] ?? 'all'));
+    $allowedStatuses = array_merge(['all', 'active', 'rejected', 'archived'], $availableStatuses);
+    $statusFilter = in_array($requestedStatus, $allowedStatuses, true) ? $requestedStatus : 'all';
+    $requestedSource = trim((string) ($_GET['source_type'] ?? ''));
+    $sourceFilter = in_array($requestedSource, $availableSourceKeys, true) ? $requestedSource : '';
+
+    $browseRecords = t8_document_browse_records($pdo, $isAdmin, (int) $currentUserId, $currentDepartmentId, $hasMetadata, $humanResourcesCategoryId, $humanResourcesCategoryLabel, [
+        'status' => $statusFilter,
+        'search' => $search,
+        'category_id' => $categoryFilter,
+        'source_type' => $sourceFilter,
+    ]);
+    $allDocumentsView = true;
+    $allActiveDocuments = $browseRecords;
     $documentCategories = [];
-    foreach ($documents as $document) {
-        $documentCategories[(int) $document['id']] = (string) ($document['category_name'] ?? 'Uploaded Document');
-    }
-    $searchNeedle = strtolower($search);
-    $allActiveDocuments = $allDocumentsView && $statusFilter !== 'rejected'
-        ? t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 5000)
-        : [];
-    if ($allDocumentsView) {
-        $allActiveDocuments = array_values(array_filter(
-            $allActiveDocuments,
-            static function (array $document) use ($statusFilter, $reviewFilter, $searchNeedle, $documentCategories): bool {
-                $status = (string) $document['status'];
-                if ((string) ($document['doc_type'] ?? '') === 'upload'
-                    && !isset($documentCategories[(int) $document['id']])) {
-                    return false;
-                }
-                if ($statusFilter === 'active' && $status !== 'approved') {
-                    return false;
-                }
-                if ($reviewFilter !== '' && $status !== $reviewFilter) {
-                    return false;
-                }
-                if ($searchNeedle !== '') {
-                    $searchText = strtolower(implode(' ', [
-                        (string) ($document['label'] ?? ''),
-                        t8_hr_doc_type_label((string) ($document['doc_type'] ?? '')),
-                        (string) ($document['doc_type'] ?? ''),
-                        (string) ($document['doc_type'] ?? '') === 'upload'
-                            ? ($documentCategories[(int) $document['id']] ?? '')
-                            : 'Human Resources',
-                    ]));
-                    if (!str_contains($searchText, $searchNeedle)) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-        ));
-    } else {
-        foreach ($documents as $document) {
-            $allActiveDocuments[] = [
-                'id' => (int) $document['id'],
-                'label' => (string) $document['title'],
-                'doc_type' => 'upload',
-                'status' => 'rejected',
-                'ts' => (string) $document['updated_at'],
-                'category' => $documentCategories[(int) $document['id']] ?? 'Uploaded Document',
-                'url_action' => 'versions',
-            ];
-        }
-        foreach ($rejectedHrRecords as $record) {
-            $allActiveDocuments[] = [
-                'id' => (int) $record['id'],
-                'label' => (string) $record['title'],
-                'doc_type' => (string) $record['type'],
-                'status' => 'rejected',
-                'ts' => (string) $record['date'],
-                'category' => 'Human Resources - ' . (string) $record['type'],
-                'url_action' => (string) $record['url_action'],
-            ];
-        }
-        if ($searchNeedle !== '') {
-            $allActiveDocuments = array_values(array_filter(
-                $allActiveDocuments,
-                static fn (array $document): bool => str_contains(strtolower(implode(' ', [
-                    (string) $document['label'],
-                    t8_hr_doc_type_label((string) $document['doc_type']),
-                    (string) ($document['category'] ?? ''),
-                ])), $searchNeedle)
-            ));
-        }
-        usort($allActiveDocuments, static fn (array $a, array $b): int => strtotime((string) $b['ts']) <=> strtotime((string) $a['ts']));
-    }
-    $archivedHrRecords = $statusFilter === 'archived'
-        ? t8_document_archived_hr_records($pdo, $isAdmin)
-        : [];
 }
 
 if (!$showCreateForm && !$showUploadVersionForm && !$showVersions && !$showList) {
@@ -1576,21 +1734,23 @@ function t8_render_camera_capture(): void
     <form id="t8DocumentsFilterForm" method="get" class="t8-card" style="margin-bottom:var(--t8-space-4); padding:var(--t8-space-4);">
         <input type="hidden" name="page" value="documents">
         <input type="hidden" name="action" value="browse">
-        <?php if (!$isAdmin): ?><p class="t8-help-text" style="margin-top:0;">My Documents: <a href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'all', 'review_status' => 'pending'])) ?>">Pending</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'active'])) ?>">Approved</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'rejected'])) ?>">Rejected</a></p><?php endif; ?>
+        <?php if (!$isAdmin): ?><p class="t8-help-text" style="margin-top:0;">My Documents: <a href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'pending'])) ?>">Pending</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'active'])) ?>">Approved</a> · <a href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'rejected'])) ?>">Rejected</a></p><?php endif; ?>
         <div class="t8-documents-filters">
-            <label>Search<input class="t8-input" type="search" name="q" value="<?= e($search) ?>" placeholder="Title, category, department, owner"></label>
+            <label>Search<input class="t8-input" type="search" name="q" value="<?= e($search) ?>" placeholder="Title, number, category, department"></label>
             <label>Category<select class="t8-select" name="category_id"><option value="">All categories</option><?php foreach ($categories as $cat): ?><option value="<?= e((string) $cat['id']) ?>" <?= $categoryFilter === (int) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option><?php endforeach; ?></select></label>
-            <label>Status<select class="t8-select" name="status"><option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>All</option><option value="active" <?= $statusFilter === 'active' ? 'selected' : '' ?>>Active</option><option value="rejected" <?= $statusFilter === 'rejected' ? 'selected' : '' ?>>Rejected</option><option value="archived" <?= $statusFilter === 'archived' ? 'selected' : '' ?>>Archived</option></select></label>
+            <label>Status<select class="t8-select" name="status"><option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>All (Live / Current)</option><option value="active" <?= $statusFilter === 'active' ? 'selected' : '' ?>>Active</option><?php foreach ($availableStatuses as $availableStatus): ?><?php if (!in_array($availableStatus, ['rejected', 'archived'], true)): ?><option value="<?= e($availableStatus) ?>" <?= $statusFilter === $availableStatus ? 'selected' : '' ?>><?= e(t8_document_browse_status_label($availableStatus)) ?></option><?php endif; ?><?php endforeach; ?><option value="rejected" <?= $statusFilter === 'rejected' ? 'selected' : '' ?>>Rejected</option><option value="archived" <?= $statusFilter === 'archived' ? 'selected' : '' ?>>Archived</option></select></label>
+            <label>Source / Type<select class="t8-select" name="source_type"><option value="">All sources</option><?php foreach (t8_document_browse_sources() as $sourceKey => $source): ?><?php if (in_array($sourceKey, $availableSourceKeys, true) || $sourceFilter === $sourceKey): ?><option value="<?= e($sourceKey) ?>" <?= $sourceFilter === $sourceKey ? 'selected' : '' ?>><?= e($source['label']) ?></option><?php endif; ?><?php endforeach; ?></select></label>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'browse'])) ?>">Clear Filters</a>
         </div>
     </form>
 
     <?php if ($allDocumentsView): ?>
         <div id="t8DocumentsResults" class="t8-card" style="margin-bottom:var(--t8-space-4);">
             <div class="t8-card-header">
-                <h2 class="t8-card-title"><?= $statusFilter === 'rejected' ? 'Rejected Documents' : ($statusFilter === 'active' ? 'Active Documents' : 'All Active Documents') ?></h2>
+                <h2 class="t8-card-title"><?= $statusFilter === 'rejected' ? 'Rejected Documents' : ($statusFilter === 'archived' ? 'Archived Documents' : ($statusFilter === 'active' ? 'Active Documents' : 'Documents')) ?></h2>
             </div>
             <?php if ($allActiveDocuments === []): ?>
-                <div class="t8-empty">No <?= e($statusFilter === 'rejected' ? 'rejected' : ($statusFilter === 'active' ? 'active' : 'live')) ?> documents found.</div>
+                <div class="t8-empty"><strong>No documents found</strong><span>No documents match the current search and filter criteria. Try adjusting your filters.</span></div>
             <?php else: ?>
                 <div class="t8-table-wrap">
                     <table class="t8-table">
@@ -1608,9 +1768,9 @@ function t8_render_camera_capture(): void
                             <?php foreach ($allActiveDocuments as $document): ?>
                                 <tr>
                                     <td><?= e((string) $document['label']) ?></td>
-                                    <td><?= e((string) ($document['category'] ?? ((string) $document['doc_type'] === 'upload' ? ($documentCategories[(int) $document['id']] ?? 'Uploaded Document') : 'Human Resources - ' . t8_hr_doc_type_label((string) $document['doc_type'])))) ?></td>
-                                    <td><?= e(t8_hr_doc_type_label((string) $document['doc_type'])) ?></td>
-                                    <td><span class="t8-badge <?= e(t8_hr_status_badge((string) $document['status'])) ?>"><?= e(ucfirst((string) $document['status'])) ?></span></td>
+                                    <td><?= e((string) $document['category']) ?></td>
+                                    <td><?= e((string) $document['source_label']) ?></td>
+                                    <td><span class="t8-badge <?= e(t8_hr_status_badge((string) $document['status'])) ?>"><?= e((string) $document['status_label']) ?></span></td>
                                     <td><?= e(format_date((string) $document['ts'], 'M d, Y')) ?></td>
                                     <td class="t8-row-actions">
                                         <?php if ($document['doc_type'] === 'upload'):
@@ -1619,7 +1779,7 @@ function t8_render_camera_capture(): void
                                                 ? t8_retention_fetch_for_entity($pdo, 'document', (int) $document['id'])
                                                 : null;
                                             if ($feedDocument !== null):
-                                                t8_document_render_menu($feedDocument, $isAdmin, 'active', $feedRetentionRecord);
+                                                t8_document_render_menu($feedDocument, $isAdmin, $statusFilter === 'archived' ? 'archived' : 'active', $feedRetentionRecord);
                                             endif;
                                         else: ?>
                                             <?php t8_document_render_feed_menu($document); ?>

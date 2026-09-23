@@ -134,20 +134,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var qInput = filterForm.querySelector('input[name="q"]');
     var categoryInput = filterForm.querySelector('select[name="category_id"]');
-    var reviewInput = filterForm.querySelector('select[name="review_status"]');
+    var statusInput = filterForm.querySelector('select[name="status"]');
+    var sourceInput = filterForm.querySelector('select[name="source_type"]');
     var pendingRequest = null;
 
     function buildDocumentsUrl() {
         var params = new URLSearchParams();
+        new FormData(filterForm).forEach(function (value, key) {
+            if (String(value).trim() !== '') {
+                params.set(key, String(value).trim());
+            }
+        });
         params.set('page', 'documents');
         params.set('action', 'browse');
-        params.set('q', qInput ? qInput.value.trim() : '');
-        if (categoryInput && categoryInput.value) {
-            params.set('category_id', categoryInput.value);
-        }
-        if (reviewInput && reviewInput.value) {
-            params.set('review_status', reviewInput.value);
-        }
         return '?' + params.toString();
     }
 
@@ -188,8 +187,11 @@ document.addEventListener('DOMContentLoaded', function () {
     if (categoryInput) {
         categoryInput.addEventListener('change', applyDocumentsFilter);
     }
-    if (reviewInput) {
-        reviewInput.addEventListener('change', applyDocumentsFilter);
+    if (statusInput) {
+        statusInput.addEventListener('change', applyDocumentsFilter);
+    }
+    if (sourceInput) {
+        sourceInput.addEventListener('change', applyDocumentsFilter);
     }
 
     filterForm.addEventListener('submit', function (event) {
