@@ -337,12 +337,12 @@ switch ($action) {
                 } elseif (!$arrivingNow && strtotime($formValues['scheduled_date']) <= time()) {
                     $errors[] = 'Scheduled visit date and time must be in the future.';
                 }
-                if ($formValues['contact_suffix'] !== '' && !preg_match('/^\d{10}$/', $formValues['contact_suffix'])) {
+                if ($formValues['contact_suffix'] !== '' && !t8_validate_ph_contact_suffix($formValues['contact_suffix'])) {
                     $errors[] = 'Contact number must be 10 digits after +63.';
                 }
 
                 if (!$errors) {
-                    $contact = $formValues['contact_suffix'] !== '' ? '+63' . $formValues['contact_suffix'] : '';
+                    $contact = $formValues['contact_suffix'] !== '' ? t8_format_ph_contact($formValues['contact_suffix']) : '';
                     $status = $arrivingNow ? 'checked_in' : 'scheduled';
                     $checkInTime = $arrivingNow ? date('Y-m-d H:i:s') : $formValues['scheduled_date'];                    $scheduledDate = $arrivingNow ? date('Y-m-d H:i:s') : $formValues['scheduled_date'];
                     $stmt = $pdo->prepare(

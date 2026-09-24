@@ -14,6 +14,37 @@ if (!function_exists('e')) {
     }
 }
 
+if (!function_exists('t8_validate_ph_contact_suffix')) {
+    /** Accepts the 10-digit suffix after +63, e.g. 9123456789. */
+    function t8_validate_ph_contact_suffix(string $value): bool
+    {
+        $digits = preg_replace('/\D+/', '', $value) ?? '';
+        return $digits !== '' && preg_match('/^\d{10}$/', $digits) === 1;
+    }
+}
+
+if (!function_exists('t8_format_ph_contact')) {
+    /** Formats a 10-digit mobile suffix or a full PH number into a normalized +63 format. */
+    function t8_format_ph_contact(string $value): string
+    {
+        $digits = preg_replace('/\D+/', '', $value) ?? '';
+
+        if ($digits === '') {
+            return '';
+        }
+
+        if (preg_match('/^63\d{10}$/', $digits) === 1) {
+            return '+' . $digits;
+        }
+
+        if (preg_match('/^\d{10}$/', $digits) === 1) {
+            return '+63' . $digits;
+        }
+
+        return '';
+    }
+}
+
 if (!function_exists('base_url')) {
     function base_url(string $path = ''): string
     {

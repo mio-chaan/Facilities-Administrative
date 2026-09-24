@@ -766,6 +766,9 @@ switch ($action) {
                 if ($role === '') {
                     $errors[] = "Please specify the party's role in this contract.";
                 }
+                if ($newPhone !== '' && !t8_validate_ph_contact_suffix($newPhone)) {
+                    $errors[] = 'Contact number must be 10 digits after +63.';
+                }
 
                 if (!$errors) {
                     if (!$partyId) {
@@ -778,7 +781,7 @@ switch ($action) {
                                 'name'  => $newName,
                                 'type'  => $newType,
                                 'email' => $newEmail !== '' ? $newEmail : null,
-                                'phone' => $newPhone !== '' ? $newPhone : null,
+                                'phone' => $newPhone !== '' ? t8_format_ph_contact($newPhone) : null,
                             ]);
                             $partyId = (int) $pdo->lastInsertId();
                         }
@@ -1193,6 +1196,7 @@ if ($showList) {
         </div>
 
         <form method="post" action="<?= e(page_url('contracts', ['action' => 'parties', 'id' => $contractId])) ?>"
+              class="t8-contract-form-grid"
               style="padding: 0 var(--t8-space-4) var(--t8-space-4);" novalidate>
             <?= t8_csrf_field() ?>
 
@@ -1219,14 +1223,34 @@ if ($showList) {
             </div>
             <div class="t8-field">
                 <label class="t8-label" for="new_phone">Contact Phone</label>
-                <input class="t8-input" type="text" id="new_phone" name="new_phone" placeholder="Optional">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span style="padding: 12px 14px; background: var(--t8-secondary); border: 1.5px solid var(--t8-border); border-radius: var(--t8-radius-sm) 0 0 var(--t8-radius-sm);">
+                        +63
+                    </span>
+                    <input
+                        class="t8-input"
+                        type="tel"
+                        inputmode="numeric"
+                        id="new_phone"
+                        name="new_phone"
+                        maxlength="10"
+                        placeholder="9123456789"
+                        pattern="[0-9]{10}"
+                        title="Enter 10 digits after +63"
+                        oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                        style="border-radius: 0 var(--t8-radius-sm) var(--t8-radius-sm) 0; flex: 1;"
+                    >
+                </div>
+                <span class="t8-help-text">Optional. Enter exactly 10 digits after +63, e.g. 9123456789.</span>
             </div>
             <div class="t8-field">
                 <label class="t8-label" for="role_in_contract">Role in This Contract</label>
                 <input class="t8-input" type="text" id="role_in_contract" name="role_in_contract" placeholder="e.g. Supplier, Counterparty" required>
             </div>
 
-            <button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-plus"></i> Add Party</button>
+            <div class="t8-form-actions">
+                <button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-plus"></i> Add Party</button>
+            </div>
         </form>
 
         <?php if ($attachedParties === []): ?>
@@ -1243,7 +1267,7 @@ if ($showList) {
                                 <td><?= e($ap['party_name']) ?></td>
                                 <td><?= e($ap['party_type']) ?></td>
                                 <td><?= e($ap['role_in_contract']) ?></td>
-                                <td><?= e((string) ($ap['contact_email'] ?? $ap['contact_phone'] ?? '—')) ?></td>
+                                <td><?= e((string) (($ap['contact_email'] !== null && $ap['contact_email'] !== '') ? $ap['contact_email'] : ($ap['contact_phone'] ?? '—'))) ?></td>
                                 <td>
                                     <form method="post" action="<?= e(page_url('contracts', ['action' => 'remove_party'])) ?>"
                                           onsubmit="return confirm('Remove this party from the contract?');">
