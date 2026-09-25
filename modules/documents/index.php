@@ -683,22 +683,8 @@ function t8_document_validate_upload(array $file): string
         return 'File type not allowed. Allowed: ' . implode(', ', T8_DOC_ALLOWED_EXT) . '.';
     }
     
-    // MIME type validation (optional if fileinfo is not available)
-    if (extension_loaded('fileinfo')) {
-        $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
-        $allowedMimes = [
-            'pdf' => ['application/pdf'], 'txt' => ['text/plain'],
-            'png' => ['image/png'], 'jpg' => ['image/jpeg'], 'jpeg' => ['image/jpeg'],
-            'doc' => ['application/msword', 'application/octet-stream'],
-            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
-            'xls' => ['application/vnd.ms-excel', 'application/octet-stream'],
-            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip'],
-            'ppt' => ['application/vnd.ms-powerpoint', 'application/octet-stream'],
-            'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'application/zip'],
-        ];
-        if ($mime === false || !in_array($mime, $allowedMimes[$ext] ?? [], true)) {
-            return 'The file contents do not match the selected file type.';
-        }
+    if (!t8_validate_uploaded_file_mime($file['tmp_name'], (string) ($file['name'] ?? ''))) {
+        return 'The file contents do not match the selected file type.';
     }
     return '';
 }

@@ -23,6 +23,121 @@ if (!function_exists('t8_validate_ph_contact_suffix')) {
     }
 }
 
+if (!function_exists('t8_allowed_upload_mime_types')) {
+    /** Strict MIME map for the project's allowed upload extensions. */
+    function t8_allowed_upload_mime_types(string $extension): array
+    {
+        $ext = strtolower(trim($extension, '.'));
+        return match ($ext) {
+            'pdf' => ['application/pdf'],
+            'txt' => ['text/plain', 'text/x-plain', 'text/csv'],
+            'png' => ['image/png'],
+            'jpg', 'jpeg' => ['image/jpeg'],
+            'doc' => ['application/msword', 'application/vnd.ms-word'],
+            'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+            'xls' => ['application/vnd.ms-excel'],
+            'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+            'ppt' => ['application/vnd.ms-powerpoint'],
+            'pptx' => ['application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+            default => [],
+        };
+    }
+}
+
+if (!function_exists('t8_detect_magic_mime')) {
+    /** Fallback for hosts where fileinfo is unavailable or returns generic data. */
+    function t8_detect_magic_mime(string $path, string $extension): string|false
+    {
+        $ext = strtolower(trim($extension, '.'));
+        if (!is_readable($path)) {
+            return false;
+        }
+
+        $sample = @file_get_contents($path, false, null, 0, 8192);
+        if ($sample === false || $sample === '') {
+            return false;
+        }
+
+        $pdf = str_starts_with($sample, "%PDF-");
+        $png = str_starts_with($sample, "\x89PNG\r\n\x1a\n");
+        $jpeg = strncmp($sample, "\xFF\xD8\xFF", 3) === 0;
+        $ole = strncmp($sample, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", 8) === 0;
+        $zipSignature = strncmp($sample, "PK\x03\x04", 4) === 0;
+
+        if ($zipSignature && class_exists('ZipArchive')) {
+            $zip = new ZipArchive();
+            if ($zip->open($path) === true) {
+                $names = [];
+                for ($index = 0; $index < $zip->numFiles; $index++) {
+                    $names[] = $zip->getNameIndex($index);
+                }
+                $zip->close();
+
+                $required = match ($ext) {
+                    'docx' => ['[Content_Types].xml', '_rels/.rels', 'word/document.xml'],
+                    'xlsx' => ['[Content_Types].xml', '_rels/.rels', 'xl/workbook.xml'],
+                    'pptx' => ['[Content_Types].xml', '_rels/.rels', 'ppt/presentation.xml'],
+                    default => [],
+                };
+
+                if ($required !== [] && count(array_intersect($required, $names)) === count($required)) {
+                    return match ($ext) {
+                        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                        default => false,
+                    };
+                }
+            }
+        }
+
+        return match ($ext) {
+            'pdf' => $pdf ? 'application/pdf' : false,
+            'png' => $png ? 'image/png' : false,
+            'jpg', 'jpeg' => $jpeg ? 'image/jpeg' : false,
+            'doc' => $ole ? 'application/msword' : false,
+            'xls' => $ole ? 'application/vnd.ms-excel' : false,
+            'ppt' => $ole ? 'application/vnd.ms-powerpoint' : false,
+            'txt' => (preg_match('/^[\x09\x0A\x0D\x20-\x7E\x80-\xFF]+$/', $sample) === 1) ? 'text/plain' : false,
+            default => false,
+        };
+    }
+}
+
+if (!function_exists('t8_validate_uploaded_file_mime')) {
+    function t8_validate_uploaded_file_mime(string $path, string $filename): bool
+    {
+        $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+        $allowed = t8_allowed_upload_mime_types($extension);
+        if ($allowed === []) {
+            return false;
+        }
+
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo !== false) {
+                $mime = finfo_file($finfo, $path);
+                finfo_close($finfo);
+                $mime = is_string($mime) ? strtolower(trim(strtok((string) $mime, ';'))) : false;
+                if ($mime !== false && in_array($mime, $allowed, true)) {
+                    return true;
+                }
+            }
+        }
+
+        if (function_exists('mime_content_type')) {
+            $mime = mime_content_type($path);
+            $mime = is_string($mime) ? strtolower(trim(strtok((string) $mime, ';'))) : false;
+            if ($mime !== false && in_array($mime, $allowed, true)) {
+                return true;
+            }
+        }
+
+        $magicMime = t8_detect_magic_mime($path, $extension);
+        return $magicMime !== false && in_array($magicMime, $allowed, true);
+    }
+}
+
 if (!function_exists('t8_format_ph_contact')) {
     /** Formats a 10-digit mobile suffix or a full PH number into a normalized +63 format. */
     function t8_format_ph_contact(string $value): string

@@ -379,6 +379,9 @@ if (!function_exists('t8_hr_store_attachment')) {
         if (!in_array($ext, $allowed, true)) {
             throw new RuntimeException('Attachment type not allowed. Allowed: ' . implode(', ', $allowed) . '.');
         }
+        if (!t8_validate_uploaded_file_mime($file['tmp_name'], (string) $file['name'])) {
+            throw new RuntimeException('The attachment contents do not match the selected file type.');
+        }
 
         $dir = UPLOAD_DIR . '/hr_documents';
         if (!is_dir($dir)) {

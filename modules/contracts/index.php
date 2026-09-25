@@ -122,6 +122,9 @@ function t8_contract_upload(array $file, string $title, int $version): array
     if (!in_array($extension, $allowed, true)) {
         throw new RuntimeException('This document type is not allowed.');
     }
+    if (function_exists('t8_validate_uploaded_file_mime') && !t8_validate_uploaded_file_mime((string) ($file['tmp_name'] ?? ''), (string) ($file['name'] ?? ''))) {
+        throw new RuntimeException('The document contents do not match the selected file type.');
+    }
     $directory = UPLOAD_DIR . '/documents';
     if (!is_dir($directory)) { mkdir($directory, 0755, true); }
     $slug = strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', '-', $title), '-')) ?: 'contract';
@@ -131,6 +134,22 @@ function t8_contract_upload(array $file, string $title, int $version): array
         throw new RuntimeException('The contract document could not be stored.');
     }
     return ['file_path' => 'documents/' . $filename, 'file_size' => (int) $file['size'], 'checksum' => hash_file('sha256', $destination) ?: null];
+}
+
+function t8_contract_register_document_retention(PDO $pdo, int $documentId, ?string $categoryName, int $actorId): void
+{
+    if (!function_exists('t8_retention_register') || !function_exists('t8_retention_fetch_for_entity')) {
+        return;
+    }
+    if (t8_retention_fetch_for_entity($pdo, 'document', $documentId) !== null) {
+        return;
+    }
+
+    [$basis, $years] = $categoryName === 'Contracts'
+        ? ['Internal contract policy - contract document', 10]
+        : ['Internal policy - general administrative document', 5];
+    t8_retention_register($pdo, 'document', $documentId, $basis, $years, date('Y-m-d'), $actorId);
+    t8_audit_log($pdo, $actorId, 'document', $documentId, 'retention_registered');
 }
 
 $contractHasMetadata = t8_contract_has_metadata($pdo);
@@ -929,19 +948,29 @@ switch ($action) {
             } elseif (isset($_FILES['contract_file']) && ($_FILES['contract_file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
                 try {
                     $version = 1;
+                    $isNewDocument = !$documentId;
+                    $categoryId = null;
                     if ($documentId) {
-                        $versionStmt = $pdo->prepare('SELECT current_version, title FROM team8_documents WHERE id = :id AND deleted_at IS NULL');
+                        $versionStmt = $pdo->prepare('SELECT * FROM team8_documents WHERE id = :id AND deleted_at IS NULL');
                         $versionStmt->execute(['id' => $documentId]);
                         $document = $versionStmt->fetch(PDO::FETCH_ASSOC);
-                        if (!$document) { throw new RuntimeException('The selected document is not available.'); }
+                        if (!$document || !t8_document_can_access($document, $currentUserId, $isAdmin, $pdo, 'view', ['department_id' => $_SESSION['department_id'] ?? null])) {
+                            throw new RuntimeException('The selected document is not available.');
+                        }
                         $version = (int) $document['current_version'] + 1;
                         $documentTitle = (string) $document['title'];
                     } else {
                         $documentTitle = trim((string) ($_POST['document_title'] ?? '')) ?: $contract['title'];
+                        $categoryIdStmt = $pdo->query("SELECT id FROM team8_document_categories WHERE name = 'Contracts' LIMIT 1");
+                        $categoryId = $categoryIdStmt ? $categoryIdStmt->fetchColumn() : false;
+                        if ($categoryId === false) {
+                            throw new RuntimeException('The Contracts document category is not configured.');
+                        }
                     }
                     $stored = t8_contract_upload($_FILES['contract_file'], $documentTitle, $version);
                     if (!$documentId) {
-                        $pdo->prepare('INSERT INTO team8_documents (uploaded_by, owner_id, title, file_path, current_version, status) VALUES (:uploaded_by, :owner_id, :title, :file_path, 1, :status)')->execute([
+                        $pdo->prepare('INSERT INTO team8_documents (category_id, uploaded_by, owner_id, title, file_path, current_version, status) VALUES (:category_id, :uploaded_by, :owner_id, :title, :file_path, 1, :status)')->execute([
+                            'category_id' => $categoryId !== false ? (int) $categoryId : null,
                             'uploaded_by' => $currentUserId, 'owner_id' => $contract['owner_id'], 'title' => $documentTitle, 'file_path' => $stored['file_path'],
                             'status' => $isAdmin ? 'approved' : 'pending',
                         ]);
@@ -951,6 +980,13 @@ switch ($action) {
                         $pdo->prepare('INSERT INTO team8_document_versions (document_id, version_no, file_path, file_size, checksum) VALUES (:document_id, :version_no, :file_path, :file_size, :checksum)')->execute(['document_id' => $documentId, 'version_no' => $version] + $stored);
                         $pdo->prepare('UPDATE team8_documents SET file_path = :file_path, current_version = :version, status = :status WHERE id = :id')->execute(['file_path' => $stored['file_path'], 'version' => $version, 'status' => $isAdmin ? 'approved' : 'pending', 'id' => $documentId]);
                     }
+                    $documentCategory = $isNewDocument ? 'Contracts' : ($document['category_name'] ?? null);
+                    if ($documentId && !isset($documentCategory)) {
+                        $categoryStmt = $pdo->prepare('SELECT c.name FROM team8_documents d LEFT JOIN team8_document_categories c ON c.id = d.category_id WHERE d.id = :id');
+                        $categoryStmt->execute(['id' => $documentId]);
+                        $documentCategory = $categoryStmt->fetchColumn() ?: null;
+                    }
+                    t8_contract_register_document_retention($pdo, $documentId, $documentCategory, $currentUserId);
                     $pdo->prepare('INSERT IGNORE INTO team8_contract_documents (contract_id, document_id) VALUES (:contract_id, :document_id)')->execute(['contract_id' => $contractId, 'document_id' => $documentId]);
                     t8_audit_log($pdo, $currentUserId, 'contract', $contractId, 'upload_document', null, 'v' . $version);
                     t8_flash_set('success', 'Contract document uploaded.');
@@ -961,12 +997,16 @@ switch ($action) {
             } elseif (!$documentId) {
                 $errors[] = 'Please select a document to attach.';
             } else {
-                if (!$isAdmin) {
-                    $ownerStmt = $pdo->prepare('SELECT id FROM team8_documents WHERE id = :id AND uploaded_by = :user_id AND deleted_at IS NULL');
-                    $ownerStmt->execute(['id' => $documentId, 'user_id' => $currentUserId]);
-                    if (!$ownerStmt->fetchColumn()) { $errors[] = 'You may submit only your own supporting documents.'; }
+                $documentStmt = $pdo->prepare('SELECT * FROM team8_documents WHERE id = :id AND deleted_at IS NULL');
+                $documentStmt->execute(['id' => $documentId]);
+                $document = $documentStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                if (!t8_document_can_access($document, $currentUserId, $isAdmin, $pdo, 'view', ['department_id' => $_SESSION['department_id'] ?? null])) {
+                    $errors[] = 'You are not authorized to attach this document.';
                 }
                 if (!$errors) {
+                $categoryStmt = $pdo->prepare('SELECT c.name FROM team8_documents d LEFT JOIN team8_document_categories c ON c.id = d.category_id WHERE d.id = :id');
+                $categoryStmt->execute(['id' => $documentId]);
+                t8_contract_register_document_retention($pdo, $documentId, $categoryStmt->fetchColumn() ?: null, $currentUserId);
                 $pdo->prepare(
                     'INSERT INTO team8_contract_documents (contract_id, document_id) VALUES (:contract_id, :document_id)'
                 )->execute(['contract_id' => $contractId, 'document_id' => $documentId]);
@@ -978,18 +1018,37 @@ switch ($action) {
         }
 
         $attachedDocsStmt = $pdo->prepare(
-            'SELECT cd.*, d.title AS document_title
+            'SELECT cd.id AS contract_document_id, cd.contract_id, cd.document_id, cd.created_at AS attached_at, d.*
              FROM team8_contract_documents cd
              JOIN team8_documents d ON d.id = cd.document_id
              WHERE cd.contract_id = :contract_id
              ORDER BY cd.created_at DESC'
         );
         $attachedDocsStmt->execute(['contract_id' => $contractId]);
-        $attachedDocs = $attachedDocsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $attachedDocs = array_values(array_filter(
+            $attachedDocsStmt->fetchAll(PDO::FETCH_ASSOC),
+            static fn (array $document): bool => t8_document_can_access(
+                $document,
+                $currentUserId,
+                $isAdmin,
+                $pdo,
+                'view',
+                ['department_id' => $_SESSION['department_id'] ?? null]
+            )
+        ));
 
-        $availableDocsStmt = $pdo->prepare('SELECT id, title FROM team8_documents WHERE deleted_at IS NULL' . ($isAdmin ? '' : ' AND uploaded_by = :user_id') . ' ORDER BY title');
-        $availableDocsStmt->execute($isAdmin ? [] : ['user_id' => $currentUserId]);
-        $availableDocs = $availableDocsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $availableDocsStmt = $pdo->query('SELECT * FROM team8_documents WHERE deleted_at IS NULL ORDER BY title');
+        $availableDocs = array_values(array_filter(
+            $availableDocsStmt->fetchAll(PDO::FETCH_ASSOC),
+            static fn (array $document): bool => t8_document_can_access(
+                $document,
+                $currentUserId,
+                $isAdmin,
+                $pdo,
+                'view',
+                ['department_id' => $_SESSION['department_id'] ?? null]
+            )
+        ));
         break;
 
     case 'detach_document':
@@ -1410,7 +1469,7 @@ if ($showList) {
                         <?php foreach ($attachedDocs as $ad): ?>
                             <tr>
                                 <td><?= e($ad['document_title']) ?></td>
-                                <td><?= e(format_date($ad['created_at'], 'M d, Y g:i A')) ?></td>
+                                <td><?= e(format_date($ad['attached_at'], 'M d, Y g:i A')) ?></td>
                                 <td style="display:flex; gap:8px; flex-wrap:wrap;">
                                     <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $ad['document_id']])) ?>">
                                         <i class="fa-solid fa-eye"></i> View
@@ -1418,7 +1477,7 @@ if ($showList) {
                                     <?php if ($isAdmin): ?><form method="post" action="<?= e(page_url('contracts', ['action' => 'detach_document'])) ?>"
                                           onsubmit="return confirm('Remove this document from the contract?');">
                                         <?= t8_csrf_field() ?>
-                                        <input type="hidden" name="link_id" value="<?= e((string) $ad['id']) ?>">
+                                        <input type="hidden" name="link_id" value="<?= e((string) $ad['contract_document_id']) ?>">
                                         <input type="hidden" name="contract_id" value="<?= e((string) $contractId) ?>">
                                         <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit"><i class="fa-solid fa-xmark"></i> Remove</button>
                                     </form><?php endif; ?>
