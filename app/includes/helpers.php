@@ -163,3 +163,85 @@ if (!function_exists('t8_csrf_verify')) {
             && hash_equals($_SESSION['t8_csrf'], $submittedToken);
     }
 }
+
+if (!function_exists('t8_document_access_matrix')) {
+    /**
+     * Central authorization matrix for uploaded document records.
+     *
+     * Supported roles/contexts:
+     * - admin: system-wide access
+     * - uploader: the user who uploaded the record
+     * - owner: the document owner (when the row contains owner_id)
+     * - department: the current session department matches the document department
+     * - recipient: a certificate/related recipient tied to the current employee
+     * - legal_case: a legal officer assigned to the case attached to the document
+     */
+    function t8_document_access_matrix(?array $document, int $userId, bool $isAdmin, ?PDO $pdo = null, array $context = []): array
+    {
+        $row = $document ?? [];
+        $userId = max(0, $userId);
+        $departmentId = isset($context['department_id']) ? (int) $context['department_id'] : null;
+        $recipientEmployeeId = isset($context['recipient_employee_id']) ? (int) $context['recipient_employee_id'] : null;
+
+        $admin = $isAdmin;
+        $uploader = $document !== null && array_key_exists('uploaded_by', $row) && (int) ($row['uploaded_by'] ?? 0) === $userId;
+        $owner = $document !== null && array_key_exists('owner_id', $row) && $row['owner_id'] !== null && (int) ($row['owner_id'] ?? 0) === $userId;
+        $department = $document !== null
+            && array_key_exists('department_id', $row)
+            && $row['department_id'] !== null
+            && $departmentId !== null
+            && (int) ($row['department_id'] ?? 0) === $departmentId;
+        $recipient = $document !== null && (
+            (array_key_exists('recipient_employee_id', $row) && $row['recipient_employee_id'] !== null && (int) ($row['recipient_employee_id'] ?? 0) === $userId)
+            || (array_key_exists('employee_id', $row) && $row['employee_id'] !== null && (int) ($row['employee_id'] ?? 0) === $userId)
+            || ($recipientEmployeeId !== null && $recipientEmployeeId === $userId)
+        );
+
+        $legalCaseAccess = false;
+        if ($document !== null && $userId > 0 && !$admin && $pdo instanceof PDO) {
+            $documentId = array_key_exists('document_id', $row) && $row['document_id'] !== null
+                ? (int) $row['document_id']
+                : (int) ($row['id'] ?? 0);
+            if ($documentId > 0 && function_exists('t8_has_role') && t8_has_role('legal_officer')) {
+                $legalStmt = $pdo->prepare(
+                    'SELECT lc.id FROM team8_legal_documents ld
+                     JOIN team8_legal_cases lc ON lc.id = ld.case_id
+                     WHERE ld.document_id = :document_id AND lc.assigned_to = :user_id AND lc.deleted_at IS NULL LIMIT 1'
+                );
+                $legalStmt->execute(['document_id' => $documentId, 'user_id' => $userId]);
+                $legalCaseAccess = $legalStmt->fetchColumn() !== false;
+            }
+        }
+
+        $view = $admin || $uploader || $owner || $department || $recipient || $legalCaseAccess;
+
+        return [
+            'admin' => $admin,
+            'uploader' => $uploader,
+            'owner' => $owner,
+            'department' => $department,
+            'recipient' => $recipient,
+            'legal_case' => $legalCaseAccess,
+            'view' => $view,
+            'download' => $view,
+            'edit' => $admin || $uploader,
+            'print' => $view,
+            'approve' => $admin,
+        ];
+    }
+}
+
+if (!function_exists('t8_document_can_access')) {
+    function t8_document_can_access(?array $document, int $userId, bool $isAdmin, ?PDO $pdo = null, string $action = 'view', array $context = []): bool
+    {
+        $matrix = t8_document_access_matrix($document, $userId, $isAdmin, $pdo, $context);
+
+        return match ($action) {
+            'download' => $matrix['download'],
+            'edit' => $matrix['edit'],
+            'print' => $matrix['print'],
+            'approve' => $matrix['approve'],
+            default => $matrix['view'],
+        };
+    }
+}

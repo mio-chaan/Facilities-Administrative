@@ -388,11 +388,19 @@ function t8_render_document_detail_modal(): void
  */
 function t8_document_is_authorized(?array $document, int $userId, bool $isAdmin): bool
 {
-    if ($document === null || $userId <= 0 || !array_key_exists('uploaded_by', $document)) {
+    if ($document === null || $userId <= 0) {
         return false;
     }
 
-    return $isAdmin || (int) $document['uploaded_by'] === $userId;
+    $matrix = t8_document_access_matrix(
+        $document,
+        $userId,
+        $isAdmin,
+        $GLOBALS['pdo'] ?? null,
+        ['department_id' => $_SESSION['department_id'] ?? null]
+    );
+
+    return $matrix['view'];
 }
 
 /** Document id from a document row or a joined version row. */
@@ -410,7 +418,18 @@ function t8_document_entity_id(?array $document): int
 
 function t8_document_can_view(?array $document, int $userId, bool $isAdmin): bool
 {
-    return t8_document_is_authorized($document, $userId, $isAdmin);
+    if ($document === null || $userId <= 0) {
+        return false;
+    }
+
+    return t8_document_can_access(
+        $document,
+        $userId,
+        $isAdmin,
+        $GLOBALS['pdo'] ?? null,
+        'view',
+        ['department_id' => $_SESSION['department_id'] ?? null]
+    );
 }
 
 /**
@@ -436,10 +455,14 @@ function t8_document_assigned_legal_case_id(PDO $pdo, int $documentId, int $user
 
 function t8_document_can_download(?array $document, int $userId, bool $isAdmin, ?PDO $pdo = null): bool
 {
+    if ($document === null || $userId <= 0) {
+        return false;
+    }
+
     if (t8_document_can_view($document, $userId, $isAdmin)) {
         return true;
     }
-    if ($document === null || $userId <= 0 || $isAdmin || $pdo === null) {
+    if ($isAdmin || $pdo === null) {
         return false;
     }
 
@@ -449,7 +472,11 @@ function t8_document_can_download(?array $document, int $userId, bool $isAdmin, 
 /** Replace/upload a new version: owner/admin, plus staff only after return. */
 function t8_document_can_edit(?array $document, int $userId, bool $isAdmin): bool
 {
-    if (!t8_document_is_authorized($document, $userId, $isAdmin)) {
+    if ($document === null || $userId <= 0) {
+        return false;
+    }
+
+    if (!t8_document_can_access($document, $userId, $isAdmin, $GLOBALS['pdo'] ?? null, 'edit', ['department_id' => $_SESSION['department_id'] ?? null])) {
         return false;
     }
 
@@ -459,13 +486,21 @@ function t8_document_can_edit(?array $document, int $userId, bool $isAdmin): boo
 /** Uploaded files have no separate print action; print follows VIEW. */
 function t8_document_can_print(?array $document, int $userId, bool $isAdmin): bool
 {
-    return t8_document_can_view($document, $userId, $isAdmin);
+    if ($document === null || $userId <= 0) {
+        return false;
+    }
+
+    return t8_document_can_access($document, $userId, $isAdmin, $GLOBALS['pdo'] ?? null, 'print', ['department_id' => $_SESSION['department_id'] ?? null]);
 }
 
 /** Approve an uploaded document: admin and a loaded document row. */
 function t8_document_can_approve(?array $document, int $userId, bool $isAdmin): bool
 {
-    return $isAdmin && t8_document_is_authorized($document, $userId, $isAdmin);
+    if ($document === null || $userId <= 0) {
+        return false;
+    }
+
+    return t8_document_can_access($document, $userId, $isAdmin, $GLOBALS['pdo'] ?? null, 'approve', ['department_id' => $_SESSION['department_id'] ?? null]);
 }
 
 /** All versions for a document, newest first. */

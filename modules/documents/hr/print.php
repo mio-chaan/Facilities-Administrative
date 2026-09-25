@@ -107,6 +107,12 @@ switch ($type) {
             http_response_code(404);
             exit('Certificate recipient not found.');
         }
+        $isRecipient = $currentUserId > 0 && (int) $recipient['employee_id'] === $currentUserId;
+        $isAdmin = $isAdmin ?? false;
+        if (!$isAdmin && !$isRecipient) {
+            http_response_code(403);
+            exit('You are not authorized to print this certificate.');
+        }
         $docNumber = $row['document_number'];
         $title = T8_CERTIFICATE_TYPES[$row['certificate_type']] ?? 'Certificate';
         $preparedByName = $row['prepared_by_name'];
