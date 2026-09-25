@@ -42,18 +42,14 @@ if ($action === 'nte_new') {
         } else {
             $type = '';
         }
-        if (in_array($datePreset, ['today', 'week', 'month'], true)) {
-            $today = new DateTimeImmutable('today');
-            $dateFrom = $today;
-            $dateTo = $today;
-            if ($datePreset === 'week') {
-                $dateTo = $today->modify('+6 days');
-            } elseif ($datePreset === 'month') {
-                $dateTo = $today->modify('last day of this month');
+        if (in_array($datePreset, ['today', 'week', 'month', 'past', 'current'], true)) {
+            $dateFilter = t8_hr_nte_date_filter($datePreset);
+            if ($dateFilter !== null) {
+                $where[] = $dateFilter['where'];
+                $params = array_merge($params, $dateFilter['params']);
+            } else {
+                $datePreset = '';
             }
-            $where[] = 'ir.incident_date BETWEEN :nte_date_from AND :nte_date_to';
-            $params['nte_date_from'] = $dateFrom->format('Y-m-d');
-            $params['nte_date_to'] = $dateTo->format('Y-m-d');
         } else {
             $datePreset = '';
         }
@@ -120,6 +116,8 @@ if ($action === 'nte_new') {
                         <option value="today" <?= $datePreset === 'today' ? 'selected' : '' ?>>Today</option>
                         <option value="week" <?= $datePreset === 'week' ? 'selected' : '' ?>>This week</option>
                         <option value="month" <?= $datePreset === 'month' ? 'selected' : '' ?>>This month</option>
+                        <option value="past" <?= $datePreset === 'past' ? 'selected' : '' ?>>Past incidents</option>
+                        <option value="current" <?= $datePreset === 'current' ? 'selected' : '' ?>>Current incidents</option>
                     </select>
                 </label>
                 <button id="t8NteReset" class="t8-btn t8-btn-outline t8-btn-sm" type="button">Reset</button>

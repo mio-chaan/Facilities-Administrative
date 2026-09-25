@@ -16,6 +16,17 @@ declare(strict_types=1);
 
 if ($action === 'incident_report_new') {
     $employee = t8_hr_current_employee($pdo);
+    $canChooseSubject = $isAdmin;
+    $subjectEmployeeId = (int) $employee['employee_id'];
+    $subjectEmployee = $employee;
+    $subjectEmployees = [];
+
+    if ($canChooseSubject) {
+        $subjectEmployees = $pdo->query(
+            'SELECT id, full_name, department_id FROM users ORDER BY full_name ASC'
+        )->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     try {
         $facilityLocations = $pdo->query(
             'SELECT id, name FROM team8_facility_locations ORDER BY name'
@@ -31,16 +42,18 @@ if ($action === 'incident_report_new') {
         'incident_type'     => '',
         'description'       => '',
         'witness'           => '',
+        'subject_employee_id' => $subjectEmployeeId,
     ];
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $formValues = [
-            'incident_date'     => trim((string) ($_POST['incident_date'] ?? '')),
-            'incident_time'     => trim((string) ($_POST['incident_time'] ?? '')),
-            'incident_location' => trim((string) ($_POST['incident_location'] ?? '')),
-            'incident_type'     => trim((string) ($_POST['incident_type'] ?? '')),
-            'description'       => trim((string) ($_POST['description'] ?? '')),
-            'witness'           => trim((string) ($_POST['witness'] ?? '')),
+            'incident_date'       => trim((string) ($_POST['incident_date'] ?? '')),
+            'incident_time'       => trim((string) ($_POST['incident_time'] ?? '')),
+            'incident_location'   => trim((string) ($_POST['incident_location'] ?? '')),
+            'incident_type'       => trim((string) ($_POST['incident_type'] ?? '')),
+            'description'         => trim((string) ($_POST['description'] ?? '')),
+            'witness'             => trim((string) ($_POST['witness'] ?? '')),
+            'subject_employee_id' => (int) ($_POST['subject_employee_id'] ?? $subjectEmployeeId),
         ];
 
         if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
@@ -76,6 +89,26 @@ if ($action === 'incident_report_new') {
             }
 
             if (!$errors) {
+                $subjectEmployeeId = $formValues['subject_employee_id'];
+                if ($canChooseSubject) {
+                    $subjectEmployeeStmt = $pdo->prepare('SELECT id, full_name, department_id FROM users WHERE id = :id LIMIT 1');
+                    $subjectEmployeeStmt->execute(['id' => $subjectEmployeeId]);
+                    $subjectEmployee = $subjectEmployeeStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$subjectEmployee) {
+                        $errors[] = 'Selected employee could not be found.';
+                    }
+                } else {
+                    $subjectEmployeeId = (int) $employee['employee_id'];
+                }
+            }
+
+            if (!$errors) {
+                $subjectEmployee = $subjectEmployee ?? [
+                    'id' => $subjectEmployeeId,
+                    'full_name' => $employee['full_name'],
+                    'department_id' => $employee['department_id'],
+                ];
+
                 $docNumber = t8_hr_generate_doc_number($pdo, 'IR', 'team8_incident_reports');
                 $stmt = $pdo->prepare(
                     'INSERT INTO team8_incident_reports
@@ -87,9 +120,9 @@ if ($action === 'incident_report_new') {
                 );
                 $stmt->execute([
                     'document_number'   => $docNumber,
-                    'employee_id'       => $employee['employee_id'],
-                    'prepared_by'       => $employee['employee_id'],
-                    'department_id'     => $employee['department_id'],
+                    'employee_id'       => (int) $subjectEmployee['id'],
+                    'prepared_by'       => $currentUserId,
+                    'department_id'     => isset($subjectEmployee['department_id']) && $subjectEmployee['department_id'] !== null ? (int) $subjectEmployee['department_id'] : null,
                     'incident_date'     => $formValues['incident_date'],
                     'incident_time'     => $formValues['incident_time'],
                     'incident_location' => $formValues['incident_location'],
@@ -101,7 +134,7 @@ if ($action === 'incident_report_new') {
                 $newId = (int) $pdo->lastInsertId();
 
                 t8_audit_log($pdo, $currentUserId, 'incident_report', $newId, 'create');
-                t8_hr_notify_admins($pdo, 'New incident report ' . $docNumber . ' filed by ' . $employee['full_name'] . '.');
+                t8_hr_notify_admins($pdo, 'New incident report ' . $docNumber . ' filed by ' . $employee['full_name'] . ' for ' . ($subjectEmployee['full_name'] ?? $employee['full_name']) . '.');
                 t8_flash_set('success', 'Incident report ' . $docNumber . ' submitted.');
                 redirect(page_url('documents', ['action' => 'incident_report_view', 'id' => $newId]));
             }
@@ -124,7 +157,7 @@ if ($action === 'incident_report_new') {
      
         <div class="t8-hr-readonly-block">
             <div class="t8-hr-readonly-item"><span>IR Document Number</span><strong>Generated upon submission</strong></div>
-            <div class="t8-hr-readonly-item"><span>Employee ID</span><strong>#<?= e((string) $employee['employee_id']) ?></strong></div>
+            <div class="t8-hr-readonly-item"><span>Subject Employee</span><strong><?= e((string) ($canChooseSubject ? $employee['full_name'] : $employee['full_name'])) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Reported By</span><strong><?= e($employee['full_name']) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Department</span><strong><?= e($employee['department_name']) ?></strong></div>
             <div class="t8-hr-readonly-item"><span>Position</span><strong><?= e($employee['position']) ?></strong></div>
@@ -133,6 +166,17 @@ if ($action === 'incident_report_new') {
     
         <form class="t8-incident-report-form" method="post" action="<?= e(page_url('documents', ['action' => 'incident_report_new'])) ?>" enctype="multipart/form-data" novalidate>
             <?= t8_csrf_field() ?>
+
+            <?php if ($canChooseSubject): ?>
+                <div class="t8-field">
+                    <label class="t8-label" for="subject_employee_id">Subject Employee</label>
+                    <select class="t8-select" id="subject_employee_id" name="subject_employee_id" required>
+                        <?php foreach ($subjectEmployees as $subject): ?>
+                            <option value="<?= e((string) $subject['id']) ?>" <?= ((int) $subject['id']) === (int) $formValues['subject_employee_id'] ? 'selected' : '' ?>><?= e((string) $subject['full_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            <?php endif; ?>
 
             <h3>Incident Information</h3>
             <div class="t8-incident-report-grid">

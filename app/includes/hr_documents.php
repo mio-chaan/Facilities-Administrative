@@ -302,6 +302,57 @@ if (!function_exists('t8_hr_incident_can_generate_nte')) {
     }
 }
 
+if (!function_exists('t8_hr_nte_date_filter')) {
+    /**
+     * Builds a date range for the NTE picker using historical dates instead of
+     * future-only ranges. The month/week presets use the current calendar window
+     * ending on today, while "past" looks backward from today.
+     */
+    function t8_hr_nte_date_filter(string $datePreset): ?array
+    {
+        $preset = strtolower(trim($datePreset));
+        $today = new DateTimeImmutable('today');
+
+        switch ($preset) {
+            case 'today':
+                return [
+                    'where' => 'ir.incident_date = :nte_date_from',
+                    'params' => ['nte_date_from' => $today->format('Y-m-d')],
+                ];
+            case 'week':
+                $from = $today->modify('-6 days');
+                return [
+                    'where' => 'ir.incident_date BETWEEN :nte_date_from AND :nte_date_to',
+                    'params' => [
+                        'nte_date_from' => $from->format('Y-m-d'),
+                        'nte_date_to' => $today->format('Y-m-d'),
+                    ],
+                ];
+            case 'month':
+                $from = $today->modify('first day of this month');
+                return [
+                    'where' => 'ir.incident_date BETWEEN :nte_date_from AND :nte_date_to',
+                    'params' => [
+                        'nte_date_from' => $from->format('Y-m-d'),
+                        'nte_date_to' => $today->format('Y-m-d'),
+                    ],
+                ];
+            case 'past':
+                return [
+                    'where' => 'ir.incident_date < :nte_date_to',
+                    'params' => ['nte_date_to' => $today->format('Y-m-d')],
+                ];
+            case 'current':
+                return [
+                    'where' => 'ir.incident_date >= :nte_date_from',
+                    'params' => ['nte_date_from' => $today->format('Y-m-d')],
+                ];
+            default:
+                return null;
+        }
+    }
+}
+
 if (!function_exists('t8_hr_nte_allows_explanation')) {
     function t8_hr_nte_allows_explanation(string $nteStatus, ?array $latestExplanation): bool
     {
