@@ -11,7 +11,9 @@
 
 declare(strict_types=1);
 
-t8_require_role(['admin']);
+if (in_array($action, ['certificate_new', 'certificate_status'], true)) {
+    t8_require_role(['admin']);
+}
 
 if ($action === 'certificate_new') {
     $type = (string) ($_GET['type'] ?? $_POST['certificate_type'] ?? '');
@@ -145,6 +147,28 @@ if ($action === 'certificate_view') {
     if (!$cert) {
         t8_flash_set('danger', 'Certificate not found.');
         redirect(page_url('documents'));
+    }
+
+    $recipientMatch = t8_hr_certificate_recipient_fetch($pdo, $id, (int) ($currentUserId ?? 0));
+    $certificateAccessRow = [
+        'uploaded_by' => (int) ($cert['prepared_by'] ?? $currentUserId ?? 0),
+        'owner_id' => (int) ($cert['prepared_by'] ?? $currentUserId ?? 0),
+        'employee_id' => (int) ($cert['employee_id'] ?? 0),
+        'recipient_employee_id' => $currentUserId,
+        'department_id' => isset($cert['department_id']) ? (int) $cert['department_id'] : null,
+    ];
+    $isCertificateAuthorized = $isAdmin || $recipientMatch !== null || t8_document_can_access(
+        $certificateAccessRow,
+        (int) ($currentUserId ?? 0),
+        $isAdmin,
+        $pdo,
+        'view',
+        ['department_id' => $_SESSION['department_id'] ?? null]
+    );
+    if (!$isCertificateAuthorized) {
+        http_response_code(403);
+        echo '<div class="t8-alert t8-alert-danger">403 — You are not authorized to view this certificate.</div>';
+        exit;
     }
     $versions = t8_hr_versions($pdo, 'certificate', $id);
     ?>
