@@ -273,7 +273,7 @@ function t8_document_render_menu(
                     <i class="fa-solid fa-box-archive"></i> View Retention Record
                 </a>
             <?php endif; ?>
-            <?php if ($isAdmin && $statusFilter === 'active' && $doc['status'] === 'pending'): ?>
+            <?php if (t8_document_can_approve($doc, (int) (t8_current_user_id() ?? 0), $isAdmin) && $statusFilter === 'active' && $doc['status'] === 'pending'): ?>
                 <div class="t8-row-menu-divider"></div>
                 <form method="post" action="<?= e(page_url('documents', ['action' => 'set_status'])) ?>">
                     <?= t8_csrf_field() ?>
@@ -376,10 +376,96 @@ function t8_render_document_detail_modal(): void
     <?php
 }
 
-/** Admins may access all documents; staff may access only their own uploads. */
+/**
+ * Canonical access rule for uploaded files (team8_documents):
+ * admins may access all rows; other users may access only documents they
+ * uploaded. Fail closed when the row or actor is missing — a supplied
+ * document ID is never enough on its own.
+ *
+ * Legal-officer download of a file attached to an assigned case is a
+ * documented extra path in t8_document_can_download(), not a general
+ * VIEW grant.
+ */
 function t8_document_is_authorized(?array $document, int $userId, bool $isAdmin): bool
 {
-    return $document !== null && ($isAdmin || (int) $document['uploaded_by'] === $userId);
+    if ($document === null || $userId <= 0 || !array_key_exists('uploaded_by', $document)) {
+        return false;
+    }
+
+    return $isAdmin || (int) $document['uploaded_by'] === $userId;
+}
+
+/** Document id from a document row or a joined version row. */
+function t8_document_entity_id(?array $document): int
+{
+    if ($document === null) {
+        return 0;
+    }
+    if (array_key_exists('document_id', $document) && $document['document_id'] !== null) {
+        return (int) $document['document_id'];
+    }
+
+    return (int) ($document['id'] ?? 0);
+}
+
+function t8_document_can_view(?array $document, int $userId, bool $isAdmin): bool
+{
+    return t8_document_is_authorized($document, $userId, $isAdmin);
+}
+
+/**
+ * Assigned legal-case id when a legal_officer may download this upload.
+ * Returns null when the assignment cannot be verified.
+ */
+function t8_document_assigned_legal_case_id(PDO $pdo, int $documentId, int $userId): ?int
+{
+    if ($documentId <= 0 || $userId <= 0 || !t8_has_role('legal_officer')) {
+        return null;
+    }
+
+    $legalStmt = $pdo->prepare(
+        'SELECT lc.id FROM team8_legal_documents ld
+         JOIN team8_legal_cases lc ON lc.id = ld.case_id
+         WHERE ld.document_id = :document_id AND lc.assigned_to = :user_id AND lc.deleted_at IS NULL LIMIT 1'
+    );
+    $legalStmt->execute(['document_id' => $documentId, 'user_id' => $userId]);
+    $legalCaseId = $legalStmt->fetchColumn();
+
+    return $legalCaseId !== false ? (int) $legalCaseId : null;
+}
+
+function t8_document_can_download(?array $document, int $userId, bool $isAdmin, ?PDO $pdo = null): bool
+{
+    if (t8_document_can_view($document, $userId, $isAdmin)) {
+        return true;
+    }
+    if ($document === null || $userId <= 0 || $isAdmin || $pdo === null) {
+        return false;
+    }
+
+    return t8_document_assigned_legal_case_id($pdo, t8_document_entity_id($document), $userId) !== null;
+}
+
+/** Replace/upload a new version: owner/admin, plus staff only after return. */
+function t8_document_can_edit(?array $document, int $userId, bool $isAdmin): bool
+{
+    if (!t8_document_is_authorized($document, $userId, $isAdmin)) {
+        return false;
+    }
+
+    return $isAdmin || (string) ($document['status'] ?? '') === 'returned_for_revision';
+}
+
+/** Uploaded files have no separate print action; print follows VIEW. */
+function t8_document_can_print(?array $document, int $userId, bool $isAdmin): bool
+{
+    return t8_document_can_view($document, $userId, $isAdmin);
+}
+
+/** Approve an uploaded document: admin and a loaded document row. */
+function t8_document_can_approve(?array $document, int $userId, bool $isAdmin): bool
+{
+    return $isAdmin && t8_document_is_authorized($document, $userId, $isAdmin);
 }
 
 /** All versions for a document, newest first. */
@@ -788,11 +874,11 @@ switch ($action) {
     case 'upload_version':
         $documentId = (int) ($_GET['id'] ?? 0);
         $document = $documentId ? t8_document_fetch($pdo, $documentId) : null;
-        if (!t8_document_is_authorized($document, $currentUserId, $isAdmin)) {
+        if (!t8_document_can_view($document, (int) ($currentUserId ?? 0), $isAdmin)) {
             t8_flash_set('danger', 'Document not found.');
             redirect(page_url('documents'));
         }
-        if (!$isAdmin && $document['status'] !== 'returned_for_revision') {
+        if (!t8_document_can_edit($document, (int) ($currentUserId ?? 0), $isAdmin)) {
             t8_flash_set('danger', 'You may replace a document only after it has been returned for revision.');
             redirect(page_url('documents', ['action' => 'versions', 'id' => $documentId]));
         }
@@ -860,12 +946,17 @@ switch ($action) {
         $id = (int) ($_POST['id'] ?? 0);
         $status = (string) ($_POST['status'] ?? '');
         $reviewReason = trim((string) ($_POST['review_reason'] ?? ''));
-        if (!$documentHasStatus || !in_array($status, ['approved', 'returned_for_revision'], true) || !t8_document_fetch($pdo, $id)) {
+        $document = $id > 0 ? t8_document_fetch($pdo, $id) : null;
+        if (
+            !$documentHasStatus
+            || !in_array($status, ['approved', 'returned_for_revision'], true)
+            || $document === null
+            || ($status === 'approved' && !t8_document_can_approve($document, (int) ($currentUserId ?? 0), $isAdmin))
+        ) {
             t8_flash_set('danger', 'The document review request is invalid.');
         } elseif ($status === 'returned_for_revision' && $reviewReason === '') {
             t8_flash_set('danger', 'A reason is required when returning a document.');
         } else {
-            $document = t8_document_fetch($pdo, $id);
             if ($documentHasReviewReason) {
                 $pdo->prepare('UPDATE team8_documents SET status = :status, review_reason = :reason WHERE id = :id')
                     ->execute(['status' => $status, 'reason' => $status === 'returned_for_revision' ? $reviewReason : null, 'id' => $id]);
@@ -931,23 +1022,15 @@ switch ($action) {
              WHERE v.id = :id LIMIT 1'
         );
         $stmt->execute(['id' => $versionId]);
-        $version = $stmt->fetch(PDO::FETCH_ASSOC);
-        $legalAccess = false;
-        if ($version && !$isAdmin && t8_has_role('legal_officer')) {
-            $legalStmt = $pdo->prepare(
-                'SELECT lc.id FROM team8_legal_documents ld
-                 JOIN team8_legal_cases lc ON lc.id = ld.case_id
-                 WHERE ld.document_id = :document_id AND lc.assigned_to = :user_id AND lc.deleted_at IS NULL LIMIT 1'
-            );
-            $legalStmt->execute(['document_id' => $version['document_id'], 'user_id' => $currentUserId]);
-            $legalCaseId = $legalStmt->fetchColumn();
-            $legalAccess = $legalCaseId !== false;
-        }
-        if (!$version || (!$isAdmin && (int) $version['uploaded_by'] !== $currentUserId && !$legalAccess)) {
+        $version = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $actorId = (int) ($currentUserId ?? 0);
+        if ($versionId <= 0 || !t8_document_can_download($version, $actorId, $isAdmin, $pdo)) {
             http_response_code(404);
             echo 'File not found.';
             exit;
         }
+        $legalCaseId = t8_document_assigned_legal_case_id($pdo, t8_document_entity_id($version), $actorId);
+        $legalAccess = $legalCaseId !== null;
         $filePath = UPLOAD_DIR . '/' . $version['file_path'];
         if (!is_file($filePath)) {
             http_response_code(404);
@@ -983,8 +1066,8 @@ switch ($action) {
              WHERE v.id = :id LIMIT 1'
         );
         $stmt->execute(['id' => $summaryVersionId]);
-        $summaryVersion = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$summaryVersion || (!$isAdmin && (int) $summaryVersion['uploaded_by'] !== $currentUserId)) {
+        $summaryVersion = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        if (!t8_document_can_view($summaryVersion, (int) ($currentUserId ?? 0), $isAdmin)) {
             t8_flash_set('danger', 'Version not found.');
             redirect(page_url('documents'));
         }
@@ -1029,7 +1112,7 @@ $showVersions = $action === 'versions';
 if ($showVersions) {
     $documentId = (int) ($_GET['id'] ?? 0);
     $document = $documentId ? t8_document_fetch($pdo, $documentId) : null;
-    if (!t8_document_is_authorized($document, $currentUserId, $isAdmin)) {
+    if (!t8_document_can_view($document, (int) ($currentUserId ?? 0), $isAdmin)) {
         t8_flash_set('danger', 'Document not found.');
         redirect(page_url('documents'));
     }
@@ -1655,7 +1738,7 @@ function t8_render_camera_capture(): void
     <div class="t8-card">
         <div class="t8-card-header">
             <h2 class="t8-card-title"><?= e($document['title']) ?> — Version History</h2>
-            <?php if ($isAdmin || $document['status'] === 'returned_for_revision'): ?>
+            <?php if (t8_document_can_edit($document, (int) ($currentUserId ?? 0), $isAdmin)): ?>
                 <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'upload_version', 'id' => $document['id']])) ?>">
                     <i class="fa-solid fa-upload"></i> Upload New Version
                 </a>
