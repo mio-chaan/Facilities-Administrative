@@ -234,6 +234,13 @@ CREATE TABLE team8_visitors (
 -- MODULE: DOCUMENT MANAGEMENT
 -- =========================================================
 
+CREATE TABLE team8_document_number_sequences (
+    prefix          VARCHAR(30) NOT NULL,
+    sequence_year   SMALLINT UNSIGNED NOT NULL,
+    last_number     INT UNSIGNED NOT NULL,
+    PRIMARY KEY (prefix, sequence_year)
+) ENGINE=InnoDB;
+
 CREATE TABLE team8_document_categories (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     name        VARCHAR(150) NOT NULL,

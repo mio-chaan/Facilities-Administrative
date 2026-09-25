@@ -914,41 +914,64 @@ switch ($action) {
                 }
 
                 if (!$errors) {
-                    $stmt = $pdo->prepare(
-                        'SELECT COALESCE(MAX(version_no), 0) FROM team8_document_versions WHERE document_id = :id'
-                    );
-                    $stmt->execute(['id' => $documentId]);
-                    $nextVersion = (int) $stmt->fetchColumn() + 1;
+                    $stored = null;
+                    try {
+                        $pdo->beginTransaction();
 
-                    $stored = t8_document_store_upload($_FILES['file'], $document['title'], $nextVersion);
+                        $lockStmt = $pdo->prepare(
+                            'SELECT id FROM team8_documents WHERE id = :id FOR UPDATE'
+                        );
+                        $lockStmt->execute(['id' => $documentId]);
+                        if (!$lockStmt->fetchColumn()) {
+                            throw new RuntimeException('Document not found.');
+                        }
 
-                    // STATUS/APPROVAL FIX: a re-upload follows the same
-                    // rule as a fresh upload - only route back into
-                    // 'pending' when the document's own category
-                    // actually has a review step (t8_document_fetch()
-                    // already joins category_name onto $document).
-                    $reuploadStatus = ($isAdmin || !t8_document_requires_approval($document['category_name'] ?? null))
-                        ? 'approved'
-                        : 'pending';
+                        $stmt = $pdo->prepare(
+                            'SELECT COALESCE(MAX(version_no), 0) FROM team8_document_versions WHERE document_id = :id'
+                        );
+                        $stmt->execute(['id' => $documentId]);
+                        $nextVersion = (int) $stmt->fetchColumn() + 1;
 
-                    $pdo->prepare(
-                        'INSERT INTO team8_document_versions (document_id, version_no, file_path, file_size, checksum)
-                         VALUES (:document_id, :version_no, :file_path, :file_size, :checksum)'
-                    )->execute([
-                        'document_id' => $documentId,
-                        'version_no'  => $nextVersion,
-                        'file_path'   => $stored['file_path'],
-                        'file_size'   => $stored['file_size'],
-                        'checksum'    => $stored['checksum'],
-                    ]);
-                    $versionUpdateSql = $documentHasStatus
-                        ? "UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, status = '" . $reuploadStatus . "', updated_at = NOW() WHERE id = :id"
-                        : 'UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, updated_at = NOW() WHERE id = :id';
-                    $pdo->prepare($versionUpdateSql)->execute([
-                        'file_path'  => $stored['file_path'],
-                        'version_no' => $nextVersion,
-                        'id'         => $documentId,
-                    ]);
+                        $stored = t8_document_store_upload($_FILES['file'], $document['title'], $nextVersion);
+
+                        // STATUS/APPROVAL FIX: a re-upload follows the same
+                        // rule as a fresh upload - only route back into
+                        // 'pending' when the document's own category
+                        // actually has a review step (t8_document_fetch()
+                        // already joins category_name onto $document).
+                        $reuploadStatus = ($isAdmin || !t8_document_requires_approval($document['category_name'] ?? null))
+                            ? 'approved'
+                            : 'pending';
+
+                        $pdo->prepare(
+                            'INSERT INTO team8_document_versions (document_id, version_no, file_path, file_size, checksum)
+                             VALUES (:document_id, :version_no, :file_path, :file_size, :checksum)'
+                        )->execute([
+                            'document_id' => $documentId,
+                            'version_no'  => $nextVersion,
+                            'file_path'   => $stored['file_path'],
+                            'file_size'   => $stored['file_size'],
+                            'checksum'    => $stored['checksum'],
+                        ]);
+                        $versionUpdateSql = $documentHasStatus
+                            ? "UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, status = '" . $reuploadStatus . "', updated_at = NOW() WHERE id = :id"
+                            : 'UPDATE team8_documents SET file_path = :file_path, current_version = :version_no, updated_at = NOW() WHERE id = :id';
+                        $pdo->prepare($versionUpdateSql)->execute([
+                            'file_path'  => $stored['file_path'],
+                            'version_no' => $nextVersion,
+                            'id'         => $documentId,
+                        ]);
+
+                        $pdo->commit();
+                    } catch (Throwable $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        if (is_array($stored)) {
+                            @unlink(t8_documents_dir() . '/' . basename($stored['file_path']));
+                        }
+                        throw $e;
+                    }
 
                     t8_audit_log($pdo, $currentUserId, 'document', $documentId, 'new_version');
                     t8_flash_set('success', 'New version uploaded (v' . $nextVersion . ').');

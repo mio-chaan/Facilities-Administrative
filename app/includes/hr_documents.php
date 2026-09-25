@@ -246,9 +246,13 @@ if (!function_exists('t8_hr_generate_doc_number')) {
     function t8_hr_generate_doc_number(PDO $pdo, string $prefix, string $table): string
     {
         $year = date('Y');
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE YEAR(created_at) = :year");
-        $stmt->execute(['year' => $year]);
-        $sequence = (int) $stmt->fetchColumn() + 1;
+        $stmt = $pdo->prepare(
+            'INSERT INTO team8_document_number_sequences (prefix, sequence_year, last_number)
+             VALUES (:prefix, :sequence_year, LAST_INSERT_ID(1))
+             ON DUPLICATE KEY UPDATE last_number = LAST_INSERT_ID(last_number + 1)'
+        );
+        $stmt->execute(['prefix' => $prefix, 'sequence_year' => $year]);
+        $sequence = (int) $pdo->query('SELECT LAST_INSERT_ID()')->fetchColumn();
         return sprintf('%s-%s-%06d', $prefix, $year, $sequence);
     }
 }
