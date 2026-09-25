@@ -1,26 +1,39 @@
 # Uploaded files (user content, not source)
-public/uploads/*
-!public/uploads/.gitkeep
+/public/uploads/*
+!/public/uploads/.gitkeep
+/storage/
 
-# OS / editor files
-.DS_Store
-Thumbs.db
+# Local environment and editor files
+/app/config/config.local.php
+.env
+.env.*
+!.env.example
 .vscode/
 .idea/
 
-# Dependencies
-vendor/
-node_modules/
+# Dependencies and generated output
+/vendor/
+/node_modules/
+/coverage/
+/build/
+/dist/
 
-# Logs
+# Logs, temporary files, and backups
 *.log
-<<<<<<< HEAD
-# Local secret config
-app/config/config.local.php
-storage/
-tests/
-scripts/
-Document Life cycle/
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Local-only QA scripts and notes
+/tests/
+/scripts/
+/Document Life cycle/
 
 
 
