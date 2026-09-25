@@ -395,6 +395,81 @@ if (!function_exists('t8_hr_store_attachment')) {
     }
 }
 
+if (!function_exists('t8_hr_attachment_can_access')) {
+    /**
+     * HR attachment access uses the document owner/employee identity.
+     * Admins may always access, while the employee named on the record
+     * may read their own attachment.
+     */
+    function t8_hr_attachment_can_access(array $row, int $userId, bool $isAdmin): bool
+    {
+        if ($userId <= 0) {
+            return false;
+        }
+        if ($isAdmin) {
+            return true;
+        }
+
+        $ownerId = (int) ($row['employee_id'] ?? $row['prepared_by'] ?? $row['user_id'] ?? 0);
+        return $ownerId === $userId;
+    }
+}
+
+if (!function_exists('t8_hr_attachment_resolve_file')) {
+    /**
+     * Resolve a stored HR attachment relative to UPLOAD_DIR, rejecting
+     * traversal and invalid paths before the file is streamed.
+     */
+    function t8_hr_attachment_resolve_file(PDO $pdo, string $type, int $id): ?array
+    {
+        $type = strtolower(trim($type));
+        $id = (int) $id;
+        if ($id <= 0) {
+            return null;
+        }
+
+        $row = null;
+        switch ($type) {
+            case 'incident_report':
+                $row = t8_hr_incident_report_fetch($pdo, $id);
+                break;
+            case 'explanation':
+                $row = t8_hr_explanation_fetch($pdo, $id);
+                break;
+            default:
+                return null;
+        }
+
+        if ($row === null) {
+            return null;
+        }
+
+        $attachmentPath = trim((string) ($row['attachment_path'] ?? ''));
+        if ($attachmentPath === '') {
+            return null;
+        }
+        if (str_contains($attachmentPath, '..') || str_starts_with($attachmentPath, '/')) {
+            return null;
+        }
+
+        $baseDir = realpath(UPLOAD_DIR);
+        if ($baseDir === false) {
+            return null;
+        }
+
+        $resolved = realpath($baseDir . DIRECTORY_SEPARATOR . ltrim($attachmentPath, '/\\'));
+        if ($resolved === false || !str_starts_with($resolved, $baseDir . DIRECTORY_SEPARATOR) && $resolved !== $baseDir) {
+            return null;
+        }
+
+        return [
+            'row' => $row,
+            'attachment_path' => $attachmentPath,
+            'resolved_path' => $resolved,
+        ];
+    }
+}
+
 // ---------------------------------------------------------------
 // Fetch helpers — each resolves display names via JOIN, never by
 // storing a duplicate copy of the name/department on the row itself.

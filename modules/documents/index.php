@@ -1049,6 +1049,34 @@ switch ($action) {
         redirect(page_url('documents'));
         break;
 
+    case 'hr_attachment_download':
+        $type = strtolower(trim((string) ($_GET['type'] ?? '')));
+        $id = (int) ($_GET['id'] ?? 0);
+        $attachment = $id > 0 ? t8_hr_attachment_resolve_file($pdo, $type, $id) : null;
+
+        if ($attachment === null || !t8_hr_attachment_can_access($attachment['row'], (int) ($currentUserId ?? 0), $isAdmin)) {
+            http_response_code(403);
+            echo 'You are not authorized to access this attachment.';
+            exit;
+        }
+
+        $filePath = $attachment['resolved_path'];
+        if (!is_file($filePath)) {
+            http_response_code(404);
+            echo 'Attachment not found on disk.';
+            exit;
+        }
+
+        $downloadName = basename($filePath);
+        t8_audit_log($pdo, $currentUserId, $type, $id, 'attachment_download');
+
+        header('Content-Description: File Transfer');
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="' . $downloadName . '"');
+        header('Content-Length: ' . filesize($filePath));
+        readfile($filePath);
+        exit;
+
     case 'download':
         $versionId = (int) ($_GET['version_id'] ?? 0);
         $stmt = $pdo->prepare(
