@@ -72,6 +72,10 @@ $retentionHelperPath = __DIR__ . '/../../app/includes/retention_helpers.php';
 if (is_file($retentionHelperPath)) {
     require_once $retentionHelperPath;
 }
+$paginationHelperPath = __DIR__ . '/../../app/includes/document_browse_pagination.php';
+if (is_file($paginationHelperPath)) {
+    require_once $paginationHelperPath;
+}
 
 $pageTitle = 'Document Management';
 $currentUserId = t8_current_user_id();
@@ -167,6 +171,54 @@ function t8_document_fetch(PDO $pdo, int $id): ?array
     $stmt->execute(['id' => $id]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
+}
+
+/** Fetch multiple uploaded documents for the current browse page in one query. */
+function t8_document_fetch_many(PDO $pdo, array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
+    if ($ids === []) {
+        return [];
+    }
+
+    $hasMetadata = t8_document_has_column($pdo, 'department_id') && t8_document_has_column($pdo, 'owner_id');
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = $pdo->prepare(
+        'SELECT d.*, c.name AS category_name, u.full_name AS uploaded_by_name' . ($hasMetadata ? ', dep.name AS department_name, owner.full_name AS owner_name' : '') . '
+         FROM team8_documents d
+         LEFT JOIN team8_document_categories c ON c.id = d.category_id
+         JOIN users u ON u.id = d.uploaded_by
+         ' . ($hasMetadata ? 'LEFT JOIN departments dep ON dep.id = d.department_id LEFT JOIN users owner ON owner.id = d.owner_id' : '') . '
+         WHERE d.id IN (' . $placeholders . ')'
+    );
+    $stmt->execute($ids);
+
+    $documents = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $document) {
+        $documents[(int) $document['id']] = $document;
+    }
+    return $documents;
+}
+
+/** Fetch retention IDs for uploaded documents on the current browse page. */
+function t8_document_retention_map(PDO $pdo, array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
+    if ($ids === [] || !function_exists('t8_retention_fetch_for_entity')) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT id, entity_id FROM team8_records WHERE entity_type = 'document' AND entity_id IN ($placeholders)"
+    );
+    $stmt->execute($ids);
+
+    $retention = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $retention[(int) $row['entity_id']] = ['id' => (int) $row['id']];
+    }
+    return $retention;
 }
 
 function t8_document_status_badge(string $status): string
@@ -1326,7 +1378,10 @@ function t8_document_browse_records(
     bool $hasMetadata,
     ?int $humanResourcesCategoryId,
     string $humanResourcesCategoryLabel,
-    array $filters
+    array $filters,
+    int $pageSize = 25,
+    int $page = 1,
+    ?bool &$hasNextPage = null
 ): array {
     $sources = t8_document_browse_sources();
     $search = (string) ($filters['search'] ?? '');
@@ -1334,9 +1389,15 @@ function t8_document_browse_records(
     $categoryId = (int) ($filters['category_id'] ?? 0);
     $sourceFilter = (string) ($filters['source_type'] ?? '');
     $records = [];
+    $pageWindow = t8_document_browse_page_window($page, $pageSize);
+    $page = $pageWindow['page'];
+    $pageSize = $pageWindow['page_size'];
+    $offset = $pageWindow['offset'];
+    $sourceLimit = $pageWindow['source_limit'];
     $includeHr = $categoryId === 0 || ($humanResourcesCategoryId !== null && $categoryId === $humanResourcesCategoryId);
 
-    $append = static function (string $sql, array $params, string $sourceKey, ?int $categoryKey, string $categoryLabel) use ($pdo, &$records, $sources): void {
+    $append = static function (string $sql, array $params, string $sourceKey, ?int $categoryKey, string $categoryLabel) use ($pdo, &$records, $sources, $sourceLimit): void {
+        $sql .= ' ORDER BY timestamp DESC, id DESC LIMIT ' . $sourceLimit;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -1457,7 +1518,9 @@ function t8_document_browse_records(
     usort($records, static fn (array $a, array $b): int => strtotime($b['timestamp']) <=> strtotime($a['timestamp'])
         ?: strcmp((string) $a['source_key'], (string) $b['source_key'])
         ?: ((int) $b['id'] <=> (int) $a['id']));
-    return $records;
+    $pageRecords = array_slice($records, $offset, $pageSize);
+    $hasNextPage = count($records) > $offset + $pageSize;
+    return $pageRecords;
 }
 
 if ($showList) {
@@ -1479,26 +1542,48 @@ if ($showList) {
     }
 
     $currentDepartmentId = isset($_SESSION['department_id']) ? (int) $_SESSION['department_id'] : null;
-    $optionRecords = t8_document_browse_records($pdo, $isAdmin, (int) $currentUserId, $currentDepartmentId, $hasMetadata, $humanResourcesCategoryId, $humanResourcesCategoryLabel, [
-        'status' => '__all_states', 'search' => '', 'category_id' => 0, 'source_type' => '',
-    ]);
-    $availableSourceKeys = array_values(array_unique(array_column($optionRecords, 'source_key')));
-    $availableStatuses = array_values(array_unique(array_column($optionRecords, 'status')));
     $requestedStatus = trim((string) ($_GET['status'] ?? 'all'));
+    $includeHumanResources = $categoryFilter === 0 || ($humanResourcesCategoryId !== null && $categoryFilter === $humanResourcesCategoryId);
+    $availableSourceKeys = $includeHumanResources
+        ? array_keys(t8_document_browse_sources())
+        : ['upload'];
+    if (!$isAdmin && in_array($requestedStatus, ['archived', 'rejected'], true)) {
+        $availableSourceKeys = ['upload'];
+    }
+    $availableStatuses = ['draft', 'pending', 'approved', 'rejected', 'returned_for_revision', 'archived'];
     $allowedStatuses = array_merge(['all', 'active', 'expired', 'expiring_soon', 'rejected', 'archived'], $availableStatuses);
     $statusFilter = in_array($requestedStatus, $allowedStatuses, true) ? $requestedStatus : 'all';
     $requestedSource = trim((string) ($_GET['source_type'] ?? ''));
     $sourceFilter = in_array($requestedSource, $availableSourceKeys, true) ? $requestedSource : '';
 
+    $browsePage = t8_document_browse_page_number($_GET['browse_page'] ?? 1);
+    $browsePageSize = T8_DOCUMENT_BROWSE_PAGE_SIZE;
+    $browseHasNextPage = false;
     $browseRecords = t8_document_browse_records($pdo, $isAdmin, (int) $currentUserId, $currentDepartmentId, $hasMetadata, $humanResourcesCategoryId, $humanResourcesCategoryLabel, [
         'status' => $statusFilter,
         'search' => $search,
         'category_id' => $categoryFilter,
         'source_type' => $sourceFilter,
-    ]);
+    ], $browsePageSize, $browsePage, $browseHasNextPage);
     $allDocumentsView = true;
     $allActiveDocuments = $browseRecords;
     $documentCategories = [];
+    $browseUploadIds = array_values(array_map(
+        static fn (array $record): int => (int) $record['id'],
+        array_filter($allActiveDocuments, static fn (array $record): bool => $record['doc_type'] === 'upload')
+    ));
+    $browseDocuments = t8_document_fetch_many($pdo, $browseUploadIds);
+    $browseRetention = t8_document_retention_map($pdo, $browseUploadIds);
+    $browsePageUrl = static function (int $page) use ($search, $categoryFilter, $statusFilter, $sourceFilter): string {
+        return page_url('documents', [
+            'action' => 'browse',
+            'q' => $search,
+            'category_id' => $categoryFilter,
+            'status' => $statusFilter,
+            'source_type' => $sourceFilter,
+            'browse_page' => $page,
+        ]);
+    };
 }
 
 if (!$showCreateForm && !$showUploadVersionForm && !$showVersions && !$showList) {
@@ -1933,10 +2018,8 @@ function t8_render_camera_capture(): void
                                     <td><?= e(format_date((string) $document['ts'], 'M d, Y')) ?></td>
                                     <td class="t8-row-actions">
                                         <?php if ($document['doc_type'] === 'upload'):
-                                            $feedDocument = t8_document_fetch($pdo, (int) $document['id']);
-                                            $feedRetentionRecord = $feedDocument !== null && function_exists('t8_retention_fetch_for_entity')
-                                                ? t8_retention_fetch_for_entity($pdo, 'document', (int) $document['id'])
-                                                : null;
+                                            $feedDocument = $browseDocuments[(int) $document['id']] ?? null;
+                                            $feedRetentionRecord = $browseRetention[(int) $document['id']] ?? null;
                                             if ($feedDocument !== null):
                                                 t8_document_render_menu($feedDocument, $isAdmin, $statusFilter === 'archived' ? 'archived' : 'active', $feedRetentionRecord);
                                             endif;
@@ -1949,6 +2032,15 @@ function t8_render_camera_capture(): void
                         </tbody>
                     </table>
                 </div>
+                <nav class="t8-pagination" aria-label="Document pages">
+                    <?php if ($browsePage > 1): ?>
+                        <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e($browsePageUrl($browsePage - 1)) ?>">Previous</a>
+                    <?php endif; ?>
+                    <span class="t8-help-text">Page <?= e((string) $browsePage) ?></span>
+                    <?php if ($browseHasNextPage): ?>
+                        <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e($browsePageUrl($browsePage + 1)) ?>">Next</a>
+                    <?php endif; ?>
+                </nav>
             <?php endif; ?>
         </div>
     <?php else: ?>
