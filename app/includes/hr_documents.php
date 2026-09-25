@@ -267,6 +267,56 @@ if (!function_exists('t8_hr_status_badge')) {
     }
 }
 
+if (!function_exists('t8_hr_status_transition_allowed')) {
+    function t8_hr_status_transition_allowed(string $currentStatus, string $newStatus): bool
+    {
+        $currentStatus = strtolower(trim($currentStatus));
+        $newStatus = strtolower(trim($newStatus));
+        $allowedStates = ['pending', 'approved', 'rejected', 'archived'];
+
+        if (!in_array($currentStatus, $allowedStates, true) || !in_array($newStatus, $allowedStates, true)) {
+            return false;
+        }
+        if ($currentStatus === 'archived') {
+            return false;
+        }
+
+        if ($currentStatus === 'pending') {
+            return in_array($newStatus, ['approved', 'rejected', 'archived'], true);
+        }
+        if ($currentStatus === 'approved') {
+            return $newStatus === 'archived';
+        }
+        if ($currentStatus === 'rejected') {
+            return $newStatus === 'archived';
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('t8_hr_incident_can_generate_nte')) {
+    function t8_hr_incident_can_generate_nte(string $status): bool
+    {
+        return strtolower(trim($status)) === 'approved';
+    }
+}
+
+if (!function_exists('t8_hr_nte_allows_explanation')) {
+    function t8_hr_nte_allows_explanation(string $nteStatus, ?array $latestExplanation): bool
+    {
+        if (strtolower(trim($nteStatus)) !== 'approved') {
+            return false;
+        }
+        if ($latestExplanation === null) {
+            return true;
+        }
+
+        $latestStatus = strtolower(trim((string) ($latestExplanation['status'] ?? '')));
+        return in_array($latestStatus, ['rejected', 'archived'], true);
+    }
+}
+
 if (!function_exists('t8_hr_notify')) {
     /** Reuses the existing shared `notifications` table/bell widget. */
     function t8_hr_notify(PDO $pdo, int $userId, string $message, ?string $targetUrl = null): void
@@ -533,7 +583,13 @@ if (!function_exists('t8_hr_nte_fetch')) {
 if (!function_exists('t8_hr_explanation_for_nte')) {
     function t8_hr_explanation_for_nte(PDO $pdo, int $nteId): ?array
     {
-        $stmt = $pdo->prepare('SELECT * FROM team8_explanations WHERE nte_id = :id LIMIT 1');
+        $stmt = $pdo->prepare(
+            'SELECT *
+             FROM team8_explanations
+             WHERE nte_id = :id
+             ORDER BY submitted_at DESC, id DESC
+             LIMIT 1'
+        );
         $stmt->execute(['id' => $nteId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;

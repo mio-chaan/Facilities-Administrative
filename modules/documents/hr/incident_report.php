@@ -216,7 +216,7 @@ if ($action === 'incident_report_view') {
         <a class="t8-btn t8-btn-outline" target="_blank" href="<?= e(page_url('documents', ['action' => 'hr_print', 'type' => 'incident_report', 'id' => $id])) ?>">
             <i class="fa-solid fa-print"></i> Print
         </a>
-        <?php if ($isAdmin && $report['status'] === 'pending' && !$existingNte): ?>
+        <?php if ($isAdmin && t8_hr_incident_can_generate_nte((string) $report['status']) && !$existingNte): ?>
             <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'nte_new', 'incident_id' => $id])) ?>">
                 <i class="fa-solid fa-file-circle-question"></i> Generate NTE
             </a>
@@ -332,6 +332,11 @@ if ($action === 'incident_report_status') {
 
     $report = t8_hr_incident_report_fetch($pdo, $id);
     if ($report) {
+        if (!t8_hr_status_transition_allowed((string) $report['status'], $newStatus)) {
+            t8_flash_set('danger', 'That incident report status change is not allowed.');
+            redirect(page_url('documents', ['action' => 'incident_report_view', 'id' => $id]));
+        }
+
         $pdo->prepare('UPDATE team8_incident_reports SET status = :status, rejection_reason = :reason WHERE id = :id')
             ->execute(['status' => $newStatus, 'reason' => $newStatus === 'rejected' ? $rejectionReason : null, 'id' => $id]);
         t8_audit_log($pdo, $currentUserId, 'incident_report', $id, $newStatus);

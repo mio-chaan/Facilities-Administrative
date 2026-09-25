@@ -26,9 +26,16 @@ if ($action === 'explanation_new') {
         echo '<div class="t8-alert t8-alert-danger">403 — This notice was not issued to you.</div>';
         return;
     }
-    if (t8_hr_explanation_for_nte($pdo, $nteId)) {
-        t8_flash_set('danger', 'You have already submitted an explanation for this notice.');
-        redirect(page_url('documents', ['action' => 'nte_view', 'id' => $nteId]));
+    $latestExplanation = t8_hr_explanation_for_nte($pdo, $nteId);
+    if (!$latestExplanation || !t8_hr_nte_allows_explanation((string) $nte['status'], $latestExplanation)) {
+        if ($latestExplanation && $latestExplanation['status'] !== 'rejected' && $latestExplanation['status'] !== 'archived') {
+            t8_flash_set('danger', 'An explanation is already pending or active for this notice.');
+            redirect(page_url('documents', ['action' => 'nte_view', 'id' => $nteId]));
+        }
+        if (strtolower(trim((string) $nte['status'])) !== 'approved') {
+            t8_flash_set('danger', 'An explanation cannot be submitted before the Notice To Explain is issued and approved.');
+            redirect(page_url('documents', ['action' => 'nte_view', 'id' => $nteId]));
+        }
     }
 
     $formValues = ['explanation_text' => ''];
@@ -207,6 +214,11 @@ if ($action === 'explanation_review') {
 
     $explanation = t8_hr_explanation_fetch($pdo, $id);
     if ($explanation) {
+        if (!t8_hr_status_transition_allowed((string) $explanation['status'], $newStatus)) {
+            t8_flash_set('danger', 'That explanation status change is not allowed.');
+            redirect(page_url('documents', ['action' => 'explanation_view', 'id' => $id]));
+        }
+
         $pdo->prepare(
             'UPDATE team8_explanations SET status = :status, admin_remarks = :remarks, reviewed_by = :reviewer, reviewed_at = NOW() WHERE id = :id'
         )->execute([

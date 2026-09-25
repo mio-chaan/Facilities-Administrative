@@ -27,7 +27,7 @@ if ($action === 'nte_new') {
         $perPage = in_array($perPage, $perPageOptions, true) ? $perPage : 10;
 
         $where = [
-            "ir.status IN ('pending', 'approved')",
+            "ir.status = 'approved'",
             'NOT EXISTS (SELECT 1 FROM team8_notice_to_explain n WHERE n.incident_report_id = ir.id)',
         ];
         $params = [];
@@ -182,6 +182,10 @@ if ($action === 'nte_new') {
         t8_flash_set('danger', 'Incident report not found.');
         redirect(page_url('documents', ['action' => 'nte_new']));
     }
+    if (!t8_hr_incident_can_generate_nte((string) $incident['status'])) {
+        t8_flash_set('danger', 'A Notice To Explain can only be generated after the incident report has been approved.');
+        redirect(page_url('documents', ['action' => 'incident_report_view', 'id' => $incidentId]));
+    }
     if (t8_hr_nte_for_incident($pdo, $incidentId)) {
         t8_flash_set('danger', 'A notice to explain already exists for that incident report.');
         redirect(page_url('documents', ['action' => 'incident_report_view', 'id' => $incidentId]));
@@ -298,9 +302,9 @@ if ($action === 'nte_view') {
         <a class="t8-btn t8-btn-outline" target="_blank" href="<?= e(page_url('documents', ['action' => 'hr_print', 'type' => 'nte', 'id' => $id])) ?>">
             <i class="fa-solid fa-print"></i> Print
         </a>
-        <?php if ($isOwner && !$explanation): ?>
+        <?php if ($isOwner && $nte['status'] === 'approved' && (!$explanation || in_array((string) $explanation['status'], ['rejected', 'archived'], true))): ?>
             <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'explanation_new', 'nte_id' => $id])) ?>">
-                <i class="fa-solid fa-pen"></i> Submit Explanation
+                <i class="fa-solid fa-pen"></i> <?= $explanation ? 'Resubmit Explanation' : 'Submit Explanation' ?>
             </a>
         <?php elseif ($explanation): ?>
             <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'explanation_view', 'id' => $explanation['id']])) ?>">
@@ -402,6 +406,11 @@ if ($action === 'nte_status') {
 
     $nte = t8_hr_nte_fetch($pdo, $id);
     if ($nte) {
+        if (!t8_hr_status_transition_allowed((string) $nte['status'], $newStatus)) {
+            t8_flash_set('danger', 'That Notice To Explain status change is not allowed.');
+            redirect(page_url('documents', ['action' => 'nte_view', 'id' => $id]));
+        }
+
         $pdo->prepare('UPDATE team8_notice_to_explain SET status = :status, rejection_reason = :reason WHERE id = :id')
             ->execute(['status' => $newStatus, 'reason' => $newStatus === 'rejected' ? $rejectionReason : null, 'id' => $id]);
         t8_audit_log($pdo, $currentUserId, 'nte', $id, $newStatus);
