@@ -65,7 +65,7 @@ $recentDocuments = t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 8);
                         : page_url('documents', ['action' => 'nte_new']); ?>
                     <a class="t8-docs-stat" href="<?= e($pendingNteUrl) ?>"><span><i class="fa-solid fa-file-circle-question"></i> Pending NTE</span><strong><?= e((string) $hrStats['pending_nte']) ?></strong></a>
                     <a class="t8-docs-stat" href="<?= e(page_url('documents')) ?>"><span><i class="fa-solid fa-pen-to-square"></i> Pending Explanations</span><strong><?= e((string) $hrStats['pending_explanations']) ?></strong></a>
-                    <a class="t8-docs-stat" href="<?= e(page_url('documents', ['action' => 'browse', 'review_status' => 'pending'])) ?>"><span><i class="fa-solid fa-check"></i> Pending Approval</span><strong><?= e((string) $hrStats['pending_approval']) ?></strong></a>
+                    <a class="t8-docs-stat" href="<?= e(page_url('documents', ['action' => 'browse', 'status' => 'pending'])) ?>"><span><i class="fa-solid fa-check"></i> Pending Approval</span><strong><?= e((string) $hrStats['pending_approval']) ?></strong></a>
                 </div>
             </div>
         </div>
