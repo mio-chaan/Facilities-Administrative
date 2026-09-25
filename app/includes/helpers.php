@@ -138,6 +138,84 @@ if (!function_exists('t8_validate_uploaded_file_mime')) {
     }
 }
 
+if (!function_exists('t8_document_expiration_state')) {
+    /** Returns the lifecycle bucket for a document expiration date. */
+    function t8_document_expiration_state(?string $expirationDate, ?string $referenceDate = null): string
+    {
+        $normalized = trim((string) ($expirationDate ?? ''));
+        if ($normalized === '') {
+            return 'active';
+        }
+
+        $reference = $referenceDate !== null && trim($referenceDate) !== ''
+            ? strtotime((string) $referenceDate)
+            : strtotime('today');
+        $expiresAt = strtotime($normalized);
+        if ($reference === false || $expiresAt === false) {
+            return 'active';
+        }
+
+        if ($expiresAt < $reference) {
+            return 'expired';
+        }
+
+        if ($expiresAt <= strtotime('+30 days', $reference)) {
+            return 'expiring_soon';
+        }
+
+        return 'active';
+    }
+}
+
+if (!function_exists('t8_document_expiration_filter_sql')) {
+    /**
+     * Builds one mutually-exclusive, live approved-document lifecycle
+     * predicate.  The list view uses these predicates directly, so keeping
+     * the common visibility scope here prevents lifecycle filters from
+     * accidentally exposing pending or archived uploads.
+     */
+    function t8_document_expiration_filter_sql(string $alias, string $status, array &$params): string
+    {
+        return match ($status) {
+            'active' => "$alias.deleted_at IS NULL AND $alias.status = 'approved' AND ($alias.expiration_date IS NULL OR DATE($alias.expiration_date) > DATE_ADD(CURDATE(), INTERVAL 30 DAY))",
+            'expired' => "$alias.deleted_at IS NULL AND $alias.status = 'approved' AND $alias.expiration_date IS NOT NULL AND DATE($alias.expiration_date) < CURDATE()",
+            'expiring_soon' => "$alias.deleted_at IS NULL AND $alias.status = 'approved' AND $alias.expiration_date IS NOT NULL AND DATE($alias.expiration_date) BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)",
+            default => '1=1',
+        };
+    }
+}
+
+if (!function_exists('t8_document_notify_approval')) {
+    /**
+     * Sends the uploader a document-version link after a real approval
+     * transition. An injectable notifier keeps this contract unit-testable
+     * without requiring a database connection. Returns whether a
+     * notification was dispatched.
+     */
+    function t8_document_notify_approval(PDO $pdo, array $document, int $documentId, string $newStatus, ?callable $notifier = null): bool
+    {
+        $uploadedBy = (int) ($document['uploaded_by'] ?? 0);
+        if ($newStatus !== 'approved' || (string) ($document['status'] ?? '') === 'approved' || $documentId <= 0 || $uploadedBy <= 0) {
+            return false;
+        }
+
+        $message = 'Your document "' . (string) ($document['title'] ?? '') . '" was approved and is now active.';
+        $targetUrl = page_url('documents', ['action' => 'versions', 'id' => $documentId]);
+
+        if ($notifier !== null) {
+            $notifier($pdo, $uploadedBy, $message, $targetUrl);
+            return true;
+        }
+
+        if (function_exists('t8_hr_notify')) {
+            t8_hr_notify($pdo, $uploadedBy, $message, $targetUrl);
+            return true;
+        }
+
+        return false;
+    }
+}
+
 if (!function_exists('t8_format_ph_contact')) {
     /** Formats a 10-digit mobile suffix or a full PH number into a normalized +63 format. */
     function t8_format_ph_contact(string $value): string

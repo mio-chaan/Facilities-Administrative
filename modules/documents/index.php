@@ -988,14 +988,15 @@ switch ($action) {
                     ->execute(['status' => $status, 'id' => $id]);
             }
             t8_audit_log($pdo, $currentUserId, 'document', $id, $status);
-                if ($status === 'returned_for_revision' && function_exists('t8_hr_notify')) {
-                    t8_hr_notify(
-                        $pdo,
-                        (int) $document['uploaded_by'],
-                        'Your document "' . $document['title'] . '" was returned for revision. Reason: ' . $reviewReason,
-                        page_url('documents', ['action' => 'versions', 'id' => $id])
-                    );
-                }
+            t8_document_notify_approval($pdo, $document, $id, $status);
+            if ($status === 'returned_for_revision' && function_exists('t8_hr_notify')) {
+                t8_hr_notify(
+                    $pdo,
+                    (int) $document['uploaded_by'],
+                    'Your document "' . $document['title'] . '" was returned for revision. Reason: ' . $reviewReason,
+                    page_url('documents', ['action' => 'versions', 'id' => $id])
+                );
+            }
             t8_flash_set('success', $status === 'approved' ? 'Document approved.' : 'Document returned for revision.');
         }
         redirect(page_url('documents', ['action' => 'browse']));
@@ -1220,7 +1221,9 @@ function t8_document_browse_status_sql(string $alias, bool $isUpload, string $st
     if ($isUpload) {
         return match ($status) {
             'all' => "$alias.deleted_at IS NULL AND $alias.status IN ('draft', 'pending', 'approved')",
-            'active' => "$alias.deleted_at IS NULL AND $alias.status = 'approved'",
+            'active' => t8_document_expiration_filter_sql($alias, 'active', $params),
+            'expired' => t8_document_expiration_filter_sql($alias, 'expired', $params),
+            'expiring_soon' => t8_document_expiration_filter_sql($alias, 'expiring_soon', $params),
             'rejected' => "$alias.deleted_at IS NULL AND $alias.status = 'returned_for_revision'",
             'archived' => "$alias.deleted_at IS NOT NULL",
             'returned_for_revision' => "$alias.deleted_at IS NULL AND $alias.status = 'returned_for_revision'",
@@ -1234,6 +1237,7 @@ function t8_document_browse_status_sql(string $alias, bool $isUpload, string $st
     return match ($status) {
         'all' => "$alias.status IN ('draft', 'pending', 'approved')",
         'active' => "$alias.status = 'approved'",
+        'expired', 'expiring_soon' => '1=0',
         'rejected' => "$alias.status = 'rejected'",
         'archived' => "$alias.status = 'archived'",
         'returned_for_revision' => '1=0',
@@ -1458,7 +1462,7 @@ if ($showList) {
     $availableSourceKeys = array_values(array_unique(array_column($optionRecords, 'source_key')));
     $availableStatuses = array_values(array_unique(array_column($optionRecords, 'status')));
     $requestedStatus = trim((string) ($_GET['status'] ?? 'all'));
-    $allowedStatuses = array_merge(['all', 'active', 'rejected', 'archived'], $availableStatuses);
+    $allowedStatuses = array_merge(['all', 'active', 'expired', 'expiring_soon', 'rejected', 'archived'], $availableStatuses);
     $statusFilter = in_array($requestedStatus, $allowedStatuses, true) ? $requestedStatus : 'all';
     $requestedSource = trim((string) ($_GET['source_type'] ?? ''));
     $sourceFilter = in_array($requestedSource, $availableSourceKeys, true) ? $requestedSource : '';
@@ -1870,7 +1874,7 @@ function t8_render_camera_capture(): void
         <div class="t8-documents-filters">
             <label>Search<input class="t8-input" type="search" name="q" value="<?= e($search) ?>" placeholder="Title, number, category, department"></label>
             <label>Category<select class="t8-select" name="category_id"><option value="">All categories</option><?php foreach ($categories as $cat): ?><option value="<?= e((string) $cat['id']) ?>" <?= $categoryFilter === (int) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option><?php endforeach; ?></select></label>
-            <label>Status<select class="t8-select" name="status"><option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>All (Live / Current)</option><option value="active" <?= $statusFilter === 'active' ? 'selected' : '' ?>>Active</option><?php foreach ($availableStatuses as $availableStatus): ?><?php if (!in_array($availableStatus, ['rejected', 'archived'], true)): ?><option value="<?= e($availableStatus) ?>" <?= $statusFilter === $availableStatus ? 'selected' : '' ?>><?= e(t8_document_browse_status_label($availableStatus)) ?></option><?php endif; ?><?php endforeach; ?><option value="rejected" <?= $statusFilter === 'rejected' ? 'selected' : '' ?>>Rejected</option><option value="archived" <?= $statusFilter === 'archived' ? 'selected' : '' ?>>Archived</option></select></label>
+            <label>Status<select class="t8-select" name="status"><option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>All (Live / Current)</option><option value="active" <?= $statusFilter === 'active' ? 'selected' : '' ?>>Active</option><option value="expiring_soon" <?= $statusFilter === 'expiring_soon' ? 'selected' : '' ?>>Expiring Soon</option><option value="expired" <?= $statusFilter === 'expired' ? 'selected' : '' ?>>Expired</option><?php foreach ($availableStatuses as $availableStatus): ?><?php if (!in_array($availableStatus, ['rejected', 'archived', 'expired', 'expiring_soon'], true)): ?><option value="<?= e($availableStatus) ?>" <?= $statusFilter === $availableStatus ? 'selected' : '' ?>><?= e(t8_document_browse_status_label($availableStatus)) ?></option><?php endif; ?><?php endforeach; ?><option value="rejected" <?= $statusFilter === 'rejected' ? 'selected' : '' ?>>Rejected</option><option value="archived" <?= $statusFilter === 'archived' ? 'selected' : '' ?>>Archived</option></select></label>
             <label>Source / Type<select class="t8-select" name="source_type"><option value="">All sources</option><?php foreach (t8_document_browse_sources() as $sourceKey => $source): ?><?php if (in_array($sourceKey, $availableSourceKeys, true) || $sourceFilter === $sourceKey): ?><option value="<?= e($sourceKey) ?>" <?= $sourceFilter === $sourceKey ? 'selected' : '' ?>><?= e($source['label']) ?></option><?php endif; ?><?php endforeach; ?></select></label>
             <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'browse'])) ?>">Clear Filters</a>
         </div>
@@ -2012,7 +2016,7 @@ function t8_render_camera_capture(): void
                                 <td><?= e($doc['document_type'] ?? '—') ?></td>
                                 <td>v<?= e((string) $doc['current_version']) ?></td>
                                 <td><span class="t8-badge <?= e(t8_document_status_badge((string) $doc['status'])) ?>"><?= e(ucwords(str_replace('_', ' ', (string) $doc['status']))) ?></span></td>
-                                <td><?= $doc['expiration_date'] ? e(format_date($doc['expiration_date'], 'M d, Y')) : '—' ?><?php if ($doc['expiration_date'] && strtotime((string) $doc['expiration_date']) <= strtotime('+30 days')): ?> <span class="t8-badge t8-badge-rejected"><?= strtotime((string) $doc['expiration_date']) < strtotime('today') ? 'Expired' : 'Expiring soon' ?></span><?php endif; ?></td>
+                                <td><?= $doc['expiration_date'] ? e(format_date($doc['expiration_date'], 'M d, Y')) : '—' ?><?php $expirationState = $doc['expiration_date'] ? t8_document_expiration_state((string) $doc['expiration_date']) : 'active'; if ($doc['expiration_date'] && $expirationState !== 'active'): ?> <span class="t8-badge t8-badge-rejected"><?= $expirationState === 'expired' ? 'Expired' : 'Expiring soon' ?></span><?php endif; ?></td>
                                 <td class="t8-row-actions">
                                     <?php t8_document_render_menu($doc, $isAdmin, $statusFilter, $docRetentionRecord); ?>
                                 </td>
