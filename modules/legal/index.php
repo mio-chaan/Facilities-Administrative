@@ -195,11 +195,32 @@ switch ($action) {
                 if (!in_array($formValues['status'], T8_LEGAL_STATUSES, true)) {
                     $errors[] = 'Invalid status selected.';
                 }
-                if ($formValues['filed_date'] === '' || strtotime($formValues['filed_date']) === false) {
+                                if ($formValues['filed_date'] === '' || strtotime($formValues['filed_date']) === false) {
                     $errors[] = 'Filed date must be a valid date.';
                 }
-                if ($formValues['deadline'] !== '' && strtotime($formValues['deadline']) === false) { $errors[] = 'Deadline must be a valid date.'; }
-                if (!$formValues['assigned_to']) {
+                if ($formValues['deadline'] !== '' && strtotime($formValues['deadline']) === false) {
+                    $errors[] = 'Deadline must be a valid date.';
+                }
+                // Server-side enforcement of the same rule the browser-side
+                // `min` attribute applies (Deadline >= max(today, Filed Date)).
+                // Native `min` is a courtesy only - a crafted POST bypasses it,
+                // so the ordering/floor must be re-checked here. Mirrors the
+                // inline syncDeadlineMinimum() script on the form.
+                if ($formValues['deadline'] !== ''
+                    && strtotime($formValues['filed_date']) !== false
+                    && strtotime($formValues['deadline']) !== false
+                ) {
+                    $filedTs    = strtotime($formValues['filed_date']);
+                    $deadlineTs = strtotime($formValues['deadline']);
+                    $todayTs    = strtotime(date('Y-m-d'));
+
+                    if ($deadlineTs < $filedTs) {
+                        $errors[] = 'Deadline cannot be earlier than the Filed Date.';
+                    } elseif ($deadlineTs < $todayTs) {
+                        $errors[] = 'Deadline cannot be in the past.';
+                    }
+                }
+               if (!$formValues['assigned_to']) {
                     $errors[] = 'Please assign this case to someone.';
                 }
 
@@ -616,6 +637,26 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <label class="t8-label" for="deadline">Deadline</label>
                 <input class="t8-input" type="date" id="deadline" name="deadline" value="<?= e($formValues['deadline']) ?>" data-t8-date-rule="future">
             </div><?php endif; ?>
+
+            <?php if ($legalHasCaseMetadata): ?><script>
+                document.addEventListener("DOMContentLoaded", function () {
+                    var filedDate = document.getElementById("filed_date");
+                    var deadline = document.getElementById("deadline");
+                    if (!filedDate || !deadline) {
+                        return;
+                    }
+
+                    function syncDeadlineMinimum() {
+                        var today = new Date();
+                        var todayValue = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+                        deadline.min = filedDate.value > todayValue ? filedDate.value : todayValue;
+                    }
+
+                    filedDate.addEventListener("change", syncDeadlineMinimum);
+                    syncDeadlineMinimum();
+                    window.setTimeout(syncDeadlineMinimum, 0);
+                });
+            </script><?php endif; ?>
 
             <div class="t8-field">
                 <label class="t8-label" for="assigned_to">Assigned To <span class="t8-required">*</span></label>
