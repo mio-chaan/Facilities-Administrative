@@ -166,7 +166,7 @@ if (t8_has_role(['admin', 'legal_officer'])) {
     }
     $legalRows = $search(
         "SELECT lc.id, lc.title, CONCAT('Case #', lc.id, ' | ', lc.status, ' | ', COALESCE(lc.subject, '')) AS details
-         FROM team8_legal_cases lc WHERE lc.deleted_at IS NULL AND {$legalWhere}
+         FROM team8_legal_cases lc WHERE lc.status <> 'archived' AND {$legalWhere}
          ORDER BY lc.created_at DESC LIMIT 8",
         $legalParams
     );

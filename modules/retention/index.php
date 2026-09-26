@@ -138,7 +138,7 @@ switch ($action) {
         )->fetchAll(PDO::FETCH_ASSOC);
         $candidateLegalCases = $pdo->query(
             "SELECT lc.id, lc.title FROM team8_legal_cases lc
-             WHERE lc.deleted_at IS NULL AND lc.status = 'closed'
+             WHERE lc.status = 'closed'
                AND NOT EXISTS (SELECT 1 FROM team8_records r WHERE r.entity_type = 'legal_case' AND r.entity_id = lc.id)
              ORDER BY lc.title"
         )->fetchAll(PDO::FETCH_ASSOC);
@@ -257,7 +257,7 @@ if ($showList) {
 
     $kpiTotalDocuments = (int) $pdo->query('SELECT COUNT(*) FROM team8_documents WHERE deleted_at IS NULL')->fetchColumn();
     $kpiTotalContracts = (int) $pdo->query('SELECT COUNT(*) FROM team8_contracts WHERE deleted_at IS NULL')->fetchColumn();
-    $kpiTotalLegalCases = (int) $pdo->query('SELECT COUNT(*) FROM team8_legal_cases WHERE deleted_at IS NULL')->fetchColumn();
+    $kpiTotalLegalCases = (int) $pdo->query("SELECT COUNT(*) FROM team8_legal_cases WHERE status <> 'archived'")->fetchColumn();
 
     $kpiDueSoon90 = (int) $pdo->query(
         "SELECT COUNT(*) FROM team8_records WHERE status IN ('active', 'due_review')

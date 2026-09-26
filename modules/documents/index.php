@@ -503,7 +503,7 @@ function t8_document_assigned_legal_case_id(PDO $pdo, int $documentId, int $user
     $legalStmt = $pdo->prepare(
         'SELECT lc.id FROM team8_legal_documents ld
          JOIN team8_legal_cases lc ON lc.id = ld.case_id
-         WHERE ld.document_id = :document_id AND lc.assigned_to = :user_id AND lc.deleted_at IS NULL LIMIT 1'
+         WHERE ld.document_id = :document_id AND lc.assigned_to = :user_id AND lc.status <> \'archived\' LIMIT 1'
     );
     $legalStmt->execute(['document_id' => $documentId, 'user_id' => $userId]);
     $legalCaseId = $legalStmt->fetchColumn();

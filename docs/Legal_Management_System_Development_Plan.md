@@ -135,6 +135,13 @@ Dev Tester
 - New Legal Case button
 - Pagination when necessary
 
+### Phase 2 implementation exception
+
+The Phase 2 list currently displays the existing synthetic reference format
+(`CASE-000001`). Persistent generated case numbers in the planned
+`LC-YYYY-NNN` format are deferred to the Create / Edit Case phase because
+they require a database-backed numbering field and generation workflow.
+
 ---
 
 # 5. Phase 3 — Create New Legal Case
@@ -193,6 +200,14 @@ Fields:
 - Closing Date
 
 Validation should prevent logically invalid dates, such as a deadline occurring before the filed date.
+
+### Phase 3 Completion Checklist
+
+- [x] Basic information is captured: generated case number, required title, case type, priority, and status; subject and description are optional.
+- [x] Case numbers use the `LC-YYYY-NNN` format, are allocated safely per year, and cannot be edited by users.
+- [x] Department and assigned legal officer are required; supporting staff is optional.
+- [x] Filed date is required; deadline, next-action date, and closing date are optional.
+- [x] Server-side date validation rejects invalid dates and dates before the filed date.
 
 ---
 

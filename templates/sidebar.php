@@ -11,7 +11,7 @@ declare(strict_types=1);
 $t8Routes = require __DIR__ . '/../app/config/routes.php';
 $active   = current_page();
 $t8CurrentRole = function_exists('t8_current_role') ? t8_current_role() : null;
-$t8LegalOfficerHiddenPages = ['retention', 'legal', 'contracts'];
+$t8LegalOfficerHiddenPages = ['retention', 'contracts'];
 
 $t8NavIcons = [
     'dashboard'   => 'fa-gauge-high',

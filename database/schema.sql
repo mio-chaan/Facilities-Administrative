@@ -349,22 +349,76 @@ CREATE TABLE team8_compliance_checks (
 -- MODULE: LEGAL MANAGEMENT
 -- =========================================================
 
+CREATE TABLE team8_legal_case_types (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    type_code   VARCHAR(60) NOT NULL,
+    name        VARCHAR(100) NOT NULL,
+    sort_order  SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    is_active   TINYINT(1) NOT NULL DEFAULT 1,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_team8_legal_case_types_code (type_code),
+    UNIQUE KEY uq_team8_legal_case_types_name (name)
+) ENGINE=InnoDB;
+
+INSERT INTO team8_legal_case_types (type_code, name, sort_order) VALUES
+    ('labor', 'Labor', 10),
+    ('employee_legal_matter', 'Employee Legal Matter', 20),
+    ('civil', 'Civil', 30),
+    ('administrative', 'Administrative', 40),
+    ('corporate_business', 'Corporate / Business', 50),
+    ('government_regulatory', 'Government / Regulatory', 60),
+    ('compliance', 'Compliance', 70),
+    ('contract_dispute', 'Contract Dispute', 80),
+    ('other', 'Other', 90);
+
+CREATE TABLE team8_legal_case_statuses (
+    status_code VARCHAR(30) PRIMARY KEY,
+    name        VARCHAR(60) NOT NULL,
+    sort_order  SMALLINT UNSIGNED NOT NULL,
+    is_active   TINYINT(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB;
+
+INSERT INTO team8_legal_case_statuses (status_code, name, sort_order) VALUES
+    ('open', 'Open', 10),
+    ('under_review', 'Under Review', 20),
+    ('active', 'Active', 30),
+    ('resolved', 'Resolved', 40),
+    ('closed', 'Closed', 50),
+    ('archived', 'Archived', 60);
+
 CREATE TABLE team8_legal_cases (
     id          INT AUTO_INCREMENT PRIMARY KEY,
+    case_number VARCHAR(20) NOT NULL UNIQUE,
     assigned_to INT NOT NULL,
+    supporting_staff_id INT NULL,
     contract_id INT NULL, -- FK added after team8_contracts is created (see below)
     title       VARCHAR(200) NOT NULL,
     subject     VARCHAR(200) NULL,
+    description TEXT NULL,
+    case_type_id INT NOT NULL,
     department_id INT NULL,
     status      VARCHAR(30) NOT NULL DEFAULT 'open',
+    priority    VARCHAR(20) NOT NULL DEFAULT 'medium',
+    archived_from_status VARCHAR(30) NULL,
     filed_date  DATE NOT NULL,
     deadline    DATE NULL,
+    next_action_date DATE NULL,
+    closing_date DATE NULL,
     closed_at   DATETIME NULL,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at  DATETIME NULL,
     CONSTRAINT fk_team8_legalcases_assignee FOREIGN KEY (assigned_to) REFERENCES users(id),
-    CONSTRAINT fk_team8_legalcases_department FOREIGN KEY (department_id) REFERENCES departments(id)
+    CONSTRAINT fk_team8_legalcases_support_staff FOREIGN KEY (supporting_staff_id) REFERENCES users(id),
+    CONSTRAINT fk_team8_legalcases_department FOREIGN KEY (department_id) REFERENCES departments(id),
+    CONSTRAINT fk_team8_legalcases_type FOREIGN KEY (case_type_id) REFERENCES team8_legal_case_types(id),
+    CONSTRAINT fk_team8_legalcases_status FOREIGN KEY (status) REFERENCES team8_legal_case_statuses(status_code),
+    CONSTRAINT fk_team8_legalcases_archived_status FOREIGN KEY (archived_from_status) REFERENCES team8_legal_case_statuses(status_code)
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_legal_case_number_sequences (
+    case_year   SMALLINT UNSIGNED PRIMARY KEY,
+    last_number INT UNSIGNED NOT NULL DEFAULT 0
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_legal_documents (
@@ -696,7 +750,9 @@ CREATE INDEX idx_team8_records_disposition_date ON team8_records(disposition_dat
 CREATE INDEX idx_team8_records_entity ON team8_records(entity_type, entity_id);
 CREATE INDEX idx_team8_records_disposition ON team8_records(disposition_date, status);
 CREATE INDEX idx_team8_legalcases_status ON team8_legal_cases(status);
-CREATE INDEX idx_team8_legalcases_deleted_status ON team8_legal_cases(deleted_at, status);
+CREATE INDEX idx_team8_legalcases_priority ON team8_legal_cases(priority, status);
+CREATE INDEX idx_team8_legalcases_type_active ON team8_legal_case_types(is_active, sort_order);
+CREATE INDEX idx_team8_legalcases_status_order ON team8_legal_case_statuses(is_active, sort_order);
 CREATE INDEX idx_team8_legal_cases_assignee ON team8_legal_cases(assigned_to, status);
 CREATE INDEX idx_team8_contracts_status ON team8_contracts(status);
 CREATE INDEX idx_team8_contracts_deleted_status ON team8_contracts(deleted_at, status);

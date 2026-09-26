@@ -15,18 +15,21 @@
 | Visitor Management | `team8_visitors` |
 | Document Management | `team8_document_categories`, `team8_documents`, `team8_document_versions` |
 | Records Retention and Compliance | `team8_retention_schedules`, `team8_records`, `team8_compliance_checks` |
-| Legal Management | `team8_legal_cases`, `team8_legal_documents` |
+| Legal Management | `team8_legal_case_types`, `team8_legal_case_statuses`, `team8_legal_cases`, `team8_legal_documents` |
 | Contract Management | `team8_contracts`, `team8_parties`, `team8_contract_parties`, `team8_contract_documents`, `team8_contract_history`, `team8_contract_obligations` |
 | HR Document Automation | `team8_incident_reports`, `team8_notice_to_explain`, `team8_explanations`, `team8_memorandums`, `team8_memorandum_recipients`, `team8_certificates`, `team8_certificate_recipients`, `team8_hr_document_versions` |
 
 ## Design notes
 
 - `team8_legal_cases.contract_id` references `team8_contracts` through a deferred foreign key because legal cases are defined first.
+- Legal case types are stored in `team8_legal_case_types`; case statuses are constrained by `team8_legal_case_statuses`. Case types are deactivated rather than deleted, and `Other` is permanent.
+- Legal cases use the `archived` status for module archiving; `archived_from_status` preserves the prior status for restore. Retention-record archival remains separate.
 - `team8_documents.file_path` is the current file, while `team8_document_versions.file_path` preserves each historical file.
 - Visitor status values are `scheduled`, `late`, `checked_in`, `checked_out`, `cancelled`, and `expired`. Scheduled visits become late after their expected arrival time and expire at the 10:00 PM cutoff if they have not checked in.
 - A reservation's free-text reason is stored in `team8_reservations.description`; approver notes are stored in `team8_reservation_approvals.remarks`.
 - `schema.sql` is the complete final schema for new installations. Import this file only; do not import the dated migration files afterward.
 - Apply the dated scripts in `database/migrations/` only when upgrading an existing database that already contains older Team 8 tables. Those scripts preserve and backfill existing data and are not required for a fresh database.
+- Existing databases must apply `2026_09_26_legal_case_catalogs.sql` after earlier Legal migrations; do not run it after importing `schema.sql`.
 
 ## Setup
 

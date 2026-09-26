@@ -34,6 +34,9 @@ Thumbs.db
 /tests/*
 !/tests/document_metadata_edit_test.php
 !/tests/phase9_expiration_notification_test.php
+!/tests/legal_catalog_test.php
+!/tests/legal_list_test.php
+!/tests/legal_case_creation_test.php
 /scripts/
 /Document Life cycle/
 
