@@ -1,8 +1,8 @@
 <?php
 /**
  * modules/legal/index.php
- * Legal Management - administrators manage cases; assigned Legal Officers
- * have read-only access only to their own cases.
+ * Legal Management - administrators manage core case ownership/lifecycle;
+ * Legal Officers can access assigned cases and their authorized work items.
  *
  * PHASE 3 (Document/Legal/Contract/Retention rebuild):
  *   - Legal Cases get the same computed "monitoring" sub-state as
@@ -37,8 +37,10 @@
  * contract_id is nullable and intentionally left unset by this form
  * for now - it gets wired up once Contract Management exists.
  *
- * Access: Administrator only for mutations. Legal Officers see only
- * their own assigned cases, read-only plus document attachment.
+ * Access: admins may create/reassign/archive cases. Legal Officers may
+ * edit case facts and manage authorized work items, but cannot change
+ * ownership or archive. Case access is scoped to direct, supporting-staff,
+ * or active task assignment.
  */
 
 declare(strict_types=1);
@@ -99,10 +101,93 @@ function t8_legal_has_case_creation_fields(PDO $pdo): bool
     }
 }
 
+function t8_legal_has_case_information(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW COLUMNS FROM team8_legal_cases LIKE 'court_agency'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function t8_legal_has_party_schema(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW TABLES LIKE 'team8_legal_case_parties'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function t8_legal_has_task_schema(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW TABLES LIKE 'team8_legal_case_tasks'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function t8_legal_has_hearing_schema(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW TABLES LIKE 'team8_legal_case_hearings'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function t8_legal_has_document_type(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW COLUMNS FROM team8_legal_documents LIKE 'legal_document_type'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function t8_legal_has_notes_schema(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW TABLES LIKE 'team8_legal_case_notes'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function t8_legal_has_resolution_schema(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW TABLES LIKE 'team8_legal_case_resolutions'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function t8_legal_has_communication_schema(PDO $pdo): bool
+{
+    try {
+        return (bool) $pdo->query("SHOW TABLES LIKE 'team8_legal_case_communications'")->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 $legalHasCaseMetadata = t8_legal_has_case_metadata($pdo);
 $legalHasClosedAt = t8_legal_has_closed_at($pdo);
 $legalHasPriority = t8_legal_has_priority($pdo);
 $legalHasCaseCreationFields = t8_legal_has_case_creation_fields($pdo);
+$legalHasCaseInformation = t8_legal_has_case_information($pdo);
+$legalHasPartySchema = t8_legal_has_party_schema($pdo);
+$legalHasTaskSchema = t8_legal_has_task_schema($pdo);
+$legalHasHearingSchema = t8_legal_has_hearing_schema($pdo);
+$legalHasDocumentType = t8_legal_has_document_type($pdo);
+$legalHasNotesSchema = t8_legal_has_notes_schema($pdo);
+$legalHasCommunicationSchema = t8_legal_has_communication_schema($pdo);
+$legalHasResolutionSchema = t8_legal_has_resolution_schema($pdo);
+$legalDocumentTypes = t8_legal_document_types();
+$legalCommunicationTypes = t8_legal_communication_types();
+$legalResolutionTypes = t8_legal_resolution_types();
 $legalPriorities = ['low', 'medium', 'high', 'urgent'];
 $legalStatuses = $pdo->query(
     'SELECT status_code FROM team8_legal_case_statuses WHERE is_active = 1 ORDER BY sort_order'
@@ -115,14 +200,29 @@ $legalCaseTypes = $pdo->query(
 /** Fetch one legal case with assignee name, or null. */
 function t8_legal_case_fetch(PDO $pdo, int $id): ?array
 {
+    global $legalHasCaseCreationFields, $legalHasTaskSchema;
+    $scope = '';
+    $params = ['id' => $id];
+    if (!t8_has_role('admin')) {
+        $userId = t8_current_user_id();
+        $scopeConditions = ['lc.assigned_to = :assigned_to'];
+        $params['assigned_to'] = $userId;
+        if ($legalHasCaseCreationFields) {
+            $scopeConditions[] = 'lc.supporting_staff_id = :supporting_staff_id';
+            $params['supporting_staff_id'] = $userId;
+        }
+        if ($legalHasTaskSchema) {
+            $scopeConditions[] = "EXISTS (SELECT 1 FROM team8_legal_case_tasks scope_task WHERE scope_task.case_id = lc.id AND scope_task.assigned_to = :task_assigned_to AND scope_task.status <> 'cancelled')";
+            $params['task_assigned_to'] = $userId;
+        }
+        $scope = ' AND (' . implode(' OR ', $scopeConditions) . ')';
+    }
     $stmt = $pdo->prepare(
         'SELECT lc.*, u.full_name AS assigned_to_name
          FROM team8_legal_cases lc
          JOIN users u ON u.id = lc.assigned_to
-         WHERE lc.id = :id' . (t8_has_role('admin') ? '' : ' AND lc.assigned_to = :assigned_to') . ' LIMIT 1'
+         WHERE lc.id = :id' . $scope . ' LIMIT 1'
     );
-    $params = ['id' => $id];
-    if (!t8_has_role('admin')) { $params['assigned_to'] = t8_current_user_id(); }
     $stmt->execute($params);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
@@ -178,6 +278,14 @@ function t8_legal_register_retention(PDO $pdo, array $case, int $actorId): void
 }
 
 $assignees = $pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC);
+$legalOfficers = $pdo->query(
+    "SELECT DISTINCT u.id, u.full_name
+     FROM users u
+     JOIN user_roles ur ON ur.user_id = u.id
+     JOIN roles r ON r.id = ur.role_id
+     WHERE r.role_name = 'legal_officer' AND u.deleted_at IS NULL
+     ORDER BY u.full_name"
+)->fetchAll(PDO::FETCH_ASSOC);
 $departments = $legalHasCaseMetadata ? $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) : [];
 
 switch ($action) {
@@ -252,7 +360,11 @@ switch ($action) {
 
     case 'create':
     case 'edit':
-        t8_require_role(['admin']);
+        if ($action === 'create') {
+            t8_require_role(['admin']);
+        } else {
+            t8_require_role(['admin', 'legal_officer']);
+        }
         $caseId = $action === 'edit' ? (int) ($_GET['id'] ?? 0) : 0;
         $existing = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
         if ($action === 'edit' && !$existing) {
@@ -269,6 +381,13 @@ switch ($action) {
                 'title'       => $existing['title'],
                 'subject'     => (string) ($existing['subject'] ?? ''),
                 'description' => (string) ($existing['description'] ?? ''),
+                'court_agency' => (string) ($existing['court_agency'] ?? ''),
+                'branch_office' => (string) ($existing['branch_office'] ?? ''),
+                'docket_reference' => (string) ($existing['docket_reference'] ?? ''),
+                'jurisdiction' => (string) ($existing['jurisdiction'] ?? ''),
+                'location' => (string) ($existing['location'] ?? ''),
+                'legal_basis' => (string) ($existing['legal_basis'] ?? ''),
+                'current_action' => (string) ($existing['current_action'] ?? ''),
                 'case_type_id' => (string) $existing['case_type_id'],
                 'department_id' => (string) ($existing['department_id'] ?? ''),
                 'status'      => $existing['status'],
@@ -280,23 +399,30 @@ switch ($action) {
                 'assigned_to' => (string) $existing['assigned_to'],
                 'supporting_staff_id' => (string) ($existing['supporting_staff_id'] ?? ''),
             ]
-            : ['title' => '', 'subject' => '', 'description' => '', 'case_type_id' => '', 'department_id' => '', 'status' => 'open', 'priority' => 'medium', 'filed_date' => date('Y-m-d'), 'deadline' => '', 'next_action_date' => '', 'closing_date' => '', 'assigned_to' => (string) $currentUserId, 'supporting_staff_id' => ''];
+            : ['title' => '', 'subject' => '', 'description' => '', 'court_agency' => '', 'branch_office' => '', 'docket_reference' => '', 'jurisdiction' => '', 'location' => '', 'legal_basis' => '', 'current_action' => '', 'case_type_id' => '', 'department_id' => '', 'status' => 'open', 'priority' => 'medium', 'filed_date' => date('Y-m-d'), 'deadline' => '', 'next_action_date' => '', 'closing_date' => '', 'assigned_to' => (string) ($legalOfficers[0]['id'] ?? $currentUserId), 'supporting_staff_id' => ''];
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $formValues = [
                 'title'       => trim((string) ($_POST['title'] ?? '')),
                 'subject'     => trim((string) ($_POST['subject'] ?? '')),
                 'description' => trim((string) ($_POST['description'] ?? '')),
+                'court_agency' => trim((string) ($_POST['court_agency'] ?? '')),
+                'branch_office' => trim((string) ($_POST['branch_office'] ?? '')),
+                'docket_reference' => trim((string) ($_POST['docket_reference'] ?? '')),
+                'jurisdiction' => trim((string) ($_POST['jurisdiction'] ?? '')),
+                'location' => trim((string) ($_POST['location'] ?? '')),
+                'legal_basis' => trim((string) ($_POST['legal_basis'] ?? '')),
+                'current_action' => trim((string) ($_POST['current_action'] ?? '')),
                 'case_type_id' => trim((string) ($_POST['case_type_id'] ?? '')),
-                'department_id' => (string) ($_POST['department_id'] ?? ''),
+                'department_id' => $isAdmin ? (string) ($_POST['department_id'] ?? '') : (string) ($existing['department_id'] ?? ''),
                 'status'      => (string) ($_POST['status'] ?? ''),
                 'priority'    => (string) ($_POST['priority'] ?? $formValues['priority']),
                 'filed_date'  => trim((string) ($_POST['filed_date'] ?? '')),
                 'deadline'    => trim((string) ($_POST['deadline'] ?? '')),
                 'next_action_date' => trim((string) ($_POST['next_action_date'] ?? '')),
                 'closing_date' => trim((string) ($_POST['closing_date'] ?? '')),
-                'assigned_to' => (string) ($_POST['assigned_to'] ?? ''),
-                'supporting_staff_id' => (string) ($_POST['supporting_staff_id'] ?? ''),
+                'assigned_to' => $isAdmin ? (string) ($_POST['assigned_to'] ?? '') : (string) ($existing['assigned_to'] ?? ''),
+                'supporting_staff_id' => $isAdmin ? (string) ($_POST['supporting_staff_id'] ?? '') : (string) ($existing['supporting_staff_id'] ?? ''),
             ];
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
@@ -308,11 +434,48 @@ switch ($action) {
                 if ($formValues['title'] === '' || mb_strlen($formValues['title']) > 200) {
                     $errors[] = 'Case title is required and must be 200 characters or fewer.';
                 }
+                if ($legalHasCaseInformation) {
+                    foreach ([
+                        'court_agency' => 200,
+                        'branch_office' => 150,
+                        'docket_reference' => 150,
+                        'jurisdiction' => 150,
+                        'location' => 200,
+                        'legal_basis' => 5000,
+                        'current_action' => 5000,
+                    ] as $field => $maxLength) {
+                        if (mb_strlen($formValues[$field]) > $maxLength) {
+                            $errors[] = ucwords(str_replace('_', ' ', $field)) . ' must be ' . $maxLength . ' characters or fewer.';
+                        }
+                    }
+                }
                 $unchangedInactiveStatus = $existing !== null
                     && $formValues['status'] === $existing['status']
                     && !in_array($existing['status'], $legalEditableStatuses, true);
                 if (!in_array($formValues['status'], $legalEditableStatuses, true) && !$unchangedInactiveStatus) {
                     $errors[] = 'Invalid status selected.';
+                }
+                if ($existing === null && $formValues['status'] !== 'open') {
+                    $errors[] = 'New legal cases must start in Open status.';
+                } elseif ($existing !== null
+                    && $formValues['status'] !== $existing['status']
+                    && !t8_legal_case_status_transition_is_allowed((string) $existing['status'], $formValues['status'])
+                ) {
+                    $errors[] = 'That case status transition is not allowed.';
+                }
+                if ($existing !== null
+                    && $formValues['status'] !== $existing['status']
+                    && in_array($formValues['status'], ['resolved', 'closed'], true)
+                ) {
+                    if (!$legalHasResolutionSchema) {
+                        $errors[] = 'Apply the case resolution migration before resolving or closing a case.';
+                    } else {
+                        $resolutionExistsStmt = $pdo->prepare('SELECT id FROM team8_legal_case_resolutions WHERE case_id = :case_id');
+                        $resolutionExistsStmt->execute(['case_id' => $caseId]);
+                        if ($resolutionExistsStmt->fetchColumn() === false) {
+                            $errors[] = 'Add a resolution record before setting this case to Resolved or Closed.';
+                        }
+                    }
                 }
                 if ($legalHasPriority && !in_array($formValues['priority'], $legalPriorities, true)) {
                     $errors[] = 'Select a valid case priority.';
@@ -355,8 +518,9 @@ switch ($action) {
                     }
                 }
                 $assigneeIds = array_map('intval', array_column($assignees, 'id'));
+                $legalOfficerIds = array_map('intval', array_column($legalOfficers, 'id'));
                 $assignedToId = filter_var($formValues['assigned_to'], FILTER_VALIDATE_INT);
-                if ($assignedToId === false || !in_array($assignedToId, $assigneeIds, true)) {
+                if ($assignedToId === false || !in_array($assignedToId, $legalOfficerIds, true)) {
                     $errors[] = 'Select a valid assigned legal officer.';
                 }
                 $departmentIds = array_map('intval', array_column($departments, 'id'));
@@ -398,6 +562,11 @@ switch ($action) {
                             'next_action_date' => $formValues['next_action_date'] !== '' ? $formValues['next_action_date'] : null,
                             'closing_date' => $formValues['closing_date'] !== '' ? $formValues['closing_date'] : null,
                         ];
+                        if ($legalHasCaseInformation) {
+                            foreach (['court_agency', 'branch_office', 'docket_reference', 'jurisdiction', 'location', 'legal_basis', 'current_action'] as $field) {
+                                $params[$field] = $formValues[$field] !== '' ? $formValues[$field] : null;
+                            }
+                        }
                         if ($legalHasPriority) {
                             $params['priority'] = $formValues['priority'];
                         }
@@ -407,26 +576,85 @@ switch ($action) {
                             $caseNumber = t8_legal_next_case_number($pdo, $caseYear);
                             $columns = 'case_number, assigned_to, supporting_staff_id, title, subject, description, case_type_id, department_id, status'
                                 . ($legalHasPriority ? ', priority' : '')
+                                . ($legalHasCaseInformation ? ', court_agency, branch_office, docket_reference, jurisdiction, location, legal_basis, current_action' : '')
                                 . ', filed_date, deadline, next_action_date, closing_date'
                                 . ($justClosed ? ', closed_at' : '');
                             $values = ':case_number, :assigned_to, :supporting_staff_id, :title, :subject, :description, :case_type_id, :department_id, :status'
                                 . ($legalHasPriority ? ', :priority' : '')
+                                . ($legalHasCaseInformation ? ', :court_agency, :branch_office, :docket_reference, :jurisdiction, :location, :legal_basis, :current_action' : '')
                                 . ', :filed_date, :deadline, :next_action_date, :closing_date'
                                 . ($justClosed ? ', NOW()' : '');
                             $params['case_number'] = $caseNumber;
                             $pdo->prepare('INSERT INTO team8_legal_cases (' . $columns . ') VALUES (' . $values . ')')->execute($params);
                             $savedCaseId = (int) $pdo->lastInsertId();
-                            t8_audit_log($pdo, $currentUserId, 'legal_case', $savedCaseId, 'create');
+                            t8_audit_log(
+                                $pdo,
+                                $currentUserId,
+                                'legal_case',
+                                $savedCaseId,
+                                'create',
+                                null,
+                                json_encode(['case_number' => $caseNumber, 'assigned_to' => (int) $assignedToId], JSON_THROW_ON_ERROR),
+                                true
+                            );
                         } else {
                             $params['id'] = $caseId;
+                            $caseAuditValues = [
+                                'title' => [$existing['title'], $formValues['title']],
+                                'subject' => [$existing['subject'] ?? null, $formValues['subject'] !== '' ? $formValues['subject'] : null],
+                                'description' => [$existing['description'] ?? null, $formValues['description'] !== '' ? $formValues['description'] : null],
+                                'case_type_id' => [(int) $existing['case_type_id'], $caseTypeId],
+                                'department_id' => [(int) ($existing['department_id'] ?? 0), (int) $departmentId],
+                                'supporting_staff_id' => [$existing['supporting_staff_id'] ?? null, $supportingStaffId === false ? null : $supportingStaffId],
+                                'filed_date' => [$existing['filed_date'], $formValues['filed_date']],
+                                'next_action_date' => [$existing['next_action_date'] ?? null, $formValues['next_action_date'] !== '' ? $formValues['next_action_date'] : null],
+                                'closing_date' => [$existing['closing_date'] ?? null, $formValues['closing_date'] !== '' ? $formValues['closing_date'] : null],
+                            ];
+                            if ($legalHasPriority) {
+                                $caseAuditValues['priority'] = [$existing['priority'] ?? null, $formValues['priority']];
+                            }
+                            if ($legalHasCaseInformation) {
+                                foreach (['court_agency', 'branch_office', 'docket_reference', 'jurisdiction', 'location', 'legal_basis', 'current_action'] as $field) {
+                                    $caseAuditValues[$field] = [$existing[$field] ?? null, $formValues[$field] !== '' ? $formValues[$field] : null];
+                                }
+                            }
+                            $changedCaseFields = [];
+                            foreach ($caseAuditValues as $field => [$oldValue, $newValue]) {
+                                if ((string) ($oldValue ?? '') !== (string) ($newValue ?? '')) {
+                                    $changedCaseFields[] = $field;
+                                }
+                            }
                             $pdo->prepare(
                                 'UPDATE team8_legal_cases SET assigned_to = :assigned_to, supporting_staff_id = :supporting_staff_id, title = :title, subject = :subject, description = :description, case_type_id = :case_type_id, department_id = :department_id, status = :status'
                                 . ($legalHasPriority ? ', priority = :priority' : '')
+                                . ($legalHasCaseInformation ? ', court_agency = :court_agency, branch_office = :branch_office, docket_reference = :docket_reference, jurisdiction = :jurisdiction, location = :location, legal_basis = :legal_basis, current_action = :current_action' : '')
                                 . ', filed_date = :filed_date, deadline = :deadline, next_action_date = :next_action_date, closing_date = :closing_date'
                                 . ($justClosed ? ', closed_at = NOW()' : '')
                                 . ' WHERE id = :id'
                             )->execute($params);
-                            t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'update');
+                            if ($formValues['status'] !== $existing['status']) {
+                                t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'status_change', (string) $existing['status'], $formValues['status'], true);
+                            }
+                            if ((int) $existing['assigned_to'] !== (int) $assignedToId) {
+                                t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'assignment_change', (string) $existing['assigned_to'], (string) $assignedToId, true);
+                            }
+                            $newDeadline = $formValues['deadline'] !== '' ? $formValues['deadline'] : null;
+                            $oldDeadline = $existing['deadline'] ?? null;
+                            if ((string) ($oldDeadline ?? '') !== (string) ($newDeadline ?? '')) {
+                                t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'deadline_change', $oldDeadline === null ? null : (string) $oldDeadline, $newDeadline, true);
+                            }
+                            if ($changedCaseFields !== []) {
+                                t8_audit_log(
+                                    $pdo,
+                                    $currentUserId,
+                                    'legal_case',
+                                    $caseId,
+                                    'case_fields_updated',
+                                    null,
+                                    json_encode($changedCaseFields, JSON_THROW_ON_ERROR),
+                                    true
+                                );
+                            }
                         }
                         $pdo->commit();
                     } catch (Throwable $e) {
@@ -451,6 +679,1046 @@ switch ($action) {
         }
         break;
 
+    case 'view':
+        $caseId = (int) ($_GET['id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+
+        $caseTypeStmt = $pdo->prepare('SELECT name FROM team8_legal_case_types WHERE id = :id');
+        $caseTypeStmt->execute(['id' => (int) $case['case_type_id']]);
+        $detailCaseType = $caseTypeStmt->fetchColumn() ?: 'Unknown';
+        $detailDepartment = '—';
+        if ($legalHasCaseMetadata && !empty($case['department_id'])) {
+            $departmentStmt = $pdo->prepare('SELECT name FROM departments WHERE id = :id');
+            $departmentStmt->execute(['id' => (int) $case['department_id']]);
+            $detailDepartment = (string) ($departmentStmt->fetchColumn() ?: '—');
+        }
+        $detailSupportingStaff = '—';
+        foreach ($assignees as $assignee) {
+            if ((int) $assignee['id'] === (int) ($case['supporting_staff_id'] ?? 0)) {
+                $detailSupportingStaff = (string) $assignee['full_name'];
+                break;
+            }
+        }
+        $caseResolution = null;
+        if ($legalHasResolutionSchema) {
+            $caseResolutionStmt = $pdo->prepare(
+                'SELECT r.*, u.full_name AS recorded_by_name, ld.document_id AS supporting_document_id, d.title AS supporting_document_title, v.id AS supporting_version_id
+                 FROM team8_legal_case_resolutions r
+                 JOIN users u ON u.id = r.recorded_by
+                 LEFT JOIN team8_legal_documents ld ON ld.id = r.supporting_legal_document_id
+                 LEFT JOIN team8_documents d ON d.id = ld.document_id
+                 LEFT JOIN team8_document_versions v ON v.document_id = d.id AND v.version_no = d.current_version
+                 WHERE r.case_id = :case_id'
+            );
+            $caseResolutionStmt->execute(['case_id' => $caseId]);
+            $caseResolution = $caseResolutionStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        break;
+
+    case 'resolution':
+        $caseId = (int) ($_GET['id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+        $resolution = null;
+        $resolutionDocuments = [];
+        $resolutionInput = [
+            'resolution_type' => '',
+            'resolution_summary' => '',
+            'resolved_date' => '',
+            'final_outcome' => '',
+            'supporting_legal_document_id' => '',
+        ];
+        if (!$legalHasResolutionSchema) {
+            $errors[] = 'Apply database/migrations/2026_09_26_legal_case_resolutions.sql before managing case resolutions.';
+            break;
+        }
+
+        $resolutionStmt = $pdo->prepare(
+            'SELECT r.*, u.full_name AS recorded_by_name, ld.document_id AS supporting_document_id, d.title AS supporting_document_title, v.id AS supporting_version_id
+             FROM team8_legal_case_resolutions r
+             JOIN users u ON u.id = r.recorded_by
+             LEFT JOIN team8_legal_documents ld ON ld.id = r.supporting_legal_document_id
+             LEFT JOIN team8_documents d ON d.id = ld.document_id
+             LEFT JOIN team8_document_versions v ON v.document_id = d.id AND v.version_no = d.current_version
+             WHERE r.case_id = :case_id'
+        );
+        $resolutionStmt->execute(['case_id' => $caseId]);
+        $resolution = $resolutionStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        if ($resolution !== null) {
+            $resolutionInput = [
+                'resolution_type' => (string) $resolution['resolution_type'],
+                'resolution_summary' => (string) $resolution['resolution_summary'],
+                'resolved_date' => (string) $resolution['resolved_date'],
+                'final_outcome' => (string) ($resolution['final_outcome'] ?? ''),
+                'supporting_legal_document_id' => (string) ($resolution['supporting_legal_document_id'] ?? ''),
+            ];
+        }
+        $resolutionDocumentsStmt = $pdo->prepare(
+            'SELECT ld.id, d.title FROM team8_legal_documents ld
+             JOIN team8_documents d ON d.id = ld.document_id
+             WHERE ld.case_id = :case_id AND d.deleted_at IS NULL
+             ORDER BY d.title'
+        );
+        $resolutionDocumentsStmt->execute(['case_id' => $caseId]);
+        $resolutionDocuments = $resolutionDocumentsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            t8_require_role(['admin', 'legal_officer']);
+            $resolutionInput = [
+                'resolution_type' => (string) ($_POST['resolution_type'] ?? ''),
+                'resolution_summary' => trim((string) ($_POST['resolution_summary'] ?? '')),
+                'resolved_date' => trim((string) ($_POST['resolved_date'] ?? '')),
+                'final_outcome' => trim((string) ($_POST['final_outcome'] ?? '')),
+                'supporting_legal_document_id' => (string) ($_POST['supporting_legal_document_id'] ?? ''),
+            ];
+            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+                $errors[] = 'Your session expired. Please try again.';
+            } elseif (!in_array($case['status'], ['active', 'resolved'], true)) {
+                $errors[] = 'Record a resolution after the case becomes Active and before it is Closed.';
+            } else {
+                if (!in_array($resolutionInput['resolution_type'], $legalResolutionTypes, true)) {
+                    $errors[] = 'Select a valid resolution type.';
+                }
+                if ($resolutionInput['resolution_summary'] === '' || mb_strlen($resolutionInput['resolution_summary']) > 5000) {
+                    $errors[] = 'Resolution summary is required and must be 5000 characters or fewer.';
+                }
+                if (!t8_legal_is_valid_iso_date($resolutionInput['resolved_date'])
+                    || !t8_legal_case_date_is_not_before_filed((string) $case['filed_date'], $resolutionInput['resolved_date'])
+                    || $resolutionInput['resolved_date'] > date('Y-m-d')
+                ) {
+                    $errors[] = 'Resolved date must be valid, on or after the filed date, and not in the future.';
+                }
+                if (mb_strlen($resolutionInput['final_outcome']) > 5000) {
+                    $errors[] = 'Final outcome must be 5000 characters or fewer.';
+                }
+                $supportingDocumentId = null;
+                if ($resolutionInput['supporting_legal_document_id'] !== '') {
+                    $supportingDocumentId = filter_var($resolutionInput['supporting_legal_document_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                    if ($supportingDocumentId === false) {
+                        $errors[] = 'Select a valid supporting document.';
+                    } else {
+                        $supportingDocumentStmt = $pdo->prepare(
+                            'SELECT id FROM team8_legal_documents WHERE id = :id AND case_id = :case_id'
+                        );
+                        $supportingDocumentStmt->execute(['id' => $supportingDocumentId, 'case_id' => $caseId]);
+                        if ($supportingDocumentStmt->fetchColumn() === false) {
+                            $errors[] = 'The supporting document must already be attached to this case.';
+                        }
+                    }
+                }
+
+                if (!$errors) {
+                    try {
+                        $pdo->beginTransaction();
+                        if ($resolution === null) {
+                            $saveResolution = $pdo->prepare(
+                                'INSERT INTO team8_legal_case_resolutions
+                                    (case_id, resolution_type, resolution_summary, resolved_date, final_outcome, supporting_legal_document_id, recorded_by)
+                                 VALUES (:case_id, :resolution_type, :resolution_summary, :resolved_date, :final_outcome, :supporting_legal_document_id, :recorded_by)'
+                            );
+                        } else {
+                            $saveResolution = $pdo->prepare(
+                                'UPDATE team8_legal_case_resolutions
+                                 SET resolution_type = :resolution_type, resolution_summary = :resolution_summary,
+                                     resolved_date = :resolved_date, final_outcome = :final_outcome,
+                                     supporting_legal_document_id = :supporting_legal_document_id, updated_at = NOW()
+                                 WHERE case_id = :case_id'
+                            );
+                        }
+                        $resolutionParams = [
+                            'case_id' => $caseId,
+                            'resolution_type' => $resolutionInput['resolution_type'],
+                            'resolution_summary' => $resolutionInput['resolution_summary'],
+                            'resolved_date' => $resolutionInput['resolved_date'],
+                            'final_outcome' => $resolutionInput['final_outcome'] !== '' ? $resolutionInput['final_outcome'] : null,
+                            'supporting_legal_document_id' => $supportingDocumentId,
+                        ];
+                        if ($resolution === null) {
+                            $resolutionParams['recorded_by'] = $currentUserId;
+                        }
+                        $saveResolution->execute($resolutionParams);
+                        $oldResolutionAudit = $resolution === null
+                            ? null
+                            : (string) $resolution['resolution_type'] . ' on ' . (string) $resolution['resolved_date'];
+                        $newResolutionAudit = $resolutionInput['resolution_type'] . ' on ' . $resolutionInput['resolved_date'];
+                        t8_audit_log(
+                            $pdo,
+                            $currentUserId,
+                            'legal_case',
+                            $caseId,
+                            $resolution === null ? 'resolution_recorded' : 'resolution_updated',
+                            $oldResolutionAudit,
+                            $newResolutionAudit,
+                            true
+                        );
+                        $pdo->commit();
+                        t8_flash_set('success', $resolution === null ? 'Case resolution recorded.' : 'Case resolution updated.');
+                        redirect(page_url('legal', ['action' => 'resolution', 'id' => $caseId]));
+                    } catch (Throwable $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        $errors[] = 'The case resolution could not be saved.';
+                    }
+                }
+            }
+        }
+        $caseResolution = null;
+        if ($legalHasResolutionSchema) {
+            $caseResolutionStmt = $pdo->prepare(
+                'SELECT r.*, ld.document_id AS supporting_document_id, d.title AS supporting_document_title, v.id AS supporting_version_id
+                 FROM team8_legal_case_resolutions r
+                 LEFT JOIN team8_legal_documents ld ON ld.id = r.supporting_legal_document_id
+                 LEFT JOIN team8_documents d ON d.id = ld.document_id
+                 LEFT JOIN team8_document_versions v ON v.document_id = d.id AND v.version_no = d.current_version
+                 WHERE r.case_id = :case_id'
+            );
+            $caseResolutionStmt->execute(['case_id' => $caseId]);
+            $caseResolution = $caseResolutionStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        break;
+
+    case 'tasks':
+        $caseId = (int) ($_GET['id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+        $tasks = [];
+        $taskInput = ['title' => '', 'description' => '', 'assigned_to' => (string) ($case['assigned_to'] ?? $currentUserId), 'due_date' => '', 'priority' => 'medium'];
+        $taskPriorities = ['low', 'medium', 'high', 'urgent'];
+        $editableTaskStatuses = ['pending', 'in_progress', 'completed', 'cancelled'];
+        if (!$legalHasTaskSchema) {
+            $errors[] = 'Apply database/migrations/2026_09_26_legal_case_tasks.sql before managing tasks.';
+            break;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            t8_require_role(['admin', 'legal_officer']);
+            $taskAction = (string) ($_POST['task_action'] ?? '');
+            if ($taskAction === 'create') {
+                $taskInput = [
+                    'title' => trim((string) ($_POST['title'] ?? '')),
+                    'description' => trim((string) ($_POST['description'] ?? '')),
+                    'assigned_to' => (string) ($_POST['assigned_to'] ?? ''),
+                    'due_date' => trim((string) ($_POST['due_date'] ?? '')),
+                    'priority' => (string) ($_POST['priority'] ?? 'medium'),
+                ];
+            }
+
+            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+                $errors[] = 'Your session expired. Please try again.';
+            } elseif ($case['status'] === 'archived') {
+                $errors[] = 'Archived cases cannot be changed.';
+            } elseif ($taskAction === 'create') {
+                if ($taskInput['title'] === '' || mb_strlen($taskInput['title']) > 200) {
+                    $errors[] = 'Task title is required and must be 200 characters or fewer.';
+                }
+                if (mb_strlen($taskInput['description']) > 5000) {
+                    $errors[] = 'Task description must be 5000 characters or fewer.';
+                }
+                if (!t8_legal_is_valid_iso_date($taskInput['due_date'])
+                    || !t8_legal_case_date_is_not_before_filed((string) $case['filed_date'], $taskInput['due_date'])
+                ) {
+                    $errors[] = 'Enter a valid due date on or after the case filed date.';
+                }
+                if (!in_array($taskInput['priority'], $taskPriorities, true)) {
+                    $errors[] = 'Select a valid task priority.';
+                }
+                $assignedToId = filter_var($taskInput['assigned_to'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                $legalOfficerIds = array_map('intval', array_column($legalOfficers, 'id'));
+                if ($assignedToId === false || !in_array($assignedToId, $legalOfficerIds, true)) {
+                    $errors[] = 'Select a valid task assignee.';
+                }
+
+                if (!$errors) {
+                    try {
+                        $pdo->beginTransaction();
+                        $insertTask = $pdo->prepare(
+                            "INSERT INTO team8_legal_case_tasks
+                                (case_id, title, description, assigned_to, created_by, due_date, priority, status)
+                             VALUES (:case_id, :title, :description, :assigned_to, :created_by, :due_date, :priority, 'pending')"
+                        );
+                        $insertTask->execute([
+                            'case_id' => $caseId,
+                            'title' => $taskInput['title'],
+                            'description' => $taskInput['description'] !== '' ? $taskInput['description'] : null,
+                            'assigned_to' => (int) $assignedToId,
+                            'created_by' => $currentUserId,
+                            'due_date' => $taskInput['due_date'],
+                            'priority' => $taskInput['priority'],
+                        ]);
+                        $taskId = (int) $pdo->lastInsertId();
+                        t8_audit_log(
+                            $pdo,
+                            $currentUserId,
+                            'legal_case_task',
+                            $taskId,
+                            'create',
+                            null,
+                            json_encode(['due_date' => $taskInput['due_date'], 'priority' => $taskInput['priority']], JSON_THROW_ON_ERROR),
+                            true
+                        );
+                        $pdo->commit();
+                        t8_flash_set('success', 'Task added to legal case.');
+                        redirect(page_url('legal', ['action' => 'tasks', 'id' => $caseId]));
+                    } catch (Throwable $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        $errors[] = 'The task could not be added.';
+                    }
+                }
+            } elseif ($taskAction === 'status') {
+                $taskId = filter_var($_POST['task_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                $nextStatus = (string) ($_POST['status'] ?? '');
+                if ($taskId === false || !in_array($nextStatus, $editableTaskStatuses, true)) {
+                    $errors[] = 'Select a valid task and status.';
+                } else {
+                    try {
+                        $pdo->beginTransaction();
+                        $taskStmt = $pdo->prepare('SELECT status FROM team8_legal_case_tasks WHERE id = :id AND case_id = :case_id FOR UPDATE');
+                        $taskStmt->execute(['id' => $taskId, 'case_id' => $caseId]);
+                        $previousStatus = $taskStmt->fetchColumn();
+                        if ($previousStatus === false) {
+                            $pdo->rollBack();
+                            $errors[] = 'Task not found for this case.';
+                        } else {
+                            $updateTask = $pdo->prepare(
+                                "UPDATE team8_legal_case_tasks
+                                 SET status = :status,
+                                     completed_at = CASE WHEN :completion_status = 'completed' THEN COALESCE(completed_at, NOW()) ELSE NULL END
+                                 WHERE id = :id AND case_id = :case_id"
+                            );
+                            $updateTask->execute([
+                                'status' => $nextStatus,
+                                'completion_status' => $nextStatus,
+                                'id' => $taskId,
+                                'case_id' => $caseId,
+                            ]);
+                            t8_audit_log($pdo, $currentUserId, 'legal_case_task', (int) $taskId, 'status_change', (string) $previousStatus, $nextStatus, true);
+                            $pdo->commit();
+                            t8_flash_set('success', 'Task status updated.');
+                            redirect(page_url('legal', ['action' => 'tasks', 'id' => $caseId]));
+                        }
+                    } catch (Throwable $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        $errors[] = 'The task status could not be updated.';
+                    }
+                }
+            } else {
+                $errors[] = 'Invalid task action.';
+            }
+        }
+
+        $taskStmt = $pdo->prepare(
+            'SELECT t.*, u.full_name AS assignee_name
+             FROM team8_legal_case_tasks t
+             JOIN users u ON u.id = t.assigned_to
+             WHERE t.case_id = :case_id
+             ORDER BY CASE WHEN t.status IN (\'completed\', \'cancelled\') THEN 1 ELSE 0 END, t.due_date, t.id DESC'
+        );
+        $taskStmt->execute(['case_id' => $caseId]);
+        $tasks = $taskStmt->fetchAll(PDO::FETCH_ASSOC);
+        break;
+
+    case 'hearings':
+        $caseId = (int) ($_GET['id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+        $hearings = [];
+        $hearingStatuses = ['scheduled', 'completed', 'postponed', 'cancelled'];
+        $hearingInput = [
+            'event_date' => '',
+            'event_time' => '',
+            'venue' => '',
+            'hearing_type' => '',
+            'purpose' => '',
+            'status' => 'scheduled',
+            'notes' => '',
+        ];
+        $editHearingId = filter_var($_GET['edit_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if (!$legalHasHearingSchema) {
+            $errors[] = 'Apply database/migrations/2026_09_26_legal_case_hearings.sql before managing hearings.';
+            break;
+        }
+
+        if ($editHearingId !== false) {
+            $editHearingStmt = $pdo->prepare('SELECT * FROM team8_legal_case_hearings WHERE id = :id AND case_id = :case_id');
+            $editHearingStmt->execute(['id' => $editHearingId, 'case_id' => $caseId]);
+            $editHearing = $editHearingStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$editHearing) {
+                $errors[] = 'Hearing not found for this case.';
+                $editHearingId = false;
+            } else {
+                $hearingInput = [
+                    'event_date' => (string) $editHearing['event_date'],
+                    'event_time' => substr((string) ($editHearing['event_time'] ?? ''), 0, 5),
+                    'venue' => (string) ($editHearing['venue'] ?? ''),
+                    'hearing_type' => (string) $editHearing['hearing_type'],
+                    'purpose' => (string) ($editHearing['purpose'] ?? ''),
+                    'status' => (string) $editHearing['status'],
+                    'notes' => (string) ($editHearing['notes'] ?? ''),
+                ];
+            }
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            t8_require_role(['admin', 'legal_officer']);
+            $hearingAction = (string) ($_POST['hearing_action'] ?? '');
+            $hearingInput = [
+                'event_date' => trim((string) ($_POST['event_date'] ?? '')),
+                'event_time' => trim((string) ($_POST['event_time'] ?? '')),
+                'venue' => trim((string) ($_POST['venue'] ?? '')),
+                'hearing_type' => trim((string) ($_POST['hearing_type'] ?? '')),
+                'purpose' => trim((string) ($_POST['purpose'] ?? '')),
+                'status' => (string) ($_POST['status'] ?? 'scheduled'),
+                'notes' => trim((string) ($_POST['notes'] ?? '')),
+            ];
+            $postedHearingId = filter_var($_POST['hearing_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($hearingAction === 'update' && $postedHearingId !== false) {
+                $editHearingId = $postedHearingId;
+            }
+
+            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+                $errors[] = 'Your session expired. Please try again.';
+            } elseif ($case['status'] === 'archived') {
+                $errors[] = 'Archived cases cannot be changed.';
+            } elseif (!in_array($hearingAction, ['create', 'update'], true)) {
+                $errors[] = 'Invalid hearing action.';
+            } else {
+                if (!t8_legal_is_valid_iso_date($hearingInput['event_date'])
+                    || !t8_legal_case_date_is_not_before_filed((string) $case['filed_date'], $hearingInput['event_date'])
+                ) {
+                    $errors[] = 'Enter a valid hearing date on or after the case filed date.';
+                }
+                if ($hearingInput['event_time'] !== '' && !t8_legal_is_valid_iso_time($hearingInput['event_time'])) {
+                    $errors[] = 'Enter a valid hearing time.';
+                }
+                if ($hearingInput['hearing_type'] === '' || mb_strlen($hearingInput['hearing_type']) > 150) {
+                    $errors[] = 'Hearing type is required and must be 150 characters or fewer.';
+                }
+                if (mb_strlen($hearingInput['venue']) > 200 || mb_strlen($hearingInput['purpose']) > 500 || mb_strlen($hearingInput['notes']) > 5000) {
+                    $errors[] = 'Venue, purpose, or notes exceed the allowed length.';
+                }
+                if (!in_array($hearingInput['status'], $hearingStatuses, true)) {
+                    $errors[] = 'Select a valid hearing status.';
+                }
+                if ($hearingAction === 'update' && $postedHearingId === false) {
+                    $errors[] = 'Select a hearing to update.';
+                }
+
+                $previousHearing = null;
+                if (!$errors && $hearingAction === 'update') {
+                    $previousHearingStmt = $pdo->prepare(
+                        'SELECT event_date, event_time, venue, hearing_type, purpose, status, notes
+                         FROM team8_legal_case_hearings WHERE id = :id AND case_id = :case_id'
+                    );
+                    $previousHearingStmt->execute(['id' => $postedHearingId, 'case_id' => $caseId]);
+                    $previousHearing = $previousHearingStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                    if ($previousHearing === null) {
+                        $errors[] = 'Hearing not found for this case.';
+                    }
+                }
+
+                if (!$errors) {
+                    $hearingParams = [
+                        'event_date' => $hearingInput['event_date'],
+                        'event_time' => $hearingInput['event_time'] !== '' ? $hearingInput['event_time'] : null,
+                        'venue' => $hearingInput['venue'] !== '' ? $hearingInput['venue'] : null,
+                        'hearing_type' => $hearingInput['hearing_type'],
+                        'purpose' => $hearingInput['purpose'] !== '' ? $hearingInput['purpose'] : null,
+                        'status' => $hearingInput['status'],
+                        'notes' => $hearingInput['notes'] !== '' ? $hearingInput['notes'] : null,
+                        'case_id' => $caseId,
+                    ];
+                    if ($hearingAction === 'create') {
+                        try {
+                            $pdo->beginTransaction();
+                            $insertHearing = $pdo->prepare(
+                                'INSERT INTO team8_legal_case_hearings
+                                    (case_id, event_date, event_time, venue, hearing_type, purpose, status, notes, created_by)
+                                 VALUES (:case_id, :event_date, :event_time, :venue, :hearing_type, :purpose, :status, :notes, :created_by)'
+                            );
+                            $insertHearing->execute($hearingParams + ['created_by' => $currentUserId]);
+                            $hearingId = (int) $pdo->lastInsertId();
+                            t8_audit_log(
+                                $pdo,
+                                $currentUserId,
+                                'legal_case_hearing',
+                                $hearingId,
+                                'create',
+                                null,
+                                json_encode([
+                                    'event_date' => $hearingInput['event_date'],
+                                    'event_time' => $hearingInput['event_time'],
+                                    'hearing_type' => $hearingInput['hearing_type'],
+                                    'status' => $hearingInput['status'],
+                                ], JSON_THROW_ON_ERROR),
+                                true
+                            );
+                            $pdo->commit();
+                            t8_flash_set('success', 'Hearing added to legal case.');
+                        } catch (Throwable $e) {
+                            if ($pdo->inTransaction()) {
+                                $pdo->rollBack();
+                            }
+                            $errors[] = 'The hearing could not be added.';
+                        }
+                    } else {
+                        $hearingAuditValues = [
+                            'event_date' => [$previousHearing['event_date'], $hearingInput['event_date']],
+                            'event_time' => [$previousHearing['event_time'], $hearingParams['event_time']],
+                            'venue' => [$previousHearing['venue'], $hearingParams['venue']],
+                            'hearing_type' => [$previousHearing['hearing_type'], $hearingInput['hearing_type']],
+                            'purpose' => [$previousHearing['purpose'], $hearingParams['purpose']],
+                            'notes' => [$previousHearing['notes'], $hearingParams['notes']],
+                        ];
+                        $changedHearingFields = [];
+                        foreach ($hearingAuditValues as $field => [$oldValue, $newValue]) {
+                            if ((string) ($oldValue ?? '') !== (string) ($newValue ?? '')) {
+                                $changedHearingFields[] = $field;
+                            }
+                        }
+                        $hearingParams['id'] = $postedHearingId;
+                        $updateHearing = $pdo->prepare(
+                            'UPDATE team8_legal_case_hearings
+                             SET event_date = :event_date, event_time = :event_time, venue = :venue,
+                                 hearing_type = :hearing_type, purpose = :purpose, status = :status, notes = :notes
+                             WHERE id = :id AND case_id = :case_id'
+                        );
+                        try {
+                            $pdo->beginTransaction();
+                            $updateHearing->execute($hearingParams);
+                            if ($previousHearing['status'] !== $hearingInput['status']) {
+                                t8_audit_log($pdo, $currentUserId, 'legal_case_hearing', (int) $postedHearingId, 'status_change', (string) $previousHearing['status'], $hearingInput['status'], true);
+                            }
+                            if ($changedHearingFields !== []) {
+                                t8_audit_log($pdo, $currentUserId, 'legal_case_hearing', (int) $postedHearingId, 'update', null, json_encode($changedHearingFields, JSON_THROW_ON_ERROR), true);
+                            }
+                            $pdo->commit();
+                            t8_flash_set('success', 'Hearing updated.');
+                        } catch (Throwable $e) {
+                            if ($pdo->inTransaction()) {
+                                $pdo->rollBack();
+                            }
+                            $errors[] = 'The hearing could not be updated.';
+                        }
+                    }
+                    if (!$errors) {
+                        redirect(page_url('legal', ['action' => 'hearings', 'id' => $caseId]));
+                    }
+                }
+            }
+        }
+
+        $hearingStmt = $pdo->prepare(
+            'SELECT * FROM team8_legal_case_hearings WHERE case_id = :case_id ORDER BY event_date, event_time, id'
+        );
+        $hearingStmt->execute(['case_id' => $caseId]);
+        $hearings = $hearingStmt->fetchAll(PDO::FETCH_ASSOC);
+        break;
+
+    case 'notes':
+        $caseId = (int) ($_GET['id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+        $caseNotes = [];
+        $noteContent = '';
+        if (!$legalHasNotesSchema) {
+            $errors[] = 'Apply database/migrations/2026_09_26_legal_case_notes.sql before managing case notes.';
+            break;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            t8_require_role(['admin', 'legal_officer']);
+            $noteContent = trim((string) ($_POST['content'] ?? ''));
+            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+                $errors[] = 'Your session expired. Please try again.';
+            } elseif ($case['status'] === 'archived') {
+                $errors[] = 'Archived cases cannot be changed.';
+            } elseif ($noteContent === '' || mb_strlen($noteContent) > 5000) {
+                $errors[] = 'Note content is required and must be 5000 characters or fewer.';
+            } else {
+                try {
+                    $pdo->beginTransaction();
+                    $insertNote = $pdo->prepare(
+                        'INSERT INTO team8_legal_case_notes (case_id, author_id, content)
+                         VALUES (:case_id, :author_id, :content)'
+                    );
+                    $insertNote->execute(['case_id' => $caseId, 'author_id' => $currentUserId, 'content' => $noteContent]);
+                    t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'add_note', null, 'Internal note added', true);
+                    $pdo->commit();
+                    t8_flash_set('success', 'Case note added.');
+                    redirect(page_url('legal', ['action' => 'notes', 'id' => $caseId]));
+                } catch (Throwable $e) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    $errors[] = 'The case note could not be saved.';
+                }
+            }
+        }
+
+        $notesStmt = $pdo->prepare(
+            'SELECT n.*, u.full_name AS author_name
+             FROM team8_legal_case_notes n
+             JOIN users u ON u.id = n.author_id
+             WHERE n.case_id = :case_id
+             ORDER BY n.created_at DESC, n.id DESC'
+        );
+        $notesStmt->execute(['case_id' => $caseId]);
+        $caseNotes = $notesStmt->fetchAll(PDO::FETCH_ASSOC);
+        break;
+
+    case 'communications':
+        $caseId = (int) ($_GET['id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+        $communications = [];
+        $communicationInput = [
+            'date' => '',
+            'time' => '',
+            'type' => '',
+            'direction' => 'incoming',
+            'sender' => '',
+            'recipient' => '',
+            'subject' => '',
+            'summary' => '',
+            'attachment_legal_document_id' => '',
+        ];
+        $caseLegalDocuments = [];
+        if (!$legalHasCommunicationSchema) {
+            $errors[] = 'Apply database/migrations/2026_09_26_legal_case_communications.sql before managing communications.';
+            break;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            t8_require_role(['admin', 'legal_officer']);
+            $communicationInput = [
+                'date' => trim((string) ($_POST['communication_date'] ?? '')),
+                'time' => trim((string) ($_POST['communication_time'] ?? '')),
+                'type' => (string) ($_POST['communication_type'] ?? ''),
+                'direction' => (string) ($_POST['direction'] ?? ''),
+                'sender' => trim((string) ($_POST['sender'] ?? '')),
+                'recipient' => trim((string) ($_POST['recipient'] ?? '')),
+                'subject' => trim((string) ($_POST['subject'] ?? '')),
+                'summary' => trim((string) ($_POST['summary'] ?? '')),
+                'attachment_legal_document_id' => (string) ($_POST['attachment_legal_document_id'] ?? ''),
+            ];
+            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+                $errors[] = 'Your session expired. Please try again.';
+            } elseif ($case['status'] === 'archived') {
+                $errors[] = 'Archived cases cannot be changed.';
+            } else {
+                if (!t8_legal_is_valid_iso_date($communicationInput['date'])) {
+                    $errors[] = 'Enter a valid communication date.';
+                }
+                if ($communicationInput['time'] !== '' && !t8_legal_is_valid_iso_time($communicationInput['time'])) {
+                    $errors[] = 'Enter a valid communication time.';
+                }
+                if (!in_array($communicationInput['type'], $legalCommunicationTypes, true)) {
+                    $errors[] = 'Select a valid communication type.';
+                }
+                if (!in_array($communicationInput['direction'], ['incoming', 'outgoing'], true)) {
+                    $errors[] = 'Select Incoming or Outgoing direction.';
+                }
+                foreach (['sender' => 200, 'recipient' => 200, 'subject' => 200, 'summary' => 5000] as $field => $maxLength) {
+                    if (($field === 'summary' && $communicationInput[$field] === '') || mb_strlen($communicationInput[$field]) > $maxLength) {
+                        $errors[] = ucwords(str_replace('_', ' ', $field)) . ' is required and must be ' . $maxLength . ' characters or fewer.';
+                    }
+                }
+
+                $attachmentId = null;
+                if ($communicationInput['attachment_legal_document_id'] !== '') {
+                    $attachmentId = filter_var($communicationInput['attachment_legal_document_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                    if ($attachmentId === false) {
+                        $errors[] = 'Select a valid attached legal document.';
+                    } else {
+                        $attachmentStmt = $pdo->prepare(
+                            'SELECT id FROM team8_legal_documents WHERE id = :id AND case_id = :case_id'
+                        );
+                        $attachmentStmt->execute(['id' => $attachmentId, 'case_id' => $caseId]);
+                        if ($attachmentStmt->fetchColumn() === false) {
+                            $errors[] = 'The selected document is not attached to this case.';
+                        }
+                    }
+                }
+
+                if (!$errors) {
+                    $communicationTime = $communicationInput['time'] === ''
+                        ? null
+                        : (strlen($communicationInput['time']) === 5 ? $communicationInput['time'] . ':00' : $communicationInput['time']);
+                    $insertCommunication = $pdo->prepare(
+                        'INSERT INTO team8_legal_case_communications
+                            (case_id, communication_date, communication_time, communication_type, direction, sender, recipient, subject, summary, attachment_legal_document_id, recorded_by)
+                         VALUES (:case_id, :communication_date, :communication_time, :communication_type, :direction, :sender, :recipient, :subject, :summary, :attachment_legal_document_id, :recorded_by)'
+                    );
+                    try {
+                        $pdo->beginTransaction();
+                        $insertCommunication->execute([
+                            'case_id' => $caseId,
+                            'communication_date' => $communicationInput['date'],
+                            'communication_time' => $communicationTime,
+                            'communication_type' => $communicationInput['type'],
+                            'direction' => $communicationInput['direction'],
+                            'sender' => $communicationInput['sender'] !== '' ? $communicationInput['sender'] : null,
+                            'recipient' => $communicationInput['recipient'] !== '' ? $communicationInput['recipient'] : null,
+                            'subject' => $communicationInput['subject'] !== '' ? $communicationInput['subject'] : null,
+                            'summary' => $communicationInput['summary'],
+                            'attachment_legal_document_id' => $attachmentId,
+                            'recorded_by' => $currentUserId,
+                        ]);
+                        t8_audit_log(
+                            $pdo,
+                            $currentUserId,
+                            'legal_case',
+                            $caseId,
+                            'record_communication',
+                            null,
+                            json_encode([
+                                'date' => $communicationInput['date'],
+                                'type' => $communicationInput['type'],
+                                'direction' => $communicationInput['direction'],
+                                'attachment_legal_document_id' => $attachmentId,
+                            ], JSON_THROW_ON_ERROR),
+                            true
+                        );
+                        $pdo->commit();
+                        t8_flash_set('success', 'Communication recorded.');
+                        redirect(page_url('legal', ['action' => 'communications', 'id' => $caseId]));
+                    } catch (Throwable $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        $errors[] = 'The communication could not be recorded.';
+                    }
+                }
+            }
+        }
+
+        $caseLegalDocumentsStmt = $pdo->prepare(
+            'SELECT ld.id, d.title
+             FROM team8_legal_documents ld
+             JOIN team8_documents d ON d.id = ld.document_id
+             WHERE ld.case_id = :case_id AND d.deleted_at IS NULL
+             ORDER BY d.title'
+        );
+        $caseLegalDocumentsStmt->execute(['case_id' => $caseId]);
+        $caseLegalDocuments = $caseLegalDocumentsStmt->fetchAll(PDO::FETCH_ASSOC);
+        $communicationsStmt = $pdo->prepare(
+            'SELECT c.*, u.full_name AS recorder_name, ld.document_id AS attachment_document_id,
+                    d.title AS attachment_title, v.id AS attachment_version_id
+             FROM team8_legal_case_communications c
+             JOIN users u ON u.id = c.recorded_by
+             LEFT JOIN team8_legal_documents ld ON ld.id = c.attachment_legal_document_id
+             LEFT JOIN team8_documents d ON d.id = ld.document_id
+             LEFT JOIN team8_document_versions v ON v.document_id = d.id AND v.version_no = d.current_version
+             WHERE c.case_id = :case_id
+             ORDER BY c.communication_date DESC, c.communication_time DESC, c.id DESC'
+        );
+        $communicationsStmt->execute(['case_id' => $caseId]);
+        $communications = $communicationsStmt->fetchAll(PDO::FETCH_ASSOC);
+        break;
+
+    case 'timeline':
+        $caseId = (int) ($_GET['id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+        $timelineConditions = [
+            "(a.entity_type = 'legal_case' AND a.entity_id = :case_id AND a.action <> 'view_documents')",
+        ];
+        $timelineParams = ['case_id' => $caseId];
+        if ($legalHasTaskSchema) {
+            $timelineConditions[] = "(a.entity_type = 'legal_case_task' AND a.entity_id IN (SELECT id FROM team8_legal_case_tasks WHERE case_id = :task_case_id))";
+            $timelineParams['task_case_id'] = $caseId;
+        }
+        if ($legalHasHearingSchema) {
+            $timelineConditions[] = "(a.entity_type = 'legal_case_hearing' AND a.entity_id IN (SELECT id FROM team8_legal_case_hearings WHERE case_id = :hearing_case_id))";
+            $timelineParams['hearing_case_id'] = $caseId;
+        }
+        $timelineStmt = $pdo->prepare(
+            'SELECT a.id, a.entity_type, a.entity_id, a.action, a.old_value, a.new_value, a.created_at,
+                    u.full_name AS actor_name
+             FROM audit_logs a
+             JOIN users u ON u.id = a.user_id
+             WHERE ' . implode(' OR ', $timelineConditions) . '
+             ORDER BY a.created_at ASC, a.id ASC'
+        );
+        $timelineStmt->execute($timelineParams);
+        $timelineEvents = $timelineStmt->fetchAll(PDO::FETCH_ASSOC);
+        break;
+
+    case 'parties':
+        $caseId = (int) ($_GET['id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+
+        $partyTypes = [];
+        $availableParties = [];
+        $attachedParties = [];
+        $partyInput = [
+            'name' => '',
+            'entity_type' => 'individual',
+            'organization' => '',
+            'contact_email' => '',
+            'contact_phone' => '',
+            'role_in_case' => '',
+            'party_id' => '',
+            'party_type_id' => '',
+        ];
+
+        if (!$legalHasPartySchema) {
+            $errors[] = 'Apply database/migrations/2026_09_26_legal_case_parties.sql before managing case parties.';
+            break;
+        }
+
+        $partyTypes = $pdo->query(
+            'SELECT id, name FROM team8_legal_party_types WHERE is_active = 1 ORDER BY sort_order, name'
+        )->fetchAll(PDO::FETCH_ASSOC);
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            t8_require_role(['admin']);
+            $partyMode = (string) ($_POST['party_mode'] ?? '');
+            $partyInput = [
+                'name' => trim((string) ($_POST['name'] ?? '')),
+                'entity_type' => (string) ($_POST['entity_type'] ?? 'individual'),
+                'organization' => trim((string) ($_POST['organization'] ?? '')),
+                'contact_email' => trim((string) ($_POST['contact_email'] ?? '')),
+                'contact_phone' => trim((string) ($_POST['contact_phone'] ?? '')),
+                'role_in_case' => trim((string) ($_POST['role_in_case'] ?? '')),
+                'party_id' => (string) ($_POST['party_id'] ?? ''),
+                'party_type_id' => (string) ($_POST['party_type_id'] ?? ''),
+            ];
+            $partyTypeId = filter_var($partyInput['party_type_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+                $errors[] = 'Your session expired. Please try again.';
+            } elseif ($case['status'] === 'archived') {
+                $errors[] = 'Archived cases cannot be changed.';
+            } elseif ($partyTypeId === false || $partyInput['role_in_case'] === '' || mb_strlen($partyInput['role_in_case']) > 100) {
+                $errors[] = 'Select a party type and enter a role of 1 to 100 characters.';
+            } else {
+                $typeStmt = $pdo->prepare('SELECT id FROM team8_legal_party_types WHERE id = :id AND is_active = 1');
+                $typeStmt->execute(['id' => $partyTypeId]);
+                if ($typeStmt->fetchColumn() === false) {
+                    $errors[] = 'Select an active legal party type.';
+                }
+
+                $partyId = 0;
+                if ($partyMode === 'existing') {
+                    $partyIdValue = filter_var($partyInput['party_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                    if ($partyIdValue === false) {
+                        $errors[] = 'Select an existing party.';
+                    } else {
+                        $partyStmt = $pdo->prepare('SELECT id FROM team8_parties WHERE id = :id');
+                        $partyStmt->execute(['id' => $partyIdValue]);
+                        $partyId = (int) ($partyStmt->fetchColumn() ?: 0);
+                        if (!$partyId) {
+                            $errors[] = 'The selected party no longer exists.';
+                        } else {
+                            $duplicateStmt = $pdo->prepare(
+                                'SELECT id FROM team8_legal_case_parties WHERE case_id = :case_id AND party_id = :party_id'
+                            );
+                            $duplicateStmt->execute(['case_id' => $caseId, 'party_id' => $partyId]);
+                            if ($duplicateStmt->fetchColumn() !== false) {
+                                $errors[] = 'That party is already attached to this case.';
+                            }
+                        }
+                    }
+                } elseif ($partyMode === 'new') {
+                    if ($partyInput['name'] === '' || mb_strlen($partyInput['name']) > 200) {
+                        $errors[] = 'Party name is required and must be 200 characters or fewer.';
+                    }
+                    if (!in_array($partyInput['entity_type'], ['individual', 'organization'], true)) {
+                        $errors[] = 'Select an individual or organization record type.';
+                    }
+                    if (mb_strlen($partyInput['organization']) > 200) {
+                        $errors[] = 'Organization must be 200 characters or fewer.';
+                    }
+                    if (mb_strlen($partyInput['contact_email']) > 150 || ($partyInput['contact_email'] !== '' && filter_var($partyInput['contact_email'], FILTER_VALIDATE_EMAIL) === false)) {
+                        $errors[] = 'Enter a valid contact email of 150 characters or fewer.';
+                    }
+                    if (mb_strlen($partyInput['contact_phone']) > 50) {
+                        $errors[] = 'Contact phone must be 50 characters or fewer.';
+                    }
+                    if (!$errors) {
+                        $duplicatePartyStmt = $pdo->prepare(
+                            "SELECT id FROM team8_parties
+                             WHERE LOWER(name) = LOWER(:name)
+                               AND type = :entity_type
+                               AND LOWER(COALESCE(organization, '')) = LOWER(:organization)
+                               AND LOWER(COALESCE(contact_email, '')) = LOWER(:contact_email)
+                             LIMIT 1"
+                        );
+                        $duplicatePartyStmt->execute([
+                            'name' => $partyInput['name'],
+                            'entity_type' => $partyInput['entity_type'],
+                            'organization' => $partyInput['organization'],
+                            'contact_email' => $partyInput['contact_email'],
+                        ]);
+                        if ($duplicatePartyStmt->fetchColumn() !== false) {
+                            $errors[] = 'A matching party record already exists. Select it from the existing-party list.';
+                        }
+                    }
+                } else {
+                    $errors[] = 'Invalid party action.';
+                }
+
+                if (!$errors) {
+                    try {
+                        $pdo->beginTransaction();
+                        if ($partyMode === 'new') {
+                            $pdo->prepare(
+                                'INSERT INTO team8_parties (name, type, organization, contact_email, contact_phone)
+                                 VALUES (:name, :type, :organization, :contact_email, :contact_phone)'
+                            )->execute([
+                                'name' => $partyInput['name'],
+                                'type' => $partyInput['entity_type'],
+                                'organization' => $partyInput['organization'] !== '' ? $partyInput['organization'] : null,
+                                'contact_email' => $partyInput['contact_email'] !== '' ? $partyInput['contact_email'] : null,
+                                'contact_phone' => $partyInput['contact_phone'] !== '' ? $partyInput['contact_phone'] : null,
+                            ]);
+                            $partyId = (int) $pdo->lastInsertId();
+                        }
+                        $pdo->prepare(
+                            'INSERT INTO team8_legal_case_parties (case_id, party_id, party_type_id, role_in_case)
+                             VALUES (:case_id, :party_id, :party_type_id, :role_in_case)'
+                        )->execute([
+                            'case_id' => $caseId,
+                            'party_id' => $partyId,
+                            'party_type_id' => $partyTypeId,
+                            'role_in_case' => $partyInput['role_in_case'],
+                        ]);
+                        $partyLinkId = (int) $pdo->lastInsertId();
+                        t8_audit_log(
+                            $pdo,
+                            $currentUserId,
+                            'legal_case',
+                            $caseId,
+                            'add_party',
+                            null,
+                            json_encode(['link_id' => $partyLinkId, 'party_id' => $partyId, 'party_type_id' => $partyTypeId, 'role' => $partyInput['role_in_case']], JSON_THROW_ON_ERROR),
+                            true
+                        );
+                        $pdo->commit();
+                        t8_flash_set('success', 'Party added to legal case.');
+                        redirect(page_url('legal', ['action' => 'parties', 'id' => $caseId]));
+                    } catch (Throwable $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        $errors[] = 'The party could not be added. It may already be linked to this case.';
+                    }
+                }
+            }
+        }
+
+        if ($isAdmin) {
+            $availableParties = $pdo->prepare(
+                'SELECT p.id, p.name, p.type, p.organization
+                 FROM team8_parties p
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM team8_legal_case_parties cp
+                     WHERE cp.case_id = :case_id AND cp.party_id = p.id
+                 )
+                 ORDER BY p.name'
+            );
+            $availableParties->execute(['case_id' => $caseId]);
+            $availableParties = $availableParties->fetchAll(PDO::FETCH_ASSOC);
+        }
+        $attachedParties = $pdo->prepare(
+            'SELECT cp.id, cp.party_id, cp.role_in_case, pt.name AS legal_party_type,
+                    p.name AS party_name, p.type AS entity_type, p.organization,
+                    p.contact_email, p.contact_phone
+             FROM team8_legal_case_parties cp
+             JOIN team8_parties p ON p.id = cp.party_id
+             JOIN team8_legal_party_types pt ON pt.id = cp.party_type_id
+             WHERE cp.case_id = :case_id
+             ORDER BY p.name, cp.id'
+        );
+        $attachedParties->execute(['case_id' => $caseId]);
+        $attachedParties = $attachedParties->fetchAll(PDO::FETCH_ASSOC);
+        break;
+
+    case 'remove_party':
+        t8_require_role(['admin']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            redirect(page_url('legal'));
+        }
+        if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('legal'));
+        }
+        $caseId = (int) ($_POST['case_id'] ?? 0);
+        $linkId = (int) ($_POST['link_id'] ?? 0);
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$legalHasPartySchema || !$case || $case['status'] === 'archived') {
+            t8_flash_set('danger', 'Legal case or party link not found.');
+        } else {
+            try {
+                $pdo->beginTransaction();
+                $partyLinkStmt = $pdo->prepare(
+                    'SELECT party_id, party_type_id, role_in_case FROM team8_legal_case_parties
+                     WHERE id = :id AND case_id = :case_id FOR UPDATE'
+                );
+                $partyLinkStmt->execute(['id' => $linkId, 'case_id' => $caseId]);
+                $partyLink = $partyLinkStmt->fetch(PDO::FETCH_ASSOC);
+                if ($partyLink === false) {
+                    $pdo->rollBack();
+                    t8_flash_set('danger', 'Party link not found.');
+                } else {
+                    $removePartyStmt = $pdo->prepare('DELETE FROM team8_legal_case_parties WHERE id = :id AND case_id = :case_id');
+                    $removePartyStmt->execute(['id' => $linkId, 'case_id' => $caseId]);
+                    t8_audit_log(
+                        $pdo,
+                        $currentUserId,
+                        'legal_case',
+                        $caseId,
+                        'remove_party',
+                        json_encode(['link_id' => $linkId, 'party_id' => (int) $partyLink['party_id'], 'party_type_id' => (int) $partyLink['party_type_id'], 'role' => $partyLink['role_in_case']], JSON_THROW_ON_ERROR),
+                        null,
+                        true
+                    );
+                    $pdo->commit();
+                    t8_flash_set('success', 'Party removed from legal case.');
+                }
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                t8_flash_set('danger', 'The party link could not be removed.');
+            }
+        }
+        redirect(page_url('legal', ['action' => 'parties', 'id' => $caseId]));
+        break;
+
     case 'archive':
     case 'restore':
         t8_require_role(['admin']);
@@ -465,18 +1733,37 @@ switch ($action) {
         $id = (int) ($_POST['id'] ?? 0);
         $case = t8_legal_case_fetch($pdo, $id);
         if ($case) {
-            if ($action === 'archive' && $case['status'] !== 'archived') {
-                $pdo->prepare("UPDATE team8_legal_cases SET archived_from_status = status, status = 'archived' WHERE id = :id")
-                    ->execute(['id' => $id]);
-            } elseif ($action === 'restore' && $case['status'] === 'archived') {
-                $pdo->prepare("UPDATE team8_legal_cases SET status = COALESCE(archived_from_status, 'open'), archived_from_status = NULL WHERE id = :id")
-                    ->execute(['id' => $id]);
-            } else {
-                t8_flash_set('danger', 'The case is not in a state that can be ' . ($action === 'archive' ? 'archived.' : 'restored.'));
-                redirect(page_url('legal', ['archived' => $action === 'restore' ? '1' : '0']));
+            if ($action === 'archive' && $case['status'] !== 'closed') {
+                t8_flash_set('danger', 'Close the case before archiving it.');
+                redirect(page_url('legal'));
             }
-            t8_audit_log($pdo, $currentUserId, 'legal_case', $id, $action);
-            t8_flash_set('success', $action === 'archive' ? 'Case archived.' : 'Case restored.');
+            if ($action === 'restore' && $case['status'] !== 'archived') {
+                t8_flash_set('danger', 'The case is not in a state that can be restored.');
+                redirect(page_url('legal', ['archived' => '1']));
+            }
+
+            $statusBefore = (string) $case['status'];
+            $statusAfter = $action === 'archive'
+                ? 'archived'
+                : (string) ($case['archived_from_status'] ?: 'open');
+            try {
+                $pdo->beginTransaction();
+                if ($action === 'archive') {
+                    $pdo->prepare("UPDATE team8_legal_cases SET archived_from_status = status, status = 'archived' WHERE id = :id")
+                        ->execute(['id' => $id]);
+                } else {
+                    $pdo->prepare("UPDATE team8_legal_cases SET status = COALESCE(archived_from_status, 'open'), archived_from_status = NULL WHERE id = :id")
+                        ->execute(['id' => $id]);
+                }
+                t8_audit_log($pdo, $currentUserId, 'legal_case', $id, $action, $statusBefore, $statusAfter, true);
+                $pdo->commit();
+                t8_flash_set('success', $action === 'archive' ? 'Case archived.' : 'Case restored.');
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                t8_flash_set('danger', 'The case status could not be changed.');
+            }
         } else {
             t8_flash_set('danger', 'Legal case not found.');
         }
@@ -492,26 +1779,71 @@ switch ($action) {
         }
         t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'view_documents');
 
+        $attachedDocs = [];
+        $availableDocs = [];
+        if (!$legalHasDocumentType) {
+            $errors[] = 'Apply database/migrations/2026_09_26_legal_case_documents.sql before managing legal documents.';
+            break;
+        }
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['form'] ?? '') === 'attach') {
             t8_require_role(['admin']);
-            $documentId = (int) ($_POST['document_id'] ?? 0);
+            $documentId = filter_var($_POST['document_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            $legalDocumentType = (string) ($_POST['legal_document_type'] ?? '');
             $description = trim((string) ($_POST['description'] ?? ''));
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
                 $errors[] = 'Your session expired. Please try again.';
-            } elseif (!$documentId) {
+            } elseif ($case['status'] === 'archived') {
+                $errors[] = 'Archived cases cannot receive documents.';
+            } elseif ($documentId === false) {
                 $errors[] = 'Please select a document to attach.';
+            } elseif (!in_array($legalDocumentType, $legalDocumentTypes, true)) {
+                $errors[] = 'Select a valid legal document type.';
+            } elseif (mb_strlen($description) > 500) {
+                $errors[] = 'Document note must be 500 characters or fewer.';
             } else {
-                $pdo->prepare(
-                    'INSERT INTO team8_legal_documents (case_id, document_id, description) VALUES (:case_id, :document_id, :description)'
-                )->execute([
-                    'case_id'     => $caseId,
-                    'document_id' => $documentId,
-                    'description' => $description !== '' ? $description : null,
-                ]);
-                t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'attach_document');
-                t8_flash_set('success', 'Document attached to case.');
-                redirect(page_url('legal', ['action' => 'documents', 'id' => $caseId]));
+                $documentStmt = $pdo->prepare('SELECT id FROM team8_documents WHERE id = :id AND deleted_at IS NULL');
+                $documentStmt->execute(['id' => $documentId]);
+                $alreadyAttached = $pdo->prepare('SELECT id FROM team8_legal_documents WHERE case_id = :case_id AND document_id = :document_id');
+                $alreadyAttached->execute(['case_id' => $caseId, 'document_id' => $documentId]);
+                if ($documentStmt->fetchColumn() === false) {
+                    $errors[] = 'The selected document is unavailable.';
+                } elseif ($alreadyAttached->fetchColumn() !== false) {
+                    $errors[] = 'That document is already attached to this case.';
+                } else {
+                    try {
+                        $pdo->beginTransaction();
+                        $pdo->prepare(
+                            'INSERT INTO team8_legal_documents (case_id, document_id, legal_document_type, description)
+                             VALUES (:case_id, :document_id, :legal_document_type, :description)'
+                        )->execute([
+                            'case_id' => $caseId,
+                            'document_id' => $documentId,
+                            'legal_document_type' => $legalDocumentType,
+                            'description' => $description !== '' ? $description : null,
+                        ]);
+                        $documentLinkId = (int) $pdo->lastInsertId();
+                        t8_audit_log(
+                            $pdo,
+                            $currentUserId,
+                            'legal_case',
+                            $caseId,
+                            'attach_document',
+                            null,
+                            json_encode(['link_id' => $documentLinkId, 'document_id' => (int) $documentId, 'type' => $legalDocumentType], JSON_THROW_ON_ERROR),
+                            true
+                        );
+                        $pdo->commit();
+                        t8_flash_set('success', 'Document attached to case.');
+                        redirect(page_url('legal', ['action' => 'documents', 'id' => $caseId]));
+                    } catch (Throwable $e) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                        $errors[] = 'The document could not be attached. Please try again.';
+                    }
+                }
             }
         }
 
@@ -526,9 +1858,17 @@ switch ($action) {
         $attachedDocs->execute(['case_id' => $caseId]);
         $attachedDocs = $attachedDocs->fetchAll(PDO::FETCH_ASSOC);
 
-        $availableDocs = $pdo->query(
-            'SELECT id, title FROM team8_documents WHERE deleted_at IS NULL ORDER BY title'
-        )->fetchAll(PDO::FETCH_ASSOC);
+        $availableDocs = $pdo->prepare(
+            'SELECT d.id, d.title FROM team8_documents d
+             WHERE d.deleted_at IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM team8_legal_documents ld
+                   WHERE ld.case_id = :case_id AND ld.document_id = d.id
+               )
+             ORDER BY d.title'
+        );
+        $availableDocs->execute(['case_id' => $caseId]);
+        $availableDocs = $availableDocs->fetchAll(PDO::FETCH_ASSOC);
         break;
 
     case 'detach_document':
@@ -543,10 +1883,57 @@ switch ($action) {
         }
         $linkId = (int) ($_POST['link_id'] ?? 0);
         $caseId = (int) ($_POST['case_id'] ?? 0);
-        $pdo->prepare('DELETE FROM team8_legal_documents WHERE id = :id AND case_id = :case_id')
-            ->execute(['id' => $linkId, 'case_id' => $caseId]);
-        t8_audit_log($pdo, $currentUserId, 'legal_case', $caseId, 'detach_document');
-        t8_flash_set('success', 'Document removed from case.');
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+        if (!$legalHasDocumentType || !$case || $case['status'] === 'archived') {
+            t8_flash_set('danger', 'Legal case or document link not found.');
+        } else {
+            try {
+                $pdo->beginTransaction();
+                $documentLinkStmt = $pdo->prepare(
+                    'SELECT document_id, legal_document_type FROM team8_legal_documents
+                     WHERE id = :id AND case_id = :case_id FOR UPDATE'
+                );
+                $documentLinkStmt->execute(['id' => $linkId, 'case_id' => $caseId]);
+                $documentLink = $documentLinkStmt->fetch(PDO::FETCH_ASSOC);
+                if ($documentLink === false) {
+                    $pdo->rollBack();
+                    t8_flash_set('danger', 'Document link not found.');
+                } else {
+                    $communicationReference = false;
+                    if ($legalHasCommunicationSchema) {
+                        $communicationStmt = $pdo->prepare(
+                            'SELECT id FROM team8_legal_case_communications WHERE attachment_legal_document_id = :link_id LIMIT 1'
+                        );
+                        $communicationStmt->execute(['link_id' => $linkId]);
+                        $communicationReference = $communicationStmt->fetchColumn() !== false;
+                    }
+                    if ($communicationReference) {
+                        $pdo->rollBack();
+                        t8_flash_set('danger', 'This document is referenced by a recorded communication and cannot be unlinked.');
+                    } else {
+                        $pdo->prepare('DELETE FROM team8_legal_documents WHERE id = :id AND case_id = :case_id')
+                            ->execute(['id' => $linkId, 'case_id' => $caseId]);
+                        t8_audit_log(
+                            $pdo,
+                            $currentUserId,
+                            'legal_case',
+                            $caseId,
+                            'detach_document',
+                            json_encode(['link_id' => $linkId, 'document_id' => (int) $documentLink['document_id'], 'type' => $documentLink['legal_document_type']], JSON_THROW_ON_ERROR),
+                            null,
+                            true
+                        );
+                        $pdo->commit();
+                        t8_flash_set('success', 'Document removed from case.');
+                    }
+                }
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                t8_flash_set('danger', 'The document link could not be removed.');
+            }
+        }
         redirect(page_url('legal', ['action' => 'documents', 'id' => $caseId]));
         break;
 
@@ -639,16 +2026,61 @@ switch ($action) {
 }
 
 $showForm = in_array($action, ['create', 'edit'], true);
+$showDetails = $action === 'view';
+$showResolution = $action === 'resolution';
+$showTimeline = $action === 'timeline';
+$showCommunications = $action === 'communications';
+$showNotes = $action === 'notes';
+$showHearings = $action === 'hearings';
+$showTasks = $action === 'tasks';
+$showParties = $action === 'parties';
 $showDocuments = $action === 'documents';
 $showRetention = $action === 'retention';
 $showCaseTypes = $action === 'case_types';
-$showList = !$showForm && !$showDocuments && !$showRetention && !$showCaseTypes;
+$showList = !$showForm && !$showDetails && !$showResolution && !$showTimeline && !$showCommunications && !$showNotes && !$showHearings && !$showTasks && !$showParties && !$showDocuments && !$showRetention && !$showCaseTypes;
 
 $currentCaseType = null;
+$formStatusOptions = [];
 if ($showForm && $existing !== null) {
     $caseTypeStmt = $pdo->prepare('SELECT id, type_code, name, is_active FROM team8_legal_case_types WHERE id = :id');
     $caseTypeStmt->execute(['id' => (int) $existing['case_type_id']]);
     $currentCaseType = $caseTypeStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+if ($showForm) {
+    if ($action === 'create') {
+        $formStatusOptions = in_array('open', $legalEditableStatuses, true) ? ['open'] : [];
+    } else {
+        $formStatusOptions[] = (string) $existing['status'];
+        $caseResolutionExists = false;
+        if ($legalHasResolutionSchema) {
+            $resolutionExistsStmt = $pdo->prepare('SELECT id FROM team8_legal_case_resolutions WHERE case_id = :case_id');
+            $resolutionExistsStmt->execute(['case_id' => (int) $existing['id']]);
+            $caseResolutionExists = $resolutionExistsStmt->fetchColumn() !== false;
+        }
+        foreach ($legalEditableStatuses as $candidateStatus) {
+            if (t8_legal_case_status_transition_is_allowed((string) $existing['status'], $candidateStatus)
+                && (!in_array($candidateStatus, ['resolved', 'closed'], true) || $caseResolutionExists)
+            ) {
+                $formStatusOptions[] = $candidateStatus;
+            }
+        }
+    }
+}
+$formAssignedOfficerName = '';
+$formSupportingStaffName = 'None';
+$formDepartmentName = '—';
+if ($showForm && $existing !== null) {
+    $formAssignedOfficerName = (string) $existing['assigned_to_name'];
+    $assigneeNameMap = array_column($assignees, 'full_name', 'id');
+    $formSupportingStaffName = $formValues['supporting_staff_id'] !== ''
+        ? (string) ($assigneeNameMap[(int) $formValues['supporting_staff_id']] ?? '—')
+        : 'None';
+    foreach ($departments as $department) {
+        if ((string) $department['id'] === $formValues['department_id']) {
+            $formDepartmentName = (string) $department['name'];
+            break;
+        }
+    }
 }
 
 if ($showList) {
@@ -711,8 +2143,17 @@ if ($showList) {
         }
     }
     if (!$isAdmin) {
-        $where[] = 'lc.assigned_to = :assigned_to';
+        $caseAccessConditions = ['lc.assigned_to = :assigned_to'];
         $params['assigned_to'] = $currentUserId;
+        if ($legalHasCaseCreationFields) {
+            $caseAccessConditions[] = 'lc.supporting_staff_id = :supporting_staff_access';
+            $params['supporting_staff_access'] = $currentUserId;
+        }
+        if ($legalHasTaskSchema) {
+            $caseAccessConditions[] = "EXISTS (SELECT 1 FROM team8_legal_case_tasks scope_task WHERE scope_task.case_id = lc.id AND scope_task.assigned_to = :task_assigned_access AND scope_task.status <> 'cancelled')";
+            $params['task_assigned_access'] = $currentUserId;
+        }
+        $where[] = '(' . implode(' OR ', $caseAccessConditions) . ')';
     }
 
     $from = " FROM team8_legal_cases lc
@@ -760,6 +2201,18 @@ function t8_legal_status_badge(string $status): string
     return $map[$status] ?? 't8-badge-pending';
 }
 
+function t8_legal_task_status_badge(string $status): string
+{
+    $map = [
+        'pending' => 't8-badge-pending',
+        'in_progress' => 't8-badge-active',
+        'completed' => 't8-badge-approved',
+        'overdue' => 't8-badge-rejected',
+        'cancelled' => 't8-badge-cancelled',
+    ];
+    return $map[$status] ?? 't8-badge-pending';
+}
+
 /**
  * Renders the meatball trigger + dropdown menu for the "Legal Cases"
  * list table, plus the data-* attributes consumed by the shared
@@ -788,6 +2241,9 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             <button type="button" class="t8-row-menu-item t8-row-view-details" role="menuitem">
                 <i class="fa-solid fa-eye"></i> View Details
             </button>
+            <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('legal', ['action' => 'view', 'id' => $id])) ?>">
+                <i class="fa-solid fa-folder-open"></i> Open Case Workspace
+            </a>
             <button type="button" class="t8-row-menu-item t8-row-copy-ref" role="menuitem" data-copy="<?= e($ref) ?>">
                 <i class="fa-solid fa-copy"></i> Copy Case Ref
             </button>
@@ -800,11 +2256,13 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                     <i class="fa-solid fa-box-archive"></i> <?= $retentionRecord !== null ? 'Manage Retention' : 'View Retention' ?>
                 </a>
             <?php endif; ?>
-            <?php if ($isAdmin && !$archivedFilter): ?>
+            <?php if (($isAdmin || t8_has_role('legal_officer')) && !$archivedFilter): ?>
                 <div class="t8-row-menu-divider"></div>
                 <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('legal', ['action' => 'edit', 'id' => $id])) ?>">
                     <i class="fa-solid fa-pen"></i> Edit
                 </a>
+                <?php if ($isAdmin): ?>
+                <?php if ($c['status'] === 'closed'): ?>
                 <form method="post" action="<?= e(page_url('legal', ['action' => 'archive'])) ?>" onsubmit="return confirm('Archive this case?');">
                     <?= t8_csrf_field() ?>
                     <input type="hidden" name="id" value="<?= e((string) $id) ?>">
@@ -812,6 +2270,12 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                         <i class="fa-solid fa-box-archive"></i> Archive
                     </button>
                 </form>
+                <?php else: ?>
+                    <button class="t8-row-menu-item t8-danger" type="button" role="menuitem" disabled title="Close the case before archiving it">
+                        <i class="fa-solid fa-box-archive"></i> Archive
+                    </button>
+                <?php endif; ?>
+                <?php endif; ?>
             <?php elseif ($isAdmin): ?>
                 <div class="t8-row-menu-divider"></div>
                 <form method="post" action="<?= e(page_url('legal', ['action' => 'restore'])) ?>">
@@ -891,20 +2355,29 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <textarea class="t8-input" id="description" name="description" rows="4"><?= e($formValues['description']) ?></textarea>
             </div>
 
-            <div class="t8-field">
+            <?php if ($legalHasCaseInformation): ?>
+                <div class="t8-field"><label class="t8-label" for="court_agency">Court / Agency</label><input class="t8-input" id="court_agency" name="court_agency" maxlength="200" value="<?= e($formValues['court_agency']) ?>"></div>
+                <div class="t8-field"><label class="t8-label" for="branch_office">Branch / Office</label><input class="t8-input" id="branch_office" name="branch_office" maxlength="150" value="<?= e($formValues['branch_office']) ?>"></div>
+                <div class="t8-field"><label class="t8-label" for="docket_reference">Docket / Reference Number</label><input class="t8-input" id="docket_reference" name="docket_reference" maxlength="150" value="<?= e($formValues['docket_reference']) ?>"></div>
+                <div class="t8-field"><label class="t8-label" for="jurisdiction">Jurisdiction</label><input class="t8-input" id="jurisdiction" name="jurisdiction" maxlength="150" value="<?= e($formValues['jurisdiction']) ?>"></div>
+                <div class="t8-field"><label class="t8-label" for="location">Location</label><input class="t8-input" id="location" name="location" maxlength="200" value="<?= e($formValues['location']) ?>"></div>
+                <div class="t8-field t8-form-span-2"><label class="t8-label" for="legal_basis">Legal Basis / Applicable Law</label><textarea class="t8-input" id="legal_basis" name="legal_basis" rows="3" maxlength="5000"><?= e($formValues['legal_basis']) ?></textarea></div>
+                <div class="t8-field t8-form-span-2"><label class="t8-label" for="current_action">Current Action / Next Step</label><textarea class="t8-input" id="current_action" name="current_action" rows="3" maxlength="5000"><?= e($formValues['current_action']) ?></textarea></div>
+            <?php endif; ?>
+
+            <?php if ($isAdmin): ?><div class="t8-field">
                 <label class="t8-label" for="department_id">Department <span class="t8-required">*</span></label>
                 <select class="t8-select" id="department_id" name="department_id" required><option value="">Select a department</option><?php foreach ($departments as $department): ?><option value="<?= e((string) $department['id']) ?>" <?= (string) $department['id'] === $formValues['department_id'] ? 'selected' : '' ?>><?= e($department['name']) ?></option><?php endforeach; ?></select>
-            </div><?php endif; ?>
+            </div><?php else: ?>
+                <div class="t8-field"><span class="t8-label">Department</span><strong><?= e($formDepartmentName) ?></strong></div>
+            <?php endif; ?><?php endif; ?>
 
             <div class="t8-field">
                 <label class="t8-label" for="status">Status <span class="t8-required">*</span></label>
                 <select class="t8-select" id="status" name="status" required data-current-status="<?= e((string) ($existing['status'] ?? $formValues['status'])) ?>">
-                    <?php if (!in_array($formValues['status'], $legalEditableStatuses, true)): ?>
-                        <option value="<?= e($formValues['status']) ?>" selected><?= e(ucwords(str_replace('_', ' ', $formValues['status']))) ?> (inactive)</option>
-                    <?php endif; ?>
-                    <?php foreach ($legalEditableStatuses as $s): ?>
+                    <?php foreach ($formStatusOptions as $s): ?>
                         <option value="<?= e($s) ?>" <?= $s === $formValues['status'] ? 'selected' : '' ?>>
-                            <?= e(ucwords(str_replace('_', ' ', $s))) ?>
+                            <?= e(ucwords(str_replace('_', ' ', $s))) ?><?= !in_array($s, $legalEditableStatuses, true) ? ' (inactive)' : '' ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -971,19 +2444,19 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             </script>
             <?php endif; ?>
 
-            <div class="t8-field">
+            <?php if ($isAdmin): ?><div class="t8-field">
                 <label class="t8-label" for="assigned_to">Assigned Legal Officer <span class="t8-required">*</span></label>
                 <select class="t8-select" id="assigned_to" name="assigned_to" required>
                     <option value="">Select a person…</option>
-                    <?php foreach ($assignees as $a): ?>
+                    <?php foreach ($legalOfficers as $a): ?>
                         <option value="<?= e((string) $a['id']) ?>" <?= (string) $a['id'] === $formValues['assigned_to'] ? 'selected' : '' ?>>
                             <?= e($a['full_name']) ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
-            </div>
+            </div><?php else: ?><div class="t8-field"><span class="t8-label">Assigned Legal Officer</span><strong><?= e($formAssignedOfficerName) ?></strong></div><?php endif; ?>
 
-            <div class="t8-field">
+            <?php if ($isAdmin): ?><div class="t8-field">
                 <label class="t8-label" for="supporting_staff_id">Supporting Staff</label>
                 <select class="t8-select" id="supporting_staff_id" name="supporting_staff_id">
                     <option value="">None</option>
@@ -993,7 +2466,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                         </option>
                     <?php endforeach; ?>
                 </select>
-            </div>
+            </div><?php else: ?><div class="t8-field"><span class="t8-label">Supporting Staff</span><strong><?= e($formSupportingStaffName) ?></strong></div><?php endif; ?>
 
             <div class="t8-form-actions t8-legal-form-actions">
                 <button class="t8-btn t8-btn-accent" type="submit">
@@ -1026,6 +2499,491 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             });
         </script>
     <?php endif; ?>
+
+<?php elseif ($showDetails): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>"><i class="fa-solid fa-arrow-left"></i> Back to Cases</a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $caseId])) ?>"><i class="fa-solid fa-paperclip"></i> Documents</a>
+        <?php if ($legalHasPartySchema): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'parties', 'id' => $caseId])) ?>"><i class="fa-solid fa-users"></i> Parties</a>
+        <?php endif; ?>
+        <?php if ($legalHasTaskSchema): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'tasks', 'id' => $caseId])) ?>"><i class="fa-solid fa-list-check"></i> Tasks</a>
+        <?php endif; ?>
+        <?php if ($legalHasHearingSchema): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'hearings', 'id' => $caseId])) ?>"><i class="fa-solid fa-calendar-days"></i> Hearings</a>
+        <?php endif; ?>
+        <?php if ($legalHasNotesSchema): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'notes', 'id' => $caseId])) ?>"><i class="fa-solid fa-note-sticky"></i> Notes</a>
+        <?php endif; ?>
+        <?php if ($legalHasCommunicationSchema): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'communications', 'id' => $caseId])) ?>"><i class="fa-solid fa-comments"></i> Communications</a>
+        <?php endif; ?>
+        <?php if ($legalHasResolutionSchema): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'resolution', 'id' => $caseId])) ?>"><i class="fa-solid fa-scale-balanced"></i> Resolution</a>
+        <?php endif; ?>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'timeline', 'id' => $caseId])) ?>"><i class="fa-solid fa-clock-rotate-left"></i> Timeline</a>
+        <?php if ($case['status'] === 'closed'): ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'retention', 'id' => $caseId])) ?>"><i class="fa-solid fa-box-archive"></i> Retention</a>
+        <?php endif; ?>
+        <?php if ($isAdmin && $case['status'] !== 'archived'): ?>
+            <a class="t8-btn t8-btn-accent" href="<?= e(page_url('legal', ['action' => 'edit', 'id' => $caseId])) ?>"><i class="fa-solid fa-pen"></i> Edit Case</a>
+        <?php endif; ?>
+    </div>
+
+    <div class="t8-card">
+        <div class="t8-card-header">
+            <div>
+                <h2 class="t8-card-title"><?= e((string) $case['title']) ?></h2>
+                <p class="t8-help-text"><?= e((string) ($case['case_number'] ?? ('CASE-' . str_pad((string) $caseId, 6, '0', STR_PAD_LEFT)))) ?> &middot; <?= e((string) $detailCaseType) ?></p>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                <span class="t8-badge <?= e(t8_legal_status_badge((string) $case['status'])) ?>"><?= e(ucwords(str_replace('_', ' ', (string) $case['status']))) ?></span>
+                <span class="t8-badge t8-badge-pending"><?= e(ucfirst((string) ($case['priority'] ?? 'medium'))) ?> Priority</span>
+                <?php if (t8_legal_is_monitoring($case)): ?><span class="t8-badge-monitoring">Monitoring</span><?php endif; ?>
+            </div>
+        </div>
+
+        <section aria-labelledby="legal-case-overview-heading" style="padding: 0 var(--t8-space-4) var(--t8-space-4);">
+            <h3 id="legal-case-overview-heading">Overview</h3>
+            <div class="t8-hr-readonly-block">
+                <div class="t8-hr-readonly-item"><span>Filed Date</span><strong><?= e(format_date((string) $case['filed_date'], 'M d, Y')) ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Deadline</span><strong><?= !empty($case['deadline']) ? e(format_date((string) $case['deadline'], 'M d, Y')) : '—' ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Next Action</span><strong><?= !empty($case['next_action_date']) ? e(format_date((string) $case['next_action_date'], 'M d, Y')) : '—' ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Closing Date</span><strong><?= !empty($case['closing_date']) ? e(format_date((string) $case['closing_date'], 'M d, Y')) : '—' ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Assigned Legal Officer</span><strong><?= e((string) $case['assigned_to_name']) ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Supporting Staff</span><strong><?= e($detailSupportingStaff) ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Department</span><strong><?= e($detailDepartment) ?></strong></div>
+            </div>
+            <?php if (trim((string) ($case['subject'] ?? '')) !== ''): ?>
+                <h3>Subject</h3>
+                <p><?= nl2br(e((string) $case['subject'])) ?></p>
+            <?php endif; ?>
+            <h3>Description / Summary</h3>
+            <?php if (trim((string) ($case['description'] ?? '')) !== ''): ?>
+                <p><?= nl2br(e((string) $case['description'])) ?></p>
+            <?php else: ?>
+                <p class="t8-help-text">No case summary has been added.</p>
+            <?php endif; ?>
+            <?php if ($legalHasCaseInformation): ?>
+                <h3>External / Legal Information</h3>
+                <div class="t8-hr-readonly-block">
+                    <?php foreach ([
+                        'Court / Agency' => 'court_agency',
+                        'Branch / Office' => 'branch_office',
+                        'Docket / Reference Number' => 'docket_reference',
+                        'Jurisdiction' => 'jurisdiction',
+                        'Location' => 'location',
+                    ] as $label => $field): ?>
+                        <?php if (!empty($case[$field])): ?><div class="t8-hr-readonly-item"><span><?= e($label) ?></span><strong><?= e((string) $case[$field]) ?></strong></div><?php endif; ?>
+                    <?php endforeach; ?>
+                </div>
+                <?php if (!empty($case['legal_basis'])): ?><h4>Legal Basis / Applicable Law</h4><p><?= nl2br(e((string) $case['legal_basis'])) ?></p><?php endif; ?>
+                <?php if (!empty($case['current_action'])): ?><h4>Current Action / Next Step</h4><p><?= nl2br(e((string) $case['current_action'])) ?></p><?php endif; ?>
+            <?php endif; ?>
+            <?php if ($legalHasResolutionSchema): ?>
+                <h3>Resolution</h3>
+                <?php if ($caseResolution !== null): ?>
+                    <div class="t8-hr-readonly-block">
+                        <div class="t8-hr-readonly-item"><span>Type</span><strong><?= e($caseResolution['resolution_type']) ?></strong></div>
+                        <div class="t8-hr-readonly-item"><span>Resolved Date</span><strong><?= e(format_date((string) $caseResolution['resolved_date'], 'M d, Y')) ?></strong></div>
+                        <?php if (!empty($caseResolution['final_outcome'])): ?><div class="t8-hr-readonly-item"><span>Final Outcome</span><strong><?= e((string) $caseResolution['final_outcome']) ?></strong></div><?php endif; ?>
+                        <?php if (!empty($caseResolution['supporting_version_id'])): ?><div class="t8-hr-readonly-item"><span>Supporting Document</span><strong><a href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $caseResolution['supporting_version_id']])) ?>"><?= e((string) $caseResolution['supporting_document_title']) ?></a></strong></div><?php endif; ?>
+                    </div>
+                    <p><?= nl2br(e((string) $caseResolution['resolution_summary'])) ?></p>
+                <?php elseif (in_array($case['status'], ['resolved', 'closed'], true)): ?>
+                    <div class="t8-alert t8-alert-warning">No resolution record is associated with this legacy case.</div>
+                <?php else: ?>
+                    <p class="t8-help-text">Record the resolution before moving this case to Resolved or Closed.</p>
+                <?php endif; ?>
+            <?php endif; ?>
+        </section>
+    </div>
+
+<?php elseif ($showResolution): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'view', 'id' => $caseId])) ?>"><i class="fa-solid fa-arrow-left"></i> Case Workspace</a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Back to Cases</a>
+    </div>
+    <div class="t8-card">
+        <div class="t8-card-header"><h2 class="t8-card-title">Resolution &mdash; <?= e((string) $case['title']) ?></h2></div>
+        <?php if (!$legalHasResolutionSchema): ?>
+            <div class="t8-alert t8-alert-danger">Apply the legal case resolutions migration before recording a resolution.</div>
+        <?php elseif ($resolution !== null): ?>
+            <div class="t8-hr-readonly-block">
+                <div class="t8-hr-readonly-item"><span>Resolution Type</span><strong><?= e($resolution['resolution_type']) ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Resolved Date</span><strong><?= e(format_date((string) $resolution['resolved_date'], 'M d, Y')) ?></strong></div>
+                <div class="t8-hr-readonly-item"><span>Recorded By</span><strong><?= e((string) $resolution['recorded_by_name']) ?></strong></div>
+                <?php if (!empty($resolution['final_outcome'])): ?><div class="t8-hr-readonly-item"><span>Final Outcome</span><strong><?= e((string) $resolution['final_outcome']) ?></strong></div><?php endif; ?>
+                <?php if (!empty($resolution['supporting_version_id'])): ?><div class="t8-hr-readonly-item"><span>Supporting Document</span><strong><a href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $resolution['supporting_version_id']])) ?>"><?= e((string) $resolution['supporting_document_title']) ?></a></strong></div><?php endif; ?>
+            </div>
+            <h3>Resolution Summary</h3>
+            <p><?= nl2br(e((string) $resolution['resolution_summary'])) ?></p>
+        <?php endif; ?>
+
+        <?php if ($legalHasResolutionSchema && in_array($case['status'], ['active', 'resolved'], true)): ?>
+            <section style="padding: var(--t8-space-4);">
+                <h3><?= $resolution !== null ? 'Update Resolution' : 'Record Resolution' ?></h3>
+                <form method="post" action="<?= e(page_url('legal', ['action' => 'resolution', 'id' => $caseId])) ?>" class="t8-legal-form-grid">
+                    <?= t8_csrf_field() ?>
+                    <div class="t8-field"><label class="t8-label" for="resolution_type">Resolution Type</label><select class="t8-select" id="resolution_type" name="resolution_type" required><option value="">Select type</option><?php foreach ($legalResolutionTypes as $type): ?><option value="<?= e($type) ?>" <?= $resolutionInput['resolution_type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></div>
+                    <div class="t8-field"><label class="t8-label" for="resolved_date">Resolved Date</label><input class="t8-input" type="date" id="resolved_date" name="resolved_date" min="<?= e((string) $case['filed_date']) ?>" max="<?= e(date('Y-m-d')) ?>" value="<?= e($resolutionInput['resolved_date']) ?>" required></div>
+                    <div class="t8-field t8-form-span-2"><label class="t8-label" for="resolution_summary">Resolution Summary</label><textarea class="t8-input" id="resolution_summary" name="resolution_summary" rows="4" maxlength="5000" required><?= e($resolutionInput['resolution_summary']) ?></textarea></div>
+                    <div class="t8-field t8-form-span-2"><label class="t8-label" for="final_outcome">Final Outcome</label><textarea class="t8-input" id="final_outcome" name="final_outcome" rows="3" maxlength="5000"><?= e($resolutionInput['final_outcome']) ?></textarea></div>
+                    <div class="t8-field t8-form-span-2"><label class="t8-label" for="resolution_document">Supporting Document</label><select class="t8-select" id="resolution_document" name="supporting_legal_document_id"><option value="">None</option><?php foreach ($resolutionDocuments as $document): ?><option value="<?= e((string) $document['id']) ?>" <?= $resolutionInput['supporting_legal_document_id'] === (string) $document['id'] ? 'selected' : '' ?>><?= e($document['title']) ?></option><?php endforeach; ?></select></div>
+                    <div class="t8-form-actions"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-check"></i> Save Resolution</button></div>
+                </form>
+            </section>
+        <?php elseif (!$legalHasResolutionSchema): ?>
+            <div class="t8-alert t8-alert-danger">Resolution is unavailable until the migration is applied.</div>
+        <?php elseif (!in_array($case['status'], ['closed', 'archived'], true)): ?>
+            <div class="t8-alert t8-alert-info">Move the case to Active before recording a resolution.</div>
+        <?php else: ?>
+            <div class="t8-alert t8-alert-info">Closed and archived case resolutions are read-only.</div>
+        <?php endif; ?>
+    </div>
+
+<?php elseif ($showTimeline): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'view', 'id' => $caseId])) ?>"><i class="fa-solid fa-arrow-left"></i> Case Workspace</a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Back to Cases</a>
+    </div>
+    <div class="t8-card">
+        <div class="t8-card-header"><h2 class="t8-card-title">Case Timeline &mdash; <?= e((string) $case['title']) ?></h2></div>
+        <?php if ($timelineEvents === []): ?>
+            <div class="t8-empty">No case activity has been recorded yet.</div>
+        <?php else: ?>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead><tr><th>Date / Time</th><th>Event</th><th>Details</th><th>By</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($timelineEvents as $event): ?>
+                            <?php $timelineDetail = t8_legal_timeline_event_detail($event); ?>
+                            <tr>
+                                <td><?= e(format_date((string) $event['created_at'], 'M d, Y g:i A')) ?></td>
+                                <td><?= e(t8_legal_timeline_event_title((string) $event['entity_type'], (string) $event['action'])) ?></td>
+                                <td><?= $timelineDetail !== '' ? e($timelineDetail) : '—' ?></td>
+                                <td><?= e($event['actor_name']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+
+<?php elseif ($showCommunications): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'view', 'id' => $caseId])) ?>"><i class="fa-solid fa-arrow-left"></i> Case Workspace</a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Back to Cases</a>
+    </div>
+    <div class="t8-card">
+        <div class="t8-card-header"><h2 class="t8-card-title">Communications &mdash; <?= e((string) $case['title']) ?></h2></div>
+        <?php if (!$legalHasCommunicationSchema): ?>
+            <div class="t8-alert t8-alert-danger">Apply the legal case communications migration before recording communications.</div>
+        <?php else: ?>
+            <?php if ($communications === []): ?>
+                <div class="t8-empty">No communications have been recorded for this case.</div>
+            <?php else: ?>
+                <div class="t8-table-wrap">
+                    <table class="t8-table">
+                        <thead><tr><th>Date</th><th>Type / Direction</th><th>Sender / Recipient</th><th>Subject / Summary</th><th>Attachment</th><th>Recorded By</th></tr></thead>
+                        <tbody>
+                            <?php foreach ($communications as $communication): ?>
+                                <tr>
+                                    <td><?= e(format_date((string) $communication['communication_date'], 'M d, Y')) ?><?= !empty($communication['communication_time']) ? '<br>' . e(date('g:i A', strtotime((string) $communication['communication_time']))) : '' ?></td>
+                                    <td><?= e((string) $communication['communication_type']) ?><br><?= e(ucfirst((string) $communication['direction'])) ?></td>
+                                    <td><?= e((string) ($communication['sender'] ?: '—')) ?><br><?= e((string) ($communication['recipient'] ?: '—')) ?></td>
+                                    <td><strong><?= e((string) ($communication['subject'] ?: '—')) ?></strong><br><?= nl2br(e((string) $communication['summary'])) ?></td>
+                                    <td><?php if (!empty($communication['attachment_version_id'])): ?><a href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $communication['attachment_version_id']])) ?>"><i class="fa-solid fa-download"></i> <?= e((string) $communication['attachment_title']) ?></a><?php else: ?>—<?php endif; ?></td>
+                                    <td><?= e($communication['recorder_name']) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($case['status'] !== 'archived'): ?>
+                <section style="padding: var(--t8-space-4);">
+                    <h3>Record Communication</h3>
+                    <form method="post" action="<?= e(page_url('legal', ['action' => 'communications', 'id' => $caseId])) ?>" class="t8-legal-form-grid">
+                        <?= t8_csrf_field() ?>
+                        <div class="t8-field"><label class="t8-label" for="communication_date">Date</label><input class="t8-input" type="date" id="communication_date" name="communication_date" value="<?= e($communicationInput['date']) ?>" required></div>
+                        <div class="t8-field"><label class="t8-label" for="communication_time">Time</label><input class="t8-input" type="time" id="communication_time" name="communication_time" value="<?= e($communicationInput['time']) ?>"></div>
+                        <div class="t8-field"><label class="t8-label" for="communication_type">Communication Type</label><select class="t8-select" id="communication_type" name="communication_type" required><option value="">Select type</option><?php foreach ($legalCommunicationTypes as $type): ?><option value="<?= e($type) ?>" <?= $communicationInput['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></div>
+                        <div class="t8-field"><label class="t8-label" for="communication_direction">Direction</label><select class="t8-select" id="communication_direction" name="direction" required><option value="incoming" <?= $communicationInput['direction'] === 'incoming' ? 'selected' : '' ?>>Incoming</option><option value="outgoing" <?= $communicationInput['direction'] === 'outgoing' ? 'selected' : '' ?>>Outgoing</option></select></div>
+                        <div class="t8-field"><label class="t8-label" for="communication_sender">Sender</label><input class="t8-input" id="communication_sender" name="sender" maxlength="200" value="<?= e($communicationInput['sender']) ?>"></div>
+                        <div class="t8-field"><label class="t8-label" for="communication_recipient">Recipient</label><input class="t8-input" id="communication_recipient" name="recipient" maxlength="200" value="<?= e($communicationInput['recipient']) ?>"></div>
+                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="communication_subject">Subject</label><input class="t8-input" id="communication_subject" name="subject" maxlength="200" value="<?= e($communicationInput['subject']) ?>"></div>
+                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="communication_summary">Summary</label><textarea class="t8-input" id="communication_summary" name="summary" rows="4" maxlength="5000" required><?= e($communicationInput['summary']) ?></textarea></div>
+                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="communication_attachment">Attached Legal Document</label><select class="t8-select" id="communication_attachment" name="attachment_legal_document_id"><option value="">None</option><?php foreach ($caseLegalDocuments as $legalDocument): ?><option value="<?= e((string) $legalDocument['id']) ?>" <?= $communicationInput['attachment_legal_document_id'] === (string) $legalDocument['id'] ? 'selected' : '' ?>><?= e($legalDocument['title']) ?></option><?php endforeach; ?></select></div>
+                        <div class="t8-form-actions"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-plus"></i> Record Communication</button></div>
+                    </form>
+                </section>
+            <?php else: ?>
+                <div class="t8-alert t8-alert-info">Archived cases are read-only.</div>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+
+<?php elseif ($showNotes): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'view', 'id' => $caseId])) ?>"><i class="fa-solid fa-arrow-left"></i> Case Workspace</a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Back to Cases</a>
+    </div>
+    <div class="t8-card">
+        <div class="t8-card-header"><h2 class="t8-card-title">Case Notes &mdash; <?= e((string) $case['title']) ?></h2></div>
+        <?php if (!$legalHasNotesSchema): ?>
+            <div class="t8-alert t8-alert-danger">Apply the legal case notes migration before viewing notes.</div>
+        <?php else: ?>
+            <?php if ($caseNotes === []): ?>
+                <div class="t8-empty">No internal notes have been added to this case.</div>
+            <?php else: ?>
+                <div class="t8-table-wrap">
+                    <table class="t8-table">
+                        <thead><tr><th>Note</th><th>Author</th><th>Date / Time</th></tr></thead>
+                        <tbody>
+                            <?php foreach ($caseNotes as $note): ?>
+                                <tr>
+                                    <td><?= nl2br(e((string) $note['content'])) ?></td>
+                                    <td><?= e($note['author_name']) ?></td>
+                                    <td><?= e(format_date((string) $note['created_at'], 'M d, Y g:i A')) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+            <?php if ($case['status'] !== 'archived'): ?>
+                <section style="padding: var(--t8-space-4);">
+                    <h3>Add Internal Note</h3>
+                    <form method="post" action="<?= e(page_url('legal', ['action' => 'notes', 'id' => $caseId])) ?>">
+                        <?= t8_csrf_field() ?>
+                        <div class="t8-field"><label class="t8-label" for="legal_case_note">Note</label><textarea class="t8-input" id="legal_case_note" name="content" rows="5" maxlength="5000" required><?= e($noteContent) ?></textarea></div>
+                        <button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-plus"></i> Add Note</button>
+                    </form>
+                </section>
+            <?php else: ?>
+                <div class="t8-alert t8-alert-info">Archived cases are read-only.</div>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+
+<?php elseif ($showHearings): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'view', 'id' => $caseId])) ?>"><i class="fa-solid fa-arrow-left"></i> Case Workspace</a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Back to Cases</a>
+    </div>
+    <div class="t8-card">
+        <div class="t8-card-header"><h2 class="t8-card-title">Hearings &amp; Proceedings &mdash; <?= e((string) $case['title']) ?></h2></div>
+        <?php if (!$legalHasHearingSchema): ?>
+            <div class="t8-alert t8-alert-danger">Apply the legal case hearings migration before managing proceedings.</div>
+        <?php else: ?>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead><tr><th>Date / Time</th><th>Venue</th><th>Type</th><th>Purpose</th><th>Status</th><th>Notes</th><th>Actions</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($hearings as $hearing): ?>
+                            <tr>
+                                <td><?= e(format_date((string) $hearing['event_date'], 'M d, Y')) ?><?= !empty($hearing['event_time']) ? '<br>' . e(date('g:i A', strtotime((string) $hearing['event_time']))) : '' ?></td>
+                                <td><?= e((string) ($hearing['venue'] ?: '—')) ?></td>
+                                <td><?= e($hearing['hearing_type']) ?></td>
+                                <td><?= e((string) ($hearing['purpose'] ?: '—')) ?></td>
+                                <td><span class="t8-badge <?= e($hearing['status'] === 'completed' ? 't8-badge-approved' : ($hearing['status'] === 'cancelled' ? 't8-badge-cancelled' : 't8-badge-pending')) ?>"><?= e(ucfirst((string) $hearing['status'])) ?></span></td>
+                                <td><?= e((string) ($hearing['notes'] ?: '—')) ?></td>
+                                <td><?php if ($case['status'] !== 'archived'): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('legal', ['action' => 'hearings', 'id' => $caseId, 'edit_id' => (int) $hearing['id']])) ?>"><i class="fa-solid fa-pen"></i> Edit</a><?php endif; ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if ($hearings === []): ?><tr><td colspan="7" class="t8-empty">No hearings or proceedings have been scheduled.</td></tr><?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+
+            <?php if ($case['status'] !== 'archived'): ?>
+                <section style="padding: var(--t8-space-4);">
+                    <h3><?= $editHearingId !== false ? 'Edit Hearing / Proceeding' : 'Add Hearing / Proceeding' ?></h3>
+                    <form method="post" action="<?= e(page_url('legal', ['action' => 'hearings', 'id' => $caseId])) ?>" class="t8-legal-form-grid">
+                        <?= t8_csrf_field() ?>
+                        <input type="hidden" name="hearing_action" value="<?= $editHearingId !== false ? 'update' : 'create' ?>">
+                        <?php if ($editHearingId !== false): ?><input type="hidden" name="hearing_id" value="<?= e((string) $editHearingId) ?>"><?php endif; ?>
+                        <div class="t8-field"><label class="t8-label" for="hearing_date">Date</label><input class="t8-input" type="date" id="hearing_date" name="event_date" min="<?= e((string) $case['filed_date']) ?>" value="<?= e($hearingInput['event_date']) ?>" required></div>
+                        <div class="t8-field"><label class="t8-label" for="hearing_time">Time</label><input class="t8-input" type="time" id="hearing_time" name="event_time" value="<?= e($hearingInput['event_time']) ?>"></div>
+                        <div class="t8-field"><label class="t8-label" for="hearing_venue">Venue</label><input class="t8-input" id="hearing_venue" name="venue" maxlength="200" value="<?= e($hearingInput['venue']) ?>"></div>
+                        <div class="t8-field"><label class="t8-label" for="hearing_type">Hearing / Proceeding Type</label><input class="t8-input" id="hearing_type" name="hearing_type" maxlength="150" value="<?= e($hearingInput['hearing_type']) ?>" required></div>
+                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="hearing_purpose">Purpose</label><input class="t8-input" id="hearing_purpose" name="purpose" maxlength="500" value="<?= e($hearingInput['purpose']) ?>"></div>
+                        <div class="t8-field"><label class="t8-label" for="hearing_status">Status</label><select class="t8-select" id="hearing_status" name="status" required><?php foreach ($hearingStatuses as $hearingStatus): ?><option value="<?= e($hearingStatus) ?>" <?= $hearingInput['status'] === $hearingStatus ? 'selected' : '' ?>><?= e(ucfirst($hearingStatus)) ?></option><?php endforeach; ?></select></div>
+                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="hearing_notes">Notes</label><textarea class="t8-input" id="hearing_notes" name="notes" rows="3" maxlength="5000"><?= e($hearingInput['notes']) ?></textarea></div>
+                        <div class="t8-form-actions"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-check"></i> <?= $editHearingId !== false ? 'Save Hearing' : 'Add Hearing' ?></button><?php if ($editHearingId !== false): ?><a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'hearings', 'id' => $caseId])) ?>">Cancel</a><?php endif; ?></div>
+                    </form>
+                </section>
+            <?php else: ?>
+                <div class="t8-alert t8-alert-info">Archived cases are read-only.</div>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+
+<?php elseif ($showTasks): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'view', 'id' => $caseId])) ?>"><i class="fa-solid fa-arrow-left"></i> Case Workspace</a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Back to Cases</a>
+    </div>
+    <div class="t8-card">
+        <div class="t8-card-header"><h2 class="t8-card-title">Tasks &amp; Deadlines &mdash; <?= e((string) $case['title']) ?></h2></div>
+        <?php if (!$legalHasTaskSchema): ?>
+            <div class="t8-alert t8-alert-danger">Apply the legal case tasks migration before managing tasks.</div>
+        <?php else: ?>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead><tr><th>Task</th><th>Assigned To</th><th>Due Date</th><th>Priority</th><th>Status</th><th>Update Status</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($tasks as $task): ?>
+                            <?php $displayTaskStatus = t8_legal_task_display_status($task); ?>
+                            <tr>
+                                <td><strong><?= e($task['title']) ?></strong><?php if (!empty($task['description'])): ?><br><span class="t8-help-text"><?= nl2br(e((string) $task['description'])) ?></span><?php endif; ?></td>
+                                <td><?= e($task['assignee_name']) ?></td>
+                                <td><?= e(format_date((string) $task['due_date'], 'M d, Y')) ?></td>
+                                <td><?= e(ucfirst((string) $task['priority'])) ?></td>
+                                <td><span class="t8-badge <?= e(t8_legal_task_status_badge($displayTaskStatus)) ?>"<?= $displayTaskStatus === 'overdue' ? ' title="Computed from the due date"' : '' ?>><?= e(ucwords(str_replace('_', ' ', $displayTaskStatus))) ?></span></td>
+                                <td>
+                                    <?php if ($case['status'] !== 'archived'): ?>
+                                        <form method="post" action="<?= e(page_url('legal', ['action' => 'tasks', 'id' => $caseId])) ?>" style="display:flex; gap:6px; align-items:center;">
+                                            <?= t8_csrf_field() ?>
+                                            <input type="hidden" name="task_action" value="status">
+                                            <input type="hidden" name="task_id" value="<?= e((string) $task['id']) ?>">
+                                            <select class="t8-select" name="status" aria-label="Status for <?= e($task['title']) ?>">
+                                                <?php foreach (['pending', 'in_progress', 'completed', 'cancelled'] as $taskStatus): ?><option value="<?= e($taskStatus) ?>" <?= $task['status'] === $taskStatus ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $taskStatus))) ?></option><?php endforeach; ?>
+                                            </select>
+                                            <button class="t8-btn t8-btn-outline t8-btn-sm" type="submit" title="Update task status" aria-label="Update status for <?= e($task['title']) ?>"><i class="fa-solid fa-check"></i></button>
+                                        </form>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if ($tasks === []): ?><tr><td colspan="6" class="t8-empty">No tasks have been added to this case.</td></tr><?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+
+            <?php if ($case['status'] !== 'archived'): ?>
+                <section style="padding: var(--t8-space-4);">
+                    <h3>Add Task</h3>
+                    <form method="post" action="<?= e(page_url('legal', ['action' => 'tasks', 'id' => $caseId])) ?>" class="t8-legal-form-grid">
+                        <?= t8_csrf_field() ?>
+                        <input type="hidden" name="task_action" value="create">
+                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="task_title">Task</label><input class="t8-input" id="task_title" name="title" maxlength="200" value="<?= e($taskInput['title']) ?>" required></div>
+                        <div class="t8-field"><label class="t8-label" for="task_assigned_to">Assigned To</label><select class="t8-select" id="task_assigned_to" name="assigned_to" required><option value="">Select a Legal Officer</option><?php foreach ($legalOfficers as $assignee): ?><option value="<?= e((string) $assignee['id']) ?>" <?= $taskInput['assigned_to'] === (string) $assignee['id'] ? 'selected' : '' ?>><?= e($assignee['full_name']) ?></option><?php endforeach; ?></select></div>
+                        <div class="t8-field"><label class="t8-label" for="task_due_date">Due Date</label><input class="t8-input" type="date" id="task_due_date" name="due_date" min="<?= e((string) $case['filed_date']) ?>" value="<?= e($taskInput['due_date']) ?>" required></div>
+                        <div class="t8-field"><label class="t8-label" for="task_priority">Priority</label><select class="t8-select" id="task_priority" name="priority" required><?php foreach ($taskPriorities as $taskPriority): ?><option value="<?= e($taskPriority) ?>" <?= $taskInput['priority'] === $taskPriority ? 'selected' : '' ?>><?= e(ucfirst($taskPriority)) ?></option><?php endforeach; ?></select></div>
+                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="task_description">Description</label><textarea class="t8-input" id="task_description" name="description" rows="3" maxlength="5000"><?= e($taskInput['description']) ?></textarea></div>
+                        <div class="t8-form-actions"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-plus"></i> Add Task</button></div>
+                    </form>
+                </section>
+            <?php else: ?>
+                <div class="t8-alert t8-alert-info">Archived cases are read-only.</div>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+
+<?php elseif ($showParties): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'view', 'id' => $caseId])) ?>"><i class="fa-solid fa-arrow-left"></i> Case Workspace</a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Back to Cases</a>
+    </div>
+    <div class="t8-card">
+        <div class="t8-card-header">
+            <h2 class="t8-card-title">Parties &mdash; <?= e((string) $case['title']) ?></h2>
+        </div>
+
+        <?php if (!$legalHasPartySchema): ?>
+            <div class="t8-alert t8-alert-danger">Apply the legal case parties migration before managing parties.</div>
+        <?php elseif ($isAdmin && $case['status'] !== 'archived'): ?>
+            <section style="padding: 0 var(--t8-space-4) var(--t8-space-4);">
+                <h3>Link Existing Party</h3>
+                <?php if ($availableParties === []): ?>
+                    <p class="t8-help-text">All existing party records are already linked, or none have been created.</p>
+                <?php else: ?>
+                    <form method="post" action="<?= e(page_url('legal', ['action' => 'parties', 'id' => $caseId])) ?>" class="t8-legal-form-grid">
+                        <?= t8_csrf_field() ?>
+                        <input type="hidden" name="party_mode" value="existing">
+                        <div class="t8-field"><label class="t8-label" for="existing_party_id">Party</label>
+                            <select class="t8-select" id="existing_party_id" name="party_id" required><option value="">Select a party</option>
+                                <?php foreach ($availableParties as $party): ?>
+                                    <option value="<?= e((string) $party['id']) ?>"><?= e($party['name']) ?> (<?= e($party['type']) ?><?= $party['organization'] ? ', ' . e($party['organization']) : '' ?>)</option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="t8-field"><label class="t8-label" for="existing_party_type">Party Type</label>
+                            <select class="t8-select" id="existing_party_type" name="party_type_id" required><option value="">Select type</option>
+                                <?php foreach ($partyTypes as $partyType): ?><option value="<?= e((string) $partyType['id']) ?>"><?= e($partyType['name']) ?></option><?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="t8-field"><label class="t8-label" for="existing_party_role">Role in Case</label><input class="t8-input" id="existing_party_role" name="role_in_case" maxlength="100" required></div>
+                        <div class="t8-form-actions"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-link"></i> Link Party</button></div>
+                    </form>
+                <?php endif; ?>
+
+                <h3>Add New Party</h3>
+                <form method="post" action="<?= e(page_url('legal', ['action' => 'parties', 'id' => $caseId])) ?>" class="t8-legal-form-grid">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="party_mode" value="new">
+                    <div class="t8-field"><label class="t8-label" for="new_party_name">Name</label><input class="t8-input" id="new_party_name" name="name" maxlength="200" value="<?= e($partyInput['name']) ?>" required></div>
+                    <div class="t8-field"><label class="t8-label" for="new_party_type">Party Type</label>
+                        <select class="t8-select" id="new_party_type" name="party_type_id" required><option value="">Select type</option>
+                            <?php foreach ($partyTypes as $partyType): ?><option value="<?= e((string) $partyType['id']) ?>" <?= $partyInput['party_type_id'] === (string) $partyType['id'] ? 'selected' : '' ?>><?= e($partyType['name']) ?></option><?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="t8-field"><label class="t8-label" for="entity_type">Record Type</label>
+                        <select class="t8-select" id="entity_type" name="entity_type"><option value="individual" <?= $partyInput['entity_type'] === 'individual' ? 'selected' : '' ?>>Individual</option><option value="organization" <?= $partyInput['entity_type'] === 'organization' ? 'selected' : '' ?>>Organization</option></select>
+                    </div>
+                    <div class="t8-field"><label class="t8-label" for="party_organization">Organization</label><input class="t8-input" id="party_organization" name="organization" maxlength="200" value="<?= e($partyInput['organization']) ?>"></div>
+                    <div class="t8-field"><label class="t8-label" for="party_contact_email">Contact Email</label><input class="t8-input" type="email" id="party_contact_email" name="contact_email" maxlength="150" value="<?= e($partyInput['contact_email']) ?>"></div>
+                    <div class="t8-field"><label class="t8-label" for="party_contact_phone">Contact Phone</label><input class="t8-input" type="tel" id="party_contact_phone" name="contact_phone" maxlength="50" value="<?= e($partyInput['contact_phone']) ?>"></div>
+                    <div class="t8-field"><label class="t8-label" for="new_party_role">Role in Case</label><input class="t8-input" id="new_party_role" name="role_in_case" maxlength="100" value="<?= e($partyInput['role_in_case']) ?>" required></div>
+                    <div class="t8-form-actions"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-plus"></i> Add Party</button></div>
+                </form>
+            </section>
+        <?php elseif ($case['status'] === 'archived'): ?>
+            <div class="t8-alert t8-alert-info">Archived cases are read-only.</div>
+        <?php endif; ?>
+
+        <?php if ($attachedParties === []): ?>
+            <div class="t8-empty">No parties are linked to this case yet.</div>
+        <?php else: ?>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead><tr><th>Name</th><th>Party Type</th><th>Organization</th><th>Role</th><th>Contact</th><?php if ($isAdmin && $case['status'] !== 'archived'): ?><th>Actions</th><?php endif; ?></tr></thead>
+                    <tbody>
+                        <?php foreach ($attachedParties as $party): ?>
+                            <tr>
+                                <td><?= e($party['party_name']) ?></td>
+                                <td><?= e($party['legal_party_type']) ?></td>
+                                <td><?= e((string) ($party['organization'] ?: '—')) ?></td>
+                                <td><?= e($party['role_in_case']) ?></td>
+                                <td><?= e((string) ($party['contact_email'] ?: ($party['contact_phone'] ?: '—'))) ?></td>
+                                <?php if ($isAdmin && $case['status'] !== 'archived'): ?><td>
+                                    <form method="post" action="<?= e(page_url('legal', ['action' => 'remove_party'])) ?>" onsubmit="return confirm('Remove this party from the case?');">
+                                        <?= t8_csrf_field() ?>
+                                        <input type="hidden" name="case_id" value="<?= e((string) $caseId) ?>">
+                                        <input type="hidden" name="link_id" value="<?= e((string) $party['id']) ?>">
+                                        <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit"><i class="fa-solid fa-xmark"></i> Remove</button>
+                                    </form>
+                                </td><?php endif; ?>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
 
 <?php elseif ($showCaseTypes): ?>
 
@@ -1082,9 +3040,9 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
 <?php elseif ($showDocuments): ?>
 
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4);">
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">
-            <i class="fa-solid fa-arrow-left"></i> Back to Cases
-        </a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'view', 'id' => $caseId])) ?>"><i class="fa-solid fa-arrow-left"></i> Case Workspace</a>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>">Back to Cases</a>
+        <?php if ($legalHasDocumentType && $case['status'] !== 'archived'): ?><a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'create', 'legal_case_id' => $caseId])) ?>"><i class="fa-solid fa-upload"></i> Upload Legal Document</a><?php endif; ?>
     </div>
 
     <div class="t8-card">
@@ -1092,8 +3050,12 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             <h2 class="t8-card-title"><?= e($case['title']) ?> — Attached Documents</h2>
         </div>
 
-        <?php if ($isAdmin && $availableDocs === []): ?>
-            <div class="t8-empty">No documents exist yet. Upload one in Document Management first.</div>
+        <?php if (!$legalHasDocumentType): ?>
+            <div class="t8-alert t8-alert-danger">Apply the legal case documents migration before managing attachments.</div>
+        <?php elseif ($case['status'] === 'archived'): ?>
+            <div class="t8-alert t8-alert-info">Archived cases are read-only.</div>
+        <?php elseif ($isAdmin && $availableDocs === []): ?>
+            <div class="t8-empty">No unlinked documents are available. Upload a legal document above or create one in Document Management.</div>
         <?php elseif ($isAdmin): ?>
             <form method="post" action="<?= e(page_url('legal', ['action' => 'documents', 'id' => $caseId])) ?>"
                   style="padding: 0 var(--t8-space-4) var(--t8-space-4);" novalidate>
@@ -1106,6 +3068,13 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                         <?php foreach ($availableDocs as $d): ?>
                             <option value="<?= e((string) $d['id']) ?>"><?= e($d['title']) ?></option>
                         <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="t8-field">
+                    <label class="t8-label" for="legal_document_type">Legal Document Type</label>
+                    <select class="t8-select" id="legal_document_type" name="legal_document_type" required>
+                        <option value="">Select a type</option>
+                        <?php foreach ($legalDocumentTypes as $documentType): ?><option value="<?= e($documentType) ?>"><?= e($documentType) ?></option><?php endforeach; ?>
                     </select>
                 </div>
                 <div class="t8-field">
@@ -1126,6 +3095,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                     <thead>
                         <tr>
                             <th>Document</th>
+                            <th>Legal Type</th>
                             <th>Note</th>
                             <th>Attached On</th>
                             <th>Actions</th>
@@ -1135,6 +3105,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                         <?php foreach ($attachedDocs as $ad): ?>
                             <tr>
                                 <td><?= e($ad['document_title']) ?></td>
+                                <td><?= e($ad['legal_document_type']) ?></td>
                                 <td><?= e((string) ($ad['description'] ?? '—')) ?></td>
                                 <td><?= e(format_date($ad['created_at'], 'M d, Y g:i A')) ?></td>
                                 <td style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -1143,7 +3114,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                                         <i class="fa-solid fa-eye"></i> View
                                     </a><?php endif; ?>
                                     <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $ad['version_id']])) ?>"><i class="fa-solid fa-download"></i> Download</a>
-                                    <?php if ($isAdmin): ?><form method="post" action="<?= e(page_url('legal', ['action' => 'detach_document'])) ?>"
+                                    <?php if ($isAdmin && $case['status'] !== 'archived'): ?><form method="post" action="<?= e(page_url('legal', ['action' => 'detach_document'])) ?>"
                                           onsubmit="return confirm('Remove this document from the case?');">
                                         <?= t8_csrf_field() ?>
                                         <input type="hidden" name="link_id" value="<?= e((string) $ad['id']) ?>">
@@ -1316,7 +3287,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <label class="t8-label" for="legal-assignee">Assigned Officer</label>
                 <select class="t8-select" id="legal-assignee" name="assigned_to">
                     <option value="">All assigned officers</option>
-                    <?php foreach ($assignees as $assignee): ?><option value="<?= e((string) $assignee['id']) ?>" <?= $assignedFilter !== false && (int) $assignee['id'] === $assignedFilter ? 'selected' : '' ?>><?= e($assignee['full_name']) ?></option><?php endforeach; ?>
+                    <?php foreach ($legalOfficers as $assignee): ?><option value="<?= e((string) $assignee['id']) ?>" <?= $assignedFilter !== false && (int) $assignee['id'] === $assignedFilter ? 'selected' : '' ?>><?= e($assignee['full_name']) ?></option><?php endforeach; ?>
                 </select>
             </div>
             <div class="t8-field"><label class="t8-label" for="legal-filed-from">Filed From</label><input class="t8-input" type="date" id="legal-filed-from" name="filed_from" value="<?= e($filedFrom) ?>"></div>
@@ -1357,7 +3328,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                             ?>
                             <tr>
                                 <td><?= e((string) ($c['case_number'] ?? ('CASE-' . str_pad((string) $c['id'], 6, '0', STR_PAD_LEFT)))) ?></td>
-                                <td><?= e($c['title']) ?></td>
+                                <td><a href="<?= e(page_url('legal', ['action' => 'view', 'id' => (int) $c['id']])) ?>"><?= e($c['title']) ?></a></td>
                                 <td><?= e($c['case_type_name']) ?><?= !(bool) $c['case_type_active'] ? ' (Inactive)' : '' ?></td>
                                 <?php if ($legalHasCaseMetadata): ?><td><?= e((string) ($c['subject'] ?? '—')) ?></td>
                                 <td><?= e((string) ($c['department_name'] ?? '—')) ?></td><?php endif; ?>

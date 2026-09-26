@@ -211,7 +211,54 @@ Validation should prevent logically invalid dates, such as a deadline occurring 
 
 ---
 
-# 6. Phase 4 — Parties
+# 6. Phase 4 — Case Details
+
+The Case Details page is the main workspace for a legal case.
+
+Recommended structure:
+
+```text
+LEGAL CASE
+LC-2026-001
+
+Employee Complaint
+Labor Case
+
+[Edit Case] [⋮]
+
+OPEN
+HIGH PRIORITY
+
+Filed: September 26, 2026
+Deadline: October 15, 2026
+Assigned: Dev Tester
+Department: Human Resources
+```
+
+## Recommended tabs / sections
+
+```text
+Overview
+Parties
+Timeline
+Tasks
+Hearings
+Documents
+Notes
+Communications
+Activity
+```
+
+The system should avoid putting all information into one excessively long page.
+
+### Phase 4 Completion Checklist
+
+- [x] Each legal case has a dedicated details workspace reachable from the case list.
+- [x] The overview shows case status, priority, case type, dates, assignment, department, subject, and summary.
+- [x] Detail access uses the same server-side role and assigned-case authorization as the legal case list.
+- [x] Existing document and closed-case retention workflows are reachable from the workspace.
+
+# 7. Phase 5 — Parties
 
 Parties should be represented as structured records instead of relying only on free-text fields.
 
@@ -255,47 +302,13 @@ Role: Respondent
 
 A case should support multiple parties.
 
----
+### Phase 5 Completion Checklist
 
-# 7. Phase 5 — Case Details
-
-The Case Details page is the main workspace for a legal case.
-
-Recommended structure:
-
-```text
-LEGAL CASE
-LC-2026-001
-
-Employee Complaint
-Labor Case
-
-[Edit Case] [⋮]
-
-OPEN
-HIGH PRIORITY
-
-Filed: September 26, 2026
-Deadline: October 15, 2026
-Assigned: Dev Tester
-Department: Human Resources
-```
-
-## Recommended tabs / sections
-
-```text
-Overview
-Parties
-Timeline
-Tasks
-Hearings
-Documents
-Notes
-Communications
-Activity
-```
-
-The system should avoid putting all information into one excessively long page.
+- [x] Parties reuse shared person and organization records with case-specific party type and role.
+- [x] A case supports multiple parties and lists their organization and contact details.
+- [x] The supported party types are stored in a database catalog.
+- [x] Administrators can add existing or new parties and unlink them; legal officers can view parties on assigned cases.
+- [x] CSRF, server-side authorization, duplicate checks, database uniqueness, and audit logging protect party changes.
 
 ---
 
@@ -314,6 +327,12 @@ Recommended fields:
 - Current Action / Next Step
 
 These fields may be optional because not every business legal matter involves a court or government agency.
+
+### Phase 6 Completion Checklist
+
+- [x] Court / Agency, Branch / Office, Docket / Reference Number, Jurisdiction, Location, Legal Basis, and Current Action are optional structured case fields.
+- [x] Case creation and editing validate field lengths and preserve the values on save.
+- [x] The case workspace displays populated external/legal information without requiring it for non-court matters.
 
 ---
 
@@ -353,6 +372,13 @@ Pending
 - Cancelled
 
 The system should automatically determine whether a task is overdue based on its due date instead of requiring users to manually select `Overdue`.
+
+### Phase 7 Completion Checklist
+
+- [x] Tasks are stored against a legal case with an assignee, due date, priority, description, and status.
+- [x] Pending, In Progress, Completed, and Cancelled are stored statuses; Overdue is computed from the due date.
+- [x] Authorized administrators and assigned legal officers can add tasks and update task status; task changes are audited.
+- [x] Server-side validation and CSRF protection cover task creation and status changes.
 
 ---
 
@@ -395,6 +421,13 @@ Status:
 Scheduled
 ```
 
+### Phase 8 Completion Checklist
+
+- [x] Cases support multiple hearings with date, optional time, venue, proceeding type, purpose, status, and notes.
+- [x] Scheduled, Completed, Postponed, and Cancelled are validated statuses, and hearings can be rescheduled by editing their date/time.
+- [x] Administrators and legal officers assigned to a case can manage its hearings; hearing changes are audited.
+- [x] Hearing date/time input is validated server-side and mutations require CSRF protection.
+
 ---
 
 # 11. Phase 9 — Legal Documents
@@ -432,6 +465,14 @@ Users should be able to:
 
 The actual document repository remains part of Document Management.
 
+### Phase 9 Completion Checklist
+
+- [x] Legal cases can attach existing Document Management records and classify each legal relationship by document type.
+- [x] New legal uploads use the existing DMS MIME validation, file storage, version, review, and retention workflows and attach atomically to the case.
+- [x] Attached documents open through existing DMS authorization and version-download rules.
+- [x] Authorized users can remove a case/document link without deleting the shared document or its versions.
+- [x] Case-scoped uploads validate assignment and CSRF, reject archived cases, and audit the case attachment.
+
 ---
 
 # 12. Phase 10 — Legal Notes
@@ -464,6 +505,13 @@ Notes = internal case-management information
 Documents = formal stored records/files
 ```
 
+### Phase 10 Completion Checklist
+
+- [x] Notes are stored separately from legal documents and remain linked to their case.
+- [x] Each note records its authenticated author and database creation date/time.
+- [x] Administrators and assigned legal officers can add notes; content is escaped on display and mutations require CSRF.
+- [x] Notes are append-only, and archived cases cannot receive new notes.
+
 ---
 
 # 13. Phase 11 — Communications
@@ -492,6 +540,13 @@ Possible fields:
 - Recorded By
 
 The first implementation does not need to integrate directly with email. Manual communication records are sufficient.
+
+### Phase 11 Completion Checklist
+
+- [x] Case communications record date, optional time, type, direction, sender, recipient, subject, summary, and recorder.
+- [x] Incoming and outgoing directions are validated; summaries are escaped and records are append-only.
+- [x] Optional attachments must be legal documents already linked to the same case and open through DMS download rules.
+- [x] Administrators and assigned legal officers can record communications with CSRF protection and audit logging; archived cases are read-only.
 
 ---
 
@@ -569,6 +624,13 @@ For example:
 
 Avoid allowing users to arbitrarily select statuses that do not make sense for the case lifecycle.
 
+### Phase 13 Completion Checklist
+
+- [x] New cases start Open and case edits expose only valid next lifecycle states.
+- [x] Closed cases cannot be reopened by status editing, and cases must be closed before they can be archived.
+- [x] Archived cases remain non-editable and restoration returns them to their prior status.
+- [x] Case status transitions are recorded as distinct audit events for the case timeline.
+
 ---
 
 # 16. Phase 14 — Case Resolution
@@ -594,6 +656,14 @@ Possible resolution types:
 - Other
 
 Avoid forcing `Won` or `Lost` onto every case because many business legal matters do not have a winner/loser outcome.
+
+### Phase 14 Completion Checklist
+
+- [x] Each case can store one resolution type, summary, resolved date, optional final outcome, and optional supporting document.
+- [x] Resolution types include the planned outcomes without forcing a Won/Lost classification.
+- [x] Supporting documents must already be attached to the same case and open through DMS access rules.
+- [x] A resolution must exist before a case can move to Resolved or Closed; resolution editing stops after closure or archive.
+- [x] Resolution creation and updates are validated, case-scoped, and audited.
 
 ---
 
@@ -642,6 +712,13 @@ Sep 28, 2026 9:02 AM
 
 Use the existing system audit architecture where possible rather than creating unrelated logging mechanisms.
 
+### Phase 15 Completion Checklist
+
+- [x] Case creation/field edits, lifecycle transitions, assignment, deadlines, parties, tasks, hearings, documents, notes, communications, resolutions, closure, and archive/restore are audited.
+- [x] Important status, assignment, deadline, party, document, and hearing changes carry safe old/new values or changed-field metadata.
+- [x] Legal data mutations and required audit entries commit together; audit failures roll back the corresponding mutation.
+- [x] The case timeline reads the shared audit log and presents actor, event, and timestamp chronologically.
+
 ---
 
 # 18. Phase 16 — Access Control
@@ -658,6 +735,18 @@ Legal records may contain confidential information, so access should be restrict
 | Other Employees | No legal-case access unless explicitly authorized |
 
 The implementation should enforce authorization on the server side, not only hide buttons in the interface.
+
+### Phase 16 Authorization Decision
+
+The current application role catalog contains no separate `authorized_staff` role, so Legal Officers are the operational role. Case access is scoped to the primary Legal Officer, designated supporting staff, or a user assigned to a non-cancelled case task. Other roles receive no legal-case access.
+
+### Phase 16 Completion Checklist
+
+- [x] Legal routes require Admin or Legal Officer authentication and case reads are scoped server-side.
+- [x] Primary, supporting-staff, and active task assignment grant access only to the related case.
+- [x] Legal Officers may edit case facts and authorized work items, but cannot create/reassign/archive cases or manage shared case catalogs/parties.
+- [x] Assignment lists only contain Legal Officer accounts; document download/upload remains gated by DMS access checks.
+- [x] CSRF validation, input validation, prepared statements, escaping, archived-case restrictions, and audit logging guard mutations.
 
 ---
 

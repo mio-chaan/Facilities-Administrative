@@ -35,6 +35,13 @@ foreach (['case_number', 'supporting_staff_id', 'description', 'next_action_date
     $assert(str_contains($schema, $field), "Fresh-install schema is missing {$field}.");
     $assert(str_contains($migration, $field), "Upgrade migration is missing {$field}.");
 }
+$caseInformationMigration = file_get_contents(__DIR__ . '/../database/migrations/2026_09_26_legal_case_information.sql');
+foreach (['court_agency', 'branch_office', 'docket_reference', 'jurisdiction', 'location', 'legal_basis', 'current_action'] as $field) {
+    $assert(str_contains($schema, $field), "Fresh-install schema is missing {$field}.");
+    $assert(str_contains($caseInformationMigration, $field), "Case information migration is missing {$field}.");
+}
+$assert(str_contains($source, 'mb_strlen($formValues[$field]) > $maxLength'), 'Optional case information should receive server-side length validation.');
+$assert(str_contains($source, 'External / Legal Information'), 'The case workspace should display legal-specific case information.');
 $assert(str_contains($schema, 'CREATE TABLE team8_legal_case_number_sequences'), 'Fresh installs should include yearly case number sequences.');
 $assert(str_contains($migration, 'CREATE TABLE team8_legal_case_number_sequences'), 'The upgrade migration should create yearly case number sequences.');
 $assert(str_contains($schema, 'case_number VARCHAR(20) NOT NULL UNIQUE'), 'Fresh-install case numbers should be unique and required.');
@@ -49,6 +56,10 @@ $assert(str_contains($source, '$legalHasCaseCreationFields || !$legalHasCaseMeta
 $assert(str_contains($source, 'name="supporting_staff_id"'), 'Supporting staff should be optional on the create form.');
 $assert(str_contains($source, 'name="next_action_date"'), 'Next action date should be captured.');
 $assert(str_contains($source, 'name="closing_date"'), 'Closing date should be captured.');
+$assert(str_contains($source, '$legalHasCaseInformation'), 'Case information fields should be migration-gated.');
+foreach (['court_agency', 'branch_office', 'docket_reference', 'jurisdiction', 'location', 'legal_basis', 'current_action'] as $field) {
+    $assert(str_contains($source, 'name="' . $field . '"'), "Case form should capture {$field}.");
+}
 $assert(!str_contains($source, 'name="case_number"'), 'Users must not submit or edit a generated case number.');
 
 echo "Legal case creation checks passed.\n";

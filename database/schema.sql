@@ -387,6 +387,29 @@ INSERT INTO team8_legal_case_statuses (status_code, name, sort_order) VALUES
     ('closed', 'Closed', 50),
     ('archived', 'Archived', 60);
 
+CREATE TABLE team8_legal_party_types (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    type_code   VARCHAR(60) NOT NULL,
+    name        VARCHAR(100) NOT NULL,
+    sort_order  SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    is_active   TINYINT(1) NOT NULL DEFAULT 1,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_team8_legal_party_types_code (type_code),
+    UNIQUE KEY uq_team8_legal_party_types_name (name)
+) ENGINE=InnoDB;
+
+INSERT INTO team8_legal_party_types (type_code, name, sort_order) VALUES
+    ('employee', 'Employee', 10),
+    ('customer', 'Customer', 20),
+    ('supplier', 'Supplier', 30),
+    ('government_agency', 'Government Agency', 40),
+    ('company_organization', 'Company / Organization', 50),
+    ('complainant', 'Complainant', 60),
+    ('respondent', 'Respondent', 70),
+    ('witness', 'Witness', 80),
+    ('other', 'Other', 90);
+
 CREATE TABLE team8_legal_cases (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     case_number VARCHAR(20) NOT NULL UNIQUE,
@@ -396,6 +419,13 @@ CREATE TABLE team8_legal_cases (
     title       VARCHAR(200) NOT NULL,
     subject     VARCHAR(200) NULL,
     description TEXT NULL,
+    court_agency VARCHAR(200) NULL,
+    branch_office VARCHAR(150) NULL,
+    docket_reference VARCHAR(150) NULL,
+    jurisdiction VARCHAR(150) NULL,
+    location VARCHAR(200) NULL,
+    legal_basis TEXT NULL,
+    current_action TEXT NULL,
     case_type_id INT NOT NULL,
     department_id INT NULL,
     status      VARCHAR(30) NOT NULL DEFAULT 'open',
@@ -416,6 +446,58 @@ CREATE TABLE team8_legal_cases (
     CONSTRAINT fk_team8_legalcases_archived_status FOREIGN KEY (archived_from_status) REFERENCES team8_legal_case_statuses(status_code)
 ) ENGINE=InnoDB;
 
+CREATE TABLE team8_legal_case_tasks (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    case_id         INT NOT NULL,
+    title           VARCHAR(200) NOT NULL,
+    description     TEXT NULL,
+    assigned_to     INT NOT NULL,
+    created_by      INT NOT NULL,
+    due_date        DATE NOT NULL,
+    priority        VARCHAR(20) NOT NULL DEFAULT 'medium',
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+    completed_at    DATETIME NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_team8_legal_tasks_case_due (case_id, due_date, status),
+    INDEX idx_team8_legal_tasks_assignee_due (assigned_to, due_date, status),
+    CONSTRAINT fk_team8_legal_tasks_case FOREIGN KEY (case_id) REFERENCES team8_legal_cases(id),
+    CONSTRAINT fk_team8_legal_tasks_assignee FOREIGN KEY (assigned_to) REFERENCES users(id),
+    CONSTRAINT fk_team8_legal_tasks_creator FOREIGN KEY (created_by) REFERENCES users(id),
+    CONSTRAINT chk_team8_legal_tasks_priority CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+    CONSTRAINT chk_team8_legal_tasks_status CHECK (status IN ('pending', 'in_progress', 'completed', 'cancelled'))
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_legal_case_hearings (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    case_id         INT NOT NULL,
+    event_date      DATE NOT NULL,
+    event_time      TIME NULL,
+    venue           VARCHAR(200) NULL,
+    hearing_type    VARCHAR(150) NOT NULL,
+    purpose         VARCHAR(500) NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'scheduled',
+    notes           TEXT NULL,
+    created_by      INT NOT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_team8_legal_hearings_case_date (case_id, event_date, event_time),
+    CONSTRAINT fk_team8_legal_hearings_case FOREIGN KEY (case_id) REFERENCES team8_legal_cases(id),
+    CONSTRAINT fk_team8_legal_hearings_creator FOREIGN KEY (created_by) REFERENCES users(id),
+    CONSTRAINT chk_team8_legal_hearings_status CHECK (status IN ('scheduled', 'completed', 'postponed', 'cancelled'))
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_legal_case_notes (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    case_id     INT NOT NULL,
+    author_id   INT NOT NULL,
+    content     TEXT NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_team8_legal_case_notes_case_date (case_id, created_at),
+    CONSTRAINT fk_team8_legal_case_notes_case FOREIGN KEY (case_id) REFERENCES team8_legal_cases(id),
+    CONSTRAINT fk_team8_legal_case_notes_author FOREIGN KEY (author_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+
 CREATE TABLE team8_legal_case_number_sequences (
     case_year   SMALLINT UNSIGNED PRIMARY KEY,
     last_number INT UNSIGNED NOT NULL DEFAULT 0
@@ -425,10 +507,50 @@ CREATE TABLE team8_legal_documents (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     case_id     INT NOT NULL,
     document_id INT NOT NULL,
+    legal_document_type VARCHAR(100) NOT NULL DEFAULT 'Other',
     description VARCHAR(500) NULL,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_team8_legaldocs_case FOREIGN KEY (case_id) REFERENCES team8_legal_cases(id),
     CONSTRAINT fk_team8_legaldocs_document FOREIGN KEY (document_id) REFERENCES team8_documents(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_legal_case_resolutions (
+    id                           INT AUTO_INCREMENT PRIMARY KEY,
+    case_id                      INT NOT NULL,
+    resolution_type              VARCHAR(100) NOT NULL,
+    resolution_summary           TEXT NOT NULL,
+    resolved_date                DATE NOT NULL,
+    final_outcome                TEXT NULL,
+    supporting_legal_document_id INT NULL,
+    recorded_by                  INT NOT NULL,
+    created_at                   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_team8_legal_case_resolution (case_id),
+    CONSTRAINT fk_team8_legal_resolution_case FOREIGN KEY (case_id) REFERENCES team8_legal_cases(id),
+    CONSTRAINT fk_team8_legal_resolution_document FOREIGN KEY (supporting_legal_document_id) REFERENCES team8_legal_documents(id),
+    CONSTRAINT fk_team8_legal_resolution_recorder FOREIGN KEY (recorded_by) REFERENCES users(id),
+    CONSTRAINT chk_team8_legal_resolution_type CHECK (resolution_type IN ('Settled', 'Dismissed', 'Resolved Internally', 'Government Decision', 'Court Decision', 'Compliance Completed', 'Other'))
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_legal_case_communications (
+    id                          INT AUTO_INCREMENT PRIMARY KEY,
+    case_id                     INT NOT NULL,
+    communication_date          DATE NOT NULL,
+    communication_time          TIME NULL,
+    communication_type          VARCHAR(100) NOT NULL,
+    direction                   VARCHAR(20) NOT NULL,
+    sender                      VARCHAR(200) NULL,
+    recipient                   VARCHAR(200) NULL,
+    subject                     VARCHAR(200) NULL,
+    summary                     TEXT NOT NULL,
+    attachment_legal_document_id INT NULL,
+    recorded_by                 INT NOT NULL,
+    created_at                  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_team8_legal_communications_case_date (case_id, communication_date, communication_time),
+    CONSTRAINT fk_team8_legal_communications_case FOREIGN KEY (case_id) REFERENCES team8_legal_cases(id),
+    CONSTRAINT fk_team8_legal_communications_document FOREIGN KEY (attachment_legal_document_id) REFERENCES team8_legal_documents(id),
+    CONSTRAINT fk_team8_legal_communications_recorder FOREIGN KEY (recorded_by) REFERENCES users(id),
+    CONSTRAINT chk_team8_legal_communications_direction CHECK (direction IN ('incoming', 'outgoing'))
 ) ENGINE=InnoDB;
 
 
@@ -470,10 +592,25 @@ CREATE TABLE team8_parties (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     name            VARCHAR(200) NOT NULL,
     type            VARCHAR(50) NOT NULL, -- e.g. individual | organization
+    organization    VARCHAR(200) NULL,
     contact_email   VARCHAR(150) NULL,
     contact_phone   VARCHAR(50) NULL,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+CREATE TABLE team8_legal_case_parties (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    case_id         INT NOT NULL,
+    party_id        INT NOT NULL,
+    party_type_id   INT NOT NULL,
+    role_in_case    VARCHAR(100) NOT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_team8_legal_case_party (case_id, party_id),
+    INDEX idx_team8_legal_case_parties_party (party_id),
+    CONSTRAINT fk_team8_legal_case_parties_case FOREIGN KEY (case_id) REFERENCES team8_legal_cases(id),
+    CONSTRAINT fk_team8_legal_case_parties_party FOREIGN KEY (party_id) REFERENCES team8_parties(id),
+    CONSTRAINT fk_team8_legal_case_parties_type FOREIGN KEY (party_type_id) REFERENCES team8_legal_party_types(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE team8_contract_parties (

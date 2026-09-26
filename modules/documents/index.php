@@ -77,6 +77,7 @@ if (is_file($paginationHelperPath)) {
     require_once $paginationHelperPath;
 }
 require_once __DIR__ . '/../../app/includes/document_metadata.php';
+require_once __DIR__ . '/../../app/includes/legal_case_helpers.php';
 
 $pageTitle = 'Document Management';
 $currentUserId = t8_current_user_id();
@@ -500,12 +501,41 @@ function t8_document_assigned_legal_case_id(PDO $pdo, int $documentId, int $user
         return null;
     }
 
+    $schemaColumn = $pdo->prepare(
+        'SELECT 1 FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = :table_name AND column_name = :column_name LIMIT 1'
+    );
+    $schemaColumn->execute(['table_name' => 'team8_legal_cases', 'column_name' => 'supporting_staff_id']);
+    $hasSupportingStaff = $schemaColumn->fetchColumn() !== false;
+    $schemaTable = $pdo->prepare(
+        'SELECT 1 FROM information_schema.tables
+         WHERE table_schema = DATABASE() AND table_name = :table_name LIMIT 1'
+    );
+    $schemaTable->execute(['table_name' => 'team8_legal_case_tasks']);
+    $hasCaseTasks = $schemaTable->fetchColumn() !== false;
+
+    $caseAccess = ['lc.assigned_to = :user_id'];
+    $params = ['document_id' => $documentId, 'user_id' => $userId];
+    if ($hasSupportingStaff) {
+        $caseAccess[] = 'lc.supporting_staff_id = :supporting_staff_id';
+        $params['supporting_staff_id'] = $userId;
+    }
+    if ($hasCaseTasks) {
+        $caseAccess[] = "EXISTS (
+            SELECT 1 FROM team8_legal_case_tasks task
+            WHERE task.case_id = lc.id AND task.assigned_to = :task_assigned_to AND task.status <> 'cancelled'
+        )";
+        $params['task_assigned_to'] = $userId;
+    }
+
     $legalStmt = $pdo->prepare(
         'SELECT lc.id FROM team8_legal_documents ld
          JOIN team8_legal_cases lc ON lc.id = ld.case_id
-         WHERE ld.document_id = :document_id AND lc.assigned_to = :user_id AND lc.status <> \'archived\' LIMIT 1'
+         WHERE ld.document_id = :document_id AND lc.status <> \'archived\'
+           AND (' . implode(' OR ', $caseAccess) . ')
+         LIMIT 1'
     );
-    $legalStmt->execute(['document_id' => $documentId, 'user_id' => $userId]);
+    $legalStmt->execute($params);
     $legalCaseId = $legalStmt->fetchColumn();
 
     return $legalCaseId !== false ? (int) $legalCaseId : null;
@@ -831,6 +861,54 @@ if ($action === 'dashboard') {
 
 switch ($action) {
     case 'create':
+        $legalUploadRawCaseId = $_SERVER['REQUEST_METHOD'] === 'POST'
+            ? ($_POST['legal_case_id'] ?? '')
+            : ($_GET['legal_case_id'] ?? '');
+        $legalUploadCaseId = $legalUploadRawCaseId === ''
+            ? 0
+            : filter_var($legalUploadRawCaseId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $legalUploadType = trim((string) ($_POST['legal_document_type'] ?? $_GET['legal_document_type'] ?? ''));
+        $legalUploadNote = trim((string) ($_POST['legal_document_note'] ?? ''));
+        $legalUploadCase = null;
+        $legalUploadDefaultCategoryId = null;
+        $legalUploadDocumentTypes = t8_legal_document_types();
+        if ($legalUploadRawCaseId !== '' && $legalUploadCaseId === false) {
+            $errors[] = 'Invalid legal case for document upload.';
+        } elseif ($legalUploadCaseId > 0) {
+            t8_require_role(['admin', 'legal_officer']);
+            $legalCaseStmt = $pdo->prepare(
+                'SELECT id, case_number, title, status FROM team8_legal_cases WHERE id = :id'
+                . ($isAdmin ? '' : ' AND assigned_to = :assigned_to')
+                . ' LIMIT 1'
+            );
+            $legalCaseParams = ['id' => $legalUploadCaseId];
+            if (!$isAdmin) {
+                $legalCaseParams['assigned_to'] = $currentUserId;
+            }
+            $legalCaseStmt->execute($legalCaseParams);
+            $legalUploadCase = $legalCaseStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            if ($legalUploadCase === null) {
+                $errors[] = 'Legal case not found or not assigned to you.';
+            } elseif ($legalUploadCase['status'] === 'archived') {
+                $errors[] = 'Archived cases cannot receive documents.';
+            } else {
+                $linkTypeStmt = $pdo->prepare(
+                    'SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = DATABASE() AND table_name = :table_name AND column_name = :column_name LIMIT 1'
+                );
+                $linkTypeStmt->execute(['table_name' => 'team8_legal_documents', 'column_name' => 'legal_document_type']);
+                if (!$linkTypeStmt->fetchColumn()) {
+                    $errors[] = 'Apply the legal case documents migration before uploading legal documents.';
+                }
+                foreach ($categories as $category) {
+                    if ((string) $category['name'] === 'Legal') {
+                        $legalUploadDefaultCategoryId = (string) $category['id'];
+                        break;
+                    }
+                }
+            }
+        }
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $title = trim((string) ($_POST['title'] ?? ''));
             $categoryId = (string) ($_POST['category_id'] ?? '') !== '' ? (int) $_POST['category_id'] : null;
@@ -867,6 +945,14 @@ switch ($action) {
                 }
                 if (!t8_document_valid_metadata_date($expirationDate)) {
                     $errors[] = 'Expiration date must be a valid YYYY-MM-DD date.';
+                }
+                if ($legalUploadCaseId > 0) {
+                    if ($legalUploadCase === null || !in_array($legalUploadType, $legalUploadDocumentTypes, true)) {
+                        $errors[] = 'Select a valid legal document type for an accessible case.';
+                    }
+                    if (mb_strlen($legalUploadNote) > 500) {
+                        $errors[] = 'Legal document note must be 500 characters or fewer.';
+                    }
                 }
                 $uploadError = t8_document_validate_upload($_FILES['file'] ?? []);
                 if ($uploadError !== '') {
@@ -929,6 +1015,28 @@ switch ($action) {
                             'checksum'    => $stored['checksum'],
                         ]);
 
+                        if ($legalUploadCaseId > 0) {
+                            $pdo->prepare(
+                                'INSERT INTO team8_legal_documents (case_id, document_id, legal_document_type, description)
+                                 VALUES (:case_id, :document_id, :legal_document_type, :description)'
+                            )->execute([
+                                'case_id' => $legalUploadCaseId,
+                                'document_id' => $documentId,
+                                'legal_document_type' => $legalUploadType,
+                                'description' => $legalUploadNote !== '' ? $legalUploadNote : null,
+                            ]);
+                            t8_audit_log(
+                                $pdo,
+                                $currentUserId,
+                                'legal_case',
+                                $legalUploadCaseId,
+                                'attach_document',
+                                null,
+                                json_encode(['document_id' => $documentId, 'type' => $legalUploadType], JSON_THROW_ON_ERROR),
+                                true
+                            );
+                        }
+
                         $pdo->commit();
                     } catch (Throwable $e) {
                         $pdo->rollBack();
@@ -944,7 +1052,9 @@ switch ($action) {
                     t8_document_register_retention($pdo, $documentId, $categoryName, $currentUserId);
 
                     t8_flash_set('success', 'Document uploaded.');
-                    redirect(page_url('documents'));
+                    redirect($legalUploadCaseId > 0
+                        ? page_url('legal', ['action' => 'documents', 'id' => $legalUploadCaseId])
+                        : page_url('documents'));
                 }
             }
         }
@@ -1824,10 +1934,23 @@ function t8_render_camera_capture(): void
 
     <div class="t8-card">
         <div class="t8-card-header">
-            <h2 class="t8-card-title">Upload New Document</h2>
+            <h2 class="t8-card-title"><?= $legalUploadCase !== null ? 'Upload Legal Document' : 'Upload New Document' ?></h2>
+            <?php if ($legalUploadCase !== null): ?><p class="t8-help-text"><?= e((string) $legalUploadCase['case_number']) ?> &middot; <?= e((string) $legalUploadCase['title']) ?></p><?php endif; ?>
         </div>
-        <form method="post" action="<?= e(page_url('documents', ['action' => 'create'])) ?>" enctype="multipart/form-data" novalidate class="t8-document-form-grid">
+        <?php $legalUploadSelectedCategoryId = (string) ($_POST['category_id'] ?? $legalUploadDefaultCategoryId ?? ''); ?>
+        <form method="post" action="<?= e(page_url('documents', array_filter(['action' => 'create', 'legal_case_id' => $legalUploadCaseId > 0 ? $legalUploadCaseId : null]))) ?>" enctype="multipart/form-data" novalidate class="t8-document-form-grid">
             <?= t8_csrf_field() ?>
+            <?php if ($legalUploadCaseId > 0): ?>
+                <input type="hidden" name="legal_case_id" value="<?= e((string) $legalUploadCaseId) ?>">
+                <div class="t8-field">
+                    <label class="t8-label" for="legal_document_type">Legal Document Type</label>
+                    <select class="t8-select" id="legal_document_type" name="legal_document_type" required>
+                        <option value="">Choose a legal document type</option>
+                        <?php foreach ($legalUploadDocumentTypes as $type): ?><option value="<?= e($type) ?>" <?= $legalUploadType === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="t8-field t8-form-span-full"><label class="t8-label" for="legal_document_note">Legal Case Note</label><input class="t8-input" id="legal_document_note" name="legal_document_note" maxlength="500" value="<?= e($legalUploadNote) ?>"></div>
+            <?php endif; ?>
 
             <div class="t8-field t8-form-span-full">
                 <label class="t8-label" for="title">Title</label>
@@ -1838,9 +1961,9 @@ function t8_render_camera_capture(): void
             <div class="t8-field">
                 <label class="t8-label" for="category_id">Category</label>
                 <select class="t8-select" id="category_id" name="category_id" required>
-                    <option value="" disabled selected>Choose a category</option>
+                    <option value="" disabled <?= $legalUploadSelectedCategoryId === '' ? 'selected' : '' ?>>Choose a category</option>
                     <?php foreach ($categories as $cat): ?>
-                        <option value="<?= e((string) $cat['id']) ?>" <?= isset($_POST['category_id']) && (string) $_POST['category_id'] === (string) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option>
+                        <option value="<?= e((string) $cat['id']) ?>" <?= $legalUploadSelectedCategoryId === (string) $cat['id'] ? 'selected' : '' ?>><?= e($cat['name']) ?></option>
                     <?php endforeach; ?>
                 </select>
                 <span class="t8-help-text">Also determines the suggested retention basis/period, and whether this document needs admin approval before it's applied automatically on upload.</span>
@@ -1893,7 +2016,7 @@ function t8_render_camera_capture(): void
                 <button class="t8-btn t8-btn-accent" type="submit">
                     <i class="fa-solid fa-upload"></i> Upload
                 </button>
-                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents')) ?>">Cancel</a>
+                <a class="t8-btn t8-btn-outline" href="<?= e($legalUploadCaseId > 0 ? page_url('legal', ['action' => 'documents', 'id' => $legalUploadCaseId]) : page_url('documents')) ?>">Cancel</a>
             </div>
         </form>
     </div>
