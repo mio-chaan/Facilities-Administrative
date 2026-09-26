@@ -3,8 +3,8 @@
  * modules/documents/index.php
  * Document Management — traditional file uploads/versioning/archiving
  * (unchanged from the original module) PLUS the HR Document
- * Automation extension: a dashboard landing page, a template picker,
- * and generated documents (Incident Report, Notice To Explain,
+ * Automation extension: a dashboard landing page and generated
+ * documents (Incident Report, Notice To Explain,
  * Explanation Letter, Memorandum/Warning Letter, Certificate).
  *
  * PHASE 4 (Document/Legal/Contract/Retention rebuild):
@@ -76,6 +76,7 @@ $paginationHelperPath = __DIR__ . '/../../app/includes/document_browse_paginatio
 if (is_file($paginationHelperPath)) {
     require_once $paginationHelperPath;
 }
+require_once __DIR__ . '/../../app/includes/document_metadata.php';
 
 $pageTitle = 'Document Management';
 $currentUserId = t8_current_user_id();
@@ -306,6 +307,11 @@ function t8_document_render_menu(
             <?php if ($showVersionsLink): ?>
                 <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $id])) ?>">
                     <i class="fa-solid fa-file-lines"></i> View / Versions
+                </a>
+            <?php endif; ?>
+            <?php if (t8_document_can_edit_metadata($doc, (int) (t8_current_user_id() ?? 0), $isAdmin)): ?>
+                <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('documents', ['action' => 'edit_metadata', 'id' => $id])) ?>">
+                    <i class="fa-solid fa-pen-to-square"></i> Edit Metadata
                 </a>
             <?php endif; ?>
             <?php if ($latestVersionId !== null): ?>
@@ -764,7 +770,7 @@ function t8_document_store_upload(array $file, string $title, int $versionNo): a
 
 $categories = $pdo->query('SELECT id, name FROM team8_document_categories ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) ?? [];
 $departments = $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) ?? [];
-$owners = $isAdmin ? ($pdo->query('SELECT id, full_name FROM users ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC) ?? []) : [];
+$owners = $isAdmin ? ($pdo->query('SELECT id, full_name FROM users WHERE deleted_at IS NULL ORDER BY full_name')->fetchAll(PDO::FETCH_ASSOC) ?? []) : [];
 
 // If no categories exist, provide a friendly message
 if (empty($categories)) {
@@ -859,8 +865,8 @@ switch ($action) {
                 } elseif (!isset($documentTypeOptions[(string) $categoryId]) || !in_array($documentType, $documentTypeOptions[(string) $categoryId], true)) {
                     $errors[] = 'The selected document type does not match the chosen category.';
                 }
-                if ($expirationDate !== '' && strtotime($expirationDate) === false) {
-                    $errors[] = 'Expiration date must be a valid date.';
+                if (!t8_document_valid_metadata_date($expirationDate)) {
+                    $errors[] = 'Expiration date must be a valid YYYY-MM-DD date.';
                 }
                 $uploadError = t8_document_validate_upload($_FILES['file'] ?? []);
                 if ($uploadError !== '') {
@@ -939,6 +945,84 @@ switch ($action) {
 
                     t8_flash_set('success', 'Document uploaded.');
                     redirect(page_url('documents'));
+                }
+            }
+        }
+        break;
+
+    case 'edit_metadata':
+        $documentId = t8_document_metadata_positive_id($_GET['id'] ?? null);
+        $documentId = $documentId === false ? 0 : $documentId;
+        $document = $documentId > 0 ? t8_document_fetch($pdo, $documentId) : null;
+        if (!t8_document_can_edit_metadata($document, (int) ($currentUserId ?? 0), $isAdmin)) {
+            t8_flash_set('danger', 'Document not found.');
+            redirect(page_url('documents'));
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $csrfToken = $_POST['csrf_token'] ?? null;
+            if (!t8_document_metadata_csrf_valid($csrfToken)) {
+                $errors[] = 'Your session expired. Please try again.';
+            } elseif (!t8_document_metadata_version_matches($_POST['metadata_version'] ?? null, $document)) {
+                $errors[] = 'This document changed after you opened it. Review the latest values and submit again.';
+                $_POST = [];
+            } else {
+                $metadataVersion = $_POST['metadata_version'];
+                $categoryInput = $_POST['category_id'] ?? '';
+                $categoryId = $categoryInput === ''
+                    ? (int) ($document['category_id'] ?? 0)
+                    : t8_document_metadata_positive_id($categoryInput);
+                $documentTypeInput = $_POST['document_type'] ?? null;
+                $documentType = is_string($documentTypeInput) ? trim($documentTypeInput) : '';
+                $titleInput = $_POST['title'] ?? null;
+                $title = is_string($titleInput) ? trim($titleInput) : '';
+                $expirationDateInput = $_POST['expiration_date'] ?? '';
+                $expirationDate = is_string($expirationDateInput) ? $expirationDateInput : null;
+                $departmentInput = $_POST['department_id'] ?? '';
+                $departmentId = $isAdmin
+                    ? ($departmentInput === '' ? null : t8_document_metadata_positive_id($departmentInput))
+                    : ($document['department_id'] ?? null);
+                $ownerInput = $_POST['owner_id'] ?? '';
+                $ownerId = $isAdmin
+                    ? ($ownerInput === '' ? null : t8_document_metadata_positive_id($ownerInput))
+                    : ($document['owner_id'] ?? null);
+
+                if (!is_string($titleInput) || $title === '') {
+                    $errors[] = 'Document title is required.';
+                }
+                if ($categoryId === false || $categoryId <= 0) {
+                    $errors[] = 'Please choose a document category.';
+                }
+                if (!is_string($documentTypeInput) || $documentType === '') {
+                    $errors[] = 'Please choose a document type.';
+                } elseif (isset($documentTypeOptions[(string) $categoryId]) && !in_array($documentType, $documentTypeOptions[(string) $categoryId], true)) {
+                    $errors[] = 'The selected document type does not match the chosen category.';
+                }
+                if (!is_string($expirationDateInput) || !t8_document_valid_metadata_date($expirationDateInput)) {
+                    $errors[] = 'Expiration date must be a valid YYYY-MM-DD date.';
+                }
+                if ($isAdmin && $departmentId === false) {
+                    $errors[] = 'Please choose a valid department.';
+                }
+                if ($isAdmin && $ownerId === false) {
+                    $errors[] = 'Please choose a valid owner.';
+                }
+                if (!$errors) {
+                    $update = [
+                        'title' => $title,
+                        'category_id' => $categoryId,
+                        'document_type' => $documentType,
+                        'expiration_date' => $expirationDate,
+                    ];
+                    if ($isAdmin) {
+                        $update['department_id'] = $departmentId;
+                        $update['owner_id'] = $ownerId;
+                    }
+                    if (t8_document_update_metadata($pdo, $documentId, $update, (int) ($currentUserId ?? 0), $isAdmin, $metadataVersion)) {
+                        t8_flash_set('success', 'Document metadata updated.');
+                        redirect(page_url('documents', ['action' => 'versions', 'id' => $documentId]));
+                    }
+                    $errors[] = 'The metadata update could not be saved.';
                 }
             }
         }
@@ -1231,6 +1315,7 @@ switch ($action) {
 }
 
 $showCreateForm = $action === 'create';
+$showEditMetadataForm = $action === 'edit_metadata' && !empty($document);
 $showUploadVersionForm = $action === 'upload_version' && !empty($document);
 $showVersions = $action === 'versions';
 
@@ -1586,7 +1671,7 @@ if ($showList) {
     };
 }
 
-if (!$showCreateForm && !$showUploadVersionForm && !$showVersions && !$showList) {
+if (!$showCreateForm && !$showEditMetadataForm && !$showUploadVersionForm && !$showVersions && !$showList) {
     // Neither an HR action, 'dashboard', nor any known upload action -
     // fall back to the dashboard rather than a blank page.
     require __DIR__ . '/hr/dashboard.php';
@@ -1879,6 +1964,90 @@ function t8_render_camera_capture(): void
         </form>
     </div>
 
+<?php elseif ($showEditMetadataForm): ?>
+
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $document['id']])) ?>">
+            <i class="fa-solid fa-arrow-left"></i> Back to Version History
+        </a>
+    </div>
+
+    <div class="t8-card">
+        <div class="t8-card-header">
+            <h2 class="t8-card-title">Edit Document Metadata</h2>
+        </div>
+        <form method="post" action="<?= e(page_url('documents', ['action' => 'edit_metadata', 'id' => $document['id']])) ?>" novalidate class="t8-document-form-grid">
+            <?= t8_csrf_field() ?>
+            <input type="hidden" name="metadata_version" value="<?= e(is_string($_POST['metadata_version'] ?? null) ? $_POST['metadata_version'] : t8_document_metadata_version_token($document)) ?>">
+
+            <div class="t8-field t8-form-span-full">
+                <label class="t8-label" for="title">Title</label>
+                <input class="t8-input" type="text" id="title" name="title" value="<?= e((string) ($_POST['title'] ?? ($document['title'] ?? ''))) ?>" required>
+            </div>
+
+            <div class="t8-field">
+                <label class="t8-label" for="category_id">Category</label>
+                <select class="t8-select" id="category_id" name="category_id" required>
+                    <?php foreach ($categories as $cat): ?>
+                        <option value="<?= e((string) $cat['id']) ?>" <?= ((string) ($_POST['category_id'] ?? ($document['category_id'] ?? '')) === (string) $cat['id']) ? 'selected' : '' ?>><?= e($cat['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div class="t8-field">
+                <label class="t8-label" for="document_type">Document Type</label>
+                <select class="t8-select" id="document_type" name="document_type" required>
+                    <?php $selectedType = (string) ($_POST['document_type'] ?? ($document['document_type'] ?? ''));
+                    $categoryIdForTypes = (string) ($_POST['category_id'] ?? ($document['category_id'] ?? ''));
+                    $availableTypes = $categoryIdForTypes !== '' && isset($documentTypeOptions[$categoryIdForTypes]) ? $documentTypeOptions[$categoryIdForTypes] : [];
+                    if ($availableTypes === [] && isset($document['category_id']) && isset($documentTypeOptions[(string) $document['category_id']])) {
+                        $availableTypes = $documentTypeOptions[(string) $document['category_id']];
+                    }
+                    if ($availableTypes === []): ?>
+                        <option value="<?= e($selectedType) ?>" selected><?= e($selectedType !== '' ? $selectedType : 'Custom Type') ?></option>
+                    <?php else: ?>
+                        <?php foreach ($availableTypes as $type): ?>
+                            <option value="<?= e($type) ?>" <?= $selectedType === $type ? 'selected' : '' ?>><?= e($type) ?></option>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </select>
+            </div>
+
+            <?php if ($isAdmin): ?>
+                <div class="t8-field">
+                    <label class="t8-label" for="department_id">Department</label>
+                    <select class="t8-select" id="department_id" name="department_id">
+                        <option value="">Not assigned</option>
+                        <?php foreach ($departments as $department): ?>
+                            <option value="<?= e((string) $department['id']) ?>" <?= ((string) ($_POST['department_id'] ?? ($document['department_id'] ?? '')) === (string) $department['id']) ? 'selected' : '' ?>><?= e($department['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="t8-field">
+                    <label class="t8-label" for="owner_id">Owner</label>
+                    <select class="t8-select" id="owner_id" name="owner_id">
+                        <option value="">Not assigned</option>
+                        <?php foreach ($owners as $owner): ?>
+                            <option value="<?= e((string) $owner['id']) ?>" <?= ((string) ($_POST['owner_id'] ?? ($document['owner_id'] ?? '')) === (string) $owner['id']) ? 'selected' : '' ?>><?= e($owner['full_name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            <?php endif; ?>
+
+            <div class="t8-field">
+                <label class="t8-label" for="expiration_date">Expiration Date</label>
+                <input class="t8-input" type="date" id="expiration_date" name="expiration_date" value="<?= e((string) ($_POST['expiration_date'] ?? ($document['expiration_date'] ?? ''))) ?>" data-t8-date-rule="future">
+            </div>
+
+            <div class="t8-form-actions t8-form-span-full">
+                <button class="t8-btn t8-btn-accent" type="submit">
+                    <i class="fa-solid fa-floppy-disk"></i> Save Metadata
+                </button>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'versions', 'id' => $document['id']])) ?>">Cancel</a>
+            </div>
+        </form>
+    </div>
+
 <?php elseif ($showVersions): ?>
 
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
@@ -1902,6 +2071,11 @@ function t8_render_camera_capture(): void
             <?php if (t8_document_can_edit($document, (int) ($currentUserId ?? 0), $isAdmin)): ?>
                 <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'upload_version', 'id' => $document['id']])) ?>">
                     <i class="fa-solid fa-upload"></i> Upload New Version
+                </a>
+            <?php endif; ?>
+            <?php if (t8_document_can_edit_metadata($document, (int) ($currentUserId ?? 0), $isAdmin)): ?>
+                <a class="t8-btn t8-btn-outline" href="<?= e(page_url('documents', ['action' => 'edit_metadata', 'id' => $document['id']])) ?>">
+                    <i class="fa-solid fa-pen-to-square"></i> Edit Metadata
                 </a>
             <?php endif; ?>
         </div>

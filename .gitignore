@@ -32,6 +32,7 @@ Thumbs.db
 
 # Local-only QA scripts and notes
 /tests/*
+!/tests/document_metadata_edit_test.php
 !/tests/phase9_expiration_notification_test.php
 /scripts/
 /Document Life cycle/

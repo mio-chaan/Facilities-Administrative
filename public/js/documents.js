@@ -1,7 +1,7 @@
 /**
  * documents.js
  * Small, dependency-free behaviors for the Document Management
- * dashboard and HR document template picker. Loaded conditionally by
+ * dashboard and document filters. Loaded conditionally by
  * templates/footer.php when $page === 'documents'.
  */
 
