@@ -50,6 +50,9 @@ $page      = $page ?? current_page();
     <?php if ($page === 'retention'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/retention.css')) ?>">
     <?php endif; ?>
+    <?php if ($page === 'legal'): ?>
+        <link rel="stylesheet" href="<?= e(asset('css/legal.css')) ?>">
+    <?php endif; ?>
     <?php if ($page === 'legal' || $page === 'contracts'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/contract-lifecycle.css')) ?>">
     <?php endif; ?>

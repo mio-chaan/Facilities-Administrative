@@ -31,6 +31,10 @@ $schema = file_get_contents(__DIR__ . '/../database/schema.sql');
 $migration = file_get_contents(__DIR__ . '/../database/migrations/2026_09_26_legal_case_creation.sql');
 $helper = file_get_contents(__DIR__ . '/../app/includes/legal_case_helpers.php');
 $source = file_get_contents(__DIR__ . '/../modules/legal/index.php');
+$formStart = strpos($source, '<?php elseif ($showForm): ?>');
+$formEnd = strpos($source, '</form>', $formStart);
+$assert($formStart !== false && $formEnd !== false, 'The case form should remain present.');
+$caseForm = substr($source, $formStart, $formEnd - $formStart);
 foreach (['case_number', 'supporting_staff_id', 'description', 'next_action_date', 'closing_date'] as $field) {
     $assert(str_contains($schema, $field), "Fresh-install schema is missing {$field}.");
     $assert(str_contains($migration, $field), "Upgrade migration is missing {$field}.");
@@ -49,17 +53,28 @@ $assert(str_contains($migration, 'YEAR(created_at)'), 'Legacy numbering should u
 $assert(str_contains($helper, 'FOR UPDATE'), 'Case number allocation should lock the yearly sequence.');
 $assert(str_contains($source, 't8_legal_next_case_number($pdo'), 'New cases should receive a generated number.');
 $assert(str_contains($source, '$pdo->beginTransaction();'), 'Number allocation and case persistence should share a transaction.');
-$assert(str_contains($source, 'name="department_id" required'), 'Department should be required by the create form.');
-$assert(str_contains($source, 'name="assigned_to" required'), 'Assigned legal officer should be required by the create form.');
-$assert(str_contains($source, 'name="status" required'), 'Case status should be required by the create form.');
+$assert(str_contains($caseForm, 'name="department_id"') && !str_contains($caseForm, 'name="department_id" required'), 'Department should be optional.');
+$caseFormMarkup = preg_replace('/<\?.*?\?>/s', '', $caseForm);
+$assert(is_string($caseFormMarkup), 'The case form markup should be readable.');
+foreach (['title', 'case_type_id', 'status', 'priority', 'filed_date', 'assigned_to'] as $requiredField) {
+    $assert(preg_match('/name="' . preg_quote($requiredField, '/') . '"[^>]*required/', $caseFormMarkup) === 1, "{$requiredField} should be required in the primary form.");
+}
+$assert(str_contains($source, "'status' => 'open'") && str_contains($source, "'priority' => 'medium'"), 'Status and Priority should default to Open and Medium on create.');
+$assert(str_contains($caseForm, 'name="deadline"') && !preg_match('/name="deadline"[^>]*required/', $caseForm), 'Deadline should remain optional and visible.');
+$assert(str_contains($caseForm, 'name="description"') && !preg_match('/name="description"[^>]*required/', $caseForm), 'Description should remain optional and visible.');
+$assert(str_contains($caseForm, '<details') && str_contains($caseForm, 'Advanced / Court Details'), 'Optional details should be grouped in a collapsed Advanced / Court Details section.');
+$assert(!str_contains($caseForm, 'name="subject"'), 'Subject must not be editable in the case form.');
+$assert(!str_contains($caseForm, 'name="supporting_staff_id"'), 'Supporting Staff must not be editable in the case form.');
+$assert(!str_contains($caseForm, 'name="next_action_date"'), 'Next Action Date must not be editable in the case form.');
+$assert(!str_contains($caseForm, 'name="closing_date"'), 'Closing Date must not be editable in the case form.');
 $assert(str_contains($source, '$legalHasCaseCreationFields || !$legalHasCaseMetadata || !$legalHasPriority'), 'The create form should require its Phase 2 and Phase 3 migrations.');
-$assert(str_contains($source, 'name="supporting_staff_id"'), 'Supporting staff should be optional on the create form.');
-$assert(str_contains($source, 'name="next_action_date"'), 'Next action date should be captured.');
-$assert(str_contains($source, 'name="closing_date"'), 'Closing date should be captured.');
 $assert(str_contains($source, '$legalHasCaseInformation'), 'Case information fields should be migration-gated.');
 foreach (['court_agency', 'branch_office', 'docket_reference', 'jurisdiction', 'location', 'legal_basis', 'current_action'] as $field) {
-    $assert(str_contains($source, 'name="' . $field . '"'), "Case form should capture {$field}.");
+    $assert(str_contains($caseForm, 'name="' . $field . '"'), "Advanced case details should include {$field}.");
 }
-$assert(!str_contains($source, 'name="case_number"'), 'Users must not submit or edit a generated case number.');
+$assert(str_contains($source, "'department_id' => \$departmentId"), 'An empty Department should be bound as NULL instead of integer zero.');
+$assert(str_contains($source, "'description' => \$formValues['description'] !== '' ? \$formValues['description'] : null"), 'An empty Description should be persisted as NULL.');
+$assert(str_contains($source, "'deadline' => \$formValues['deadline'] !== '' ? \$formValues['deadline'] : null"), 'An empty Deadline should be persisted as NULL.');
+$assert(!str_contains($caseForm, 'name="case_number"'), 'Users must not submit or edit a generated case number.');
 
 echo "Legal case creation checks passed.\n";

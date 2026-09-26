@@ -471,7 +471,6 @@ switch ($action) {
         $formValues = $existing !== null
             ? [
                 'title'       => $existing['title'],
-                'subject'     => (string) ($existing['subject'] ?? ''),
                 'description' => (string) ($existing['description'] ?? ''),
                 'court_agency' => (string) ($existing['court_agency'] ?? ''),
                 'branch_office' => (string) ($existing['branch_office'] ?? ''),
@@ -486,17 +485,13 @@ switch ($action) {
                 'priority'    => $legalHasPriority ? (string) ($existing['priority'] ?? 'medium') : 'medium',
                 'filed_date'  => $existing['filed_date'],
                 'deadline'    => (string) ($existing['deadline'] ?? ''),
-                'next_action_date' => (string) ($existing['next_action_date'] ?? ''),
-                'closing_date' => (string) ($existing['closing_date'] ?? ''),
                 'assigned_to' => (string) $existing['assigned_to'],
-                'supporting_staff_id' => (string) ($existing['supporting_staff_id'] ?? ''),
             ]
-            : ['title' => '', 'subject' => '', 'description' => '', 'court_agency' => '', 'branch_office' => '', 'docket_reference' => '', 'jurisdiction' => '', 'location' => '', 'legal_basis' => '', 'current_action' => '', 'case_type_id' => '', 'department_id' => '', 'status' => 'open', 'priority' => 'medium', 'filed_date' => date('Y-m-d'), 'deadline' => '', 'next_action_date' => '', 'closing_date' => '', 'assigned_to' => (string) ($legalOfficers[0]['id'] ?? $currentUserId), 'supporting_staff_id' => ''];
+            : ['title' => '', 'description' => '', 'court_agency' => '', 'branch_office' => '', 'docket_reference' => '', 'jurisdiction' => '', 'location' => '', 'legal_basis' => '', 'current_action' => '', 'case_type_id' => '', 'department_id' => '', 'status' => 'open', 'priority' => 'medium', 'filed_date' => date('Y-m-d'), 'deadline' => '', 'assigned_to' => (string) ($legalOfficers[0]['id'] ?? $currentUserId)];
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $formValues = [
                 'title'       => trim((string) ($_POST['title'] ?? '')),
-                'subject'     => trim((string) ($_POST['subject'] ?? '')),
                 'description' => trim((string) ($_POST['description'] ?? '')),
                 'court_agency' => trim((string) ($_POST['court_agency'] ?? '')),
                 'branch_office' => trim((string) ($_POST['branch_office'] ?? '')),
@@ -511,10 +506,7 @@ switch ($action) {
                 'priority'    => (string) ($_POST['priority'] ?? $formValues['priority']),
                 'filed_date'  => trim((string) ($_POST['filed_date'] ?? '')),
                 'deadline'    => trim((string) ($_POST['deadline'] ?? '')),
-                'next_action_date' => trim((string) ($_POST['next_action_date'] ?? '')),
-                'closing_date' => trim((string) ($_POST['closing_date'] ?? '')),
                 'assigned_to' => $isAdmin ? (string) ($_POST['assigned_to'] ?? '') : (string) ($existing['assigned_to'] ?? ''),
-                'supporting_staff_id' => $isAdmin ? (string) ($_POST['supporting_staff_id'] ?? '') : (string) ($existing['supporting_staff_id'] ?? ''),
             ];
 
             if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
@@ -587,11 +579,11 @@ switch ($action) {
                 $caseType->execute(['id' => $caseTypeId]);
                 $selectedCaseType = $caseType->fetch(PDO::FETCH_ASSOC);
                 if ((!$selectedCaseType || !t8_legal_case_type_is_selectable($selectedCaseType))
-                    && !($existing !== null && $caseTypeId === (int) $existing['case_type_id'] && $formValues['case_type_id'] === '')
+                    && !($existing !== null && $caseTypeId === (int) $existing['case_type_id'] && $selectedCaseType && !(bool) $selectedCaseType['is_active'])
                 ) {
                     $errors[] = 'Select an active legal case type.';
                 }
-                foreach (['deadline' => 'Deadline', 'next_action_date' => 'Next action date', 'closing_date' => 'Closing date'] as $dateField => $dateLabel) {
+                foreach (['deadline' => 'Deadline'] as $dateField => $dateLabel) {
                     if ($formValues[$dateField] !== '' && !t8_legal_is_valid_iso_date($formValues[$dateField])) {
                         $errors[] = $dateLabel . ' must be a valid date.';
                     } elseif ($formValues[$dateField] !== ''
@@ -609,23 +601,17 @@ switch ($action) {
                         $errors[] = 'Deadline cannot be in the past.';
                     }
                 }
-                $assigneeIds = array_map('intval', array_column($assignees, 'id'));
                 $legalOfficerIds = array_map('intval', array_column($legalOfficers, 'id'));
                 $assignedToId = filter_var($formValues['assigned_to'], FILTER_VALIDATE_INT);
                 if ($assignedToId === false || !in_array($assignedToId, $legalOfficerIds, true)) {
                     $errors[] = 'Select a valid assigned legal officer.';
                 }
                 $departmentIds = array_map('intval', array_column($departments, 'id'));
-                $departmentId = filter_var($formValues['department_id'], FILTER_VALIDATE_INT);
-                if (!$legalHasCaseMetadata || $departmentId === false || !in_array($departmentId, $departmentIds, true)) {
+                $departmentId = $formValues['department_id'] === ''
+                    ? null
+                    : filter_var($formValues['department_id'], FILTER_VALIDATE_INT);
+                if (!$legalHasCaseMetadata || ($departmentId !== null && ($departmentId === false || !in_array($departmentId, $departmentIds, true)))) {
                     $errors[] = 'Select a valid department.';
-                }
-                $supportingStaffId = null;
-                if ($formValues['supporting_staff_id'] !== '') {
-                    $supportingStaffId = filter_var($formValues['supporting_staff_id'], FILTER_VALIDATE_INT);
-                    if ($supportingStaffId === false || !in_array($supportingStaffId, $assigneeIds, true)) {
-                        $errors[] = 'Select a valid supporting staff member.';
-                    }
                 }
 
                 if (!$errors) {
@@ -642,17 +628,13 @@ switch ($action) {
                         $pdo->beginTransaction();
                         $params = [
                             'assigned_to' => (int) $assignedToId,
-                            'supporting_staff_id' => $supportingStaffId === false ? null : $supportingStaffId,
                             'title' => $formValues['title'],
-                            'subject' => $formValues['subject'] !== '' ? $formValues['subject'] : null,
                             'description' => $formValues['description'] !== '' ? $formValues['description'] : null,
                             'case_type_id' => $caseTypeId,
-                            'department_id' => (int) $departmentId,
+                            'department_id' => $departmentId,
                             'status' => $formValues['status'],
                             'filed_date' => $formValues['filed_date'],
                             'deadline' => $formValues['deadline'] !== '' ? $formValues['deadline'] : null,
-                            'next_action_date' => $formValues['next_action_date'] !== '' ? $formValues['next_action_date'] : null,
-                            'closing_date' => $formValues['closing_date'] !== '' ? $formValues['closing_date'] : null,
                         ];
                         if ($legalHasCaseInformation) {
                             foreach (['court_agency', 'branch_office', 'docket_reference', 'jurisdiction', 'location', 'legal_basis', 'current_action'] as $field) {
@@ -666,15 +648,15 @@ switch ($action) {
                         if ($action === 'create') {
                             $caseYear = (int) $pdo->query('SELECT YEAR(CURRENT_DATE)')->fetchColumn();
                             $caseNumber = t8_legal_next_case_number($pdo, $caseYear);
-                            $columns = 'case_number, assigned_to, supporting_staff_id, title, subject, description, case_type_id, department_id, status'
+                            $columns = 'case_number, assigned_to, title, description, case_type_id, department_id, status'
                                 . ($legalHasPriority ? ', priority' : '')
                                 . ($legalHasCaseInformation ? ', court_agency, branch_office, docket_reference, jurisdiction, location, legal_basis, current_action' : '')
-                                . ', filed_date, deadline, next_action_date, closing_date'
+                                . ', filed_date, deadline'
                                 . ($justClosed ? ', closed_at' : '');
-                            $values = ':case_number, :assigned_to, :supporting_staff_id, :title, :subject, :description, :case_type_id, :department_id, :status'
+                            $values = ':case_number, :assigned_to, :title, :description, :case_type_id, :department_id, :status'
                                 . ($legalHasPriority ? ', :priority' : '')
                                 . ($legalHasCaseInformation ? ', :court_agency, :branch_office, :docket_reference, :jurisdiction, :location, :legal_basis, :current_action' : '')
-                                . ', :filed_date, :deadline, :next_action_date, :closing_date'
+                                . ', :filed_date, :deadline'
                                 . ($justClosed ? ', NOW()' : '');
                             $params['case_number'] = $caseNumber;
                             $pdo->prepare('INSERT INTO team8_legal_cases (' . $columns . ') VALUES (' . $values . ')')->execute($params);
@@ -693,14 +675,10 @@ switch ($action) {
                             $params['id'] = $caseId;
                             $caseAuditValues = [
                                 'title' => [$existing['title'], $formValues['title']],
-                                'subject' => [$existing['subject'] ?? null, $formValues['subject'] !== '' ? $formValues['subject'] : null],
                                 'description' => [$existing['description'] ?? null, $formValues['description'] !== '' ? $formValues['description'] : null],
                                 'case_type_id' => [(int) $existing['case_type_id'], $caseTypeId],
-                                'department_id' => [(int) ($existing['department_id'] ?? 0), (int) $departmentId],
-                                'supporting_staff_id' => [$existing['supporting_staff_id'] ?? null, $supportingStaffId === false ? null : $supportingStaffId],
+                                'department_id' => [$existing['department_id'] ?? null, $departmentId],
                                 'filed_date' => [$existing['filed_date'], $formValues['filed_date']],
-                                'next_action_date' => [$existing['next_action_date'] ?? null, $formValues['next_action_date'] !== '' ? $formValues['next_action_date'] : null],
-                                'closing_date' => [$existing['closing_date'] ?? null, $formValues['closing_date'] !== '' ? $formValues['closing_date'] : null],
                             ];
                             if ($legalHasPriority) {
                                 $caseAuditValues['priority'] = [$existing['priority'] ?? null, $formValues['priority']];
@@ -717,10 +695,10 @@ switch ($action) {
                                 }
                             }
                             $pdo->prepare(
-                                'UPDATE team8_legal_cases SET assigned_to = :assigned_to, supporting_staff_id = :supporting_staff_id, title = :title, subject = :subject, description = :description, case_type_id = :case_type_id, department_id = :department_id, status = :status'
+                                'UPDATE team8_legal_cases SET assigned_to = :assigned_to, title = :title, description = :description, case_type_id = :case_type_id, department_id = :department_id, status = :status'
                                 . ($legalHasPriority ? ', priority = :priority' : '')
                                 . ($legalHasCaseInformation ? ', court_agency = :court_agency, branch_office = :branch_office, docket_reference = :docket_reference, jurisdiction = :jurisdiction, location = :location, legal_basis = :legal_basis, current_action = :current_action' : '')
-                                . ', filed_date = :filed_date, deadline = :deadline, next_action_date = :next_action_date, closing_date = :closing_date'
+                                . ', filed_date = :filed_date, deadline = :deadline'
                                 . ($justClosed ? ', closed_at = NOW()' : '')
                                 . ' WHERE id = :id'
                             )->execute($params);
@@ -787,13 +765,6 @@ switch ($action) {
             $departmentStmt = $pdo->prepare('SELECT name FROM departments WHERE id = :id');
             $departmentStmt->execute(['id' => (int) $case['department_id']]);
             $detailDepartment = (string) ($departmentStmt->fetchColumn() ?: '—');
-        }
-        $detailSupportingStaff = '—';
-        foreach ($assignees as $assignee) {
-            if ((int) $assignee['id'] === (int) ($case['supporting_staff_id'] ?? 0)) {
-                $detailSupportingStaff = (string) $assignee['full_name'];
-                break;
-            }
         }
         $caseResolution = null;
         if ($legalHasResolutionSchema) {
@@ -2160,14 +2131,9 @@ if ($showForm) {
     }
 }
 $formAssignedOfficerName = '';
-$formSupportingStaffName = 'None';
 $formDepartmentName = '—';
 if ($showForm && $existing !== null) {
     $formAssignedOfficerName = (string) $existing['assigned_to_name'];
-    $assigneeNameMap = array_column($assignees, 'full_name', 'id');
-    $formSupportingStaffName = $formValues['supporting_staff_id'] !== ''
-        ? (string) ($assigneeNameMap[(int) $formValues['supporting_staff_id']] ?? '—')
-        : 'None';
     foreach ($departments as $department) {
         if ((string) $department['id'] === $formValues['department_id']) {
             $formDepartmentName = (string) $department['name'];
@@ -2411,8 +2377,21 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
     <?php
 }
 ?>
-<h1>Legal Management</h1>
-<p class="t8-help-text"><?= $isAdmin ? 'Track legal cases and their supporting documents.' : 'View legal cases assigned to you.' ?></p>
+<header class="t8-legal-page-header">
+    <div>
+        <h1><?= $action === 'list' ? ($archivedFilter ? 'Archived Cases' : 'Legal Cases') : 'Legal Management' ?></h1>
+        <p class="t8-help-text"><?= $isAdmin ? 'Track legal cases and their supporting documents.' : 'View legal cases assigned to you.' ?></p>
+    </div>
+    <?php if ($action === 'list'): ?>
+        <nav class="t8-legal-page-actions" aria-label="Legal case actions">
+            <?php if ($isAdmin): ?><a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'case_types'])) ?>"><i class="fa-solid fa-list"></i> Manage Case Types</a><?php endif; ?>
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', array_merge($legalListFilters, ['archived' => $archivedFilter ? '0' : '1']))) ?>">
+                <i class="fa-solid fa-box-archive"></i> <?= $archivedFilter ? 'View Active' : 'View Archived' ?>
+            </a>
+            <?php if ($isAdmin && !$archivedFilter): ?><a class="t8-btn t8-btn-accent" href="<?= e(page_url('legal', ['action' => 'create'])) ?>"><i class="fa-solid fa-plus"></i> New Legal Case</a><?php endif; ?>
+        </nav>
+    <?php endif; ?>
+</header>
 
 <?php foreach ($errors as $error): ?>
     <div class="t8-alert t8-alert-danger"><?= e($error) ?></div>
@@ -2454,8 +2433,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
         </div>
         <form method="post"
               action="<?= e(page_url('legal', array_filter(['action' => $action, 'id' => $_GET['id'] ?? null]))) ?>"
-              class="t8-legal-form-grid"
-              novalidate>
+              class="t8-legal-form-grid">
             <p class="t8-help-text t8-required-legend">* Required field</p>
             <?= t8_csrf_field() ?>
 
@@ -2474,8 +2452,8 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <label class="t8-label" for="case_type_id">Case Type <span class="t8-required">*</span></label>
                 <?php if ($currentCaseType !== null && !(bool) $currentCaseType['is_active']): ?>
                     <span class="t8-help-text">Existing type: <?= e($currentCaseType['name']) ?> (inactive; retained on this case).</span>
-                    <select class="t8-select" id="case_type_id" name="case_type_id">
-                        <option value="" <?= $formValues['case_type_id'] === '' || $formValues['case_type_id'] === (string) $existing['case_type_id'] ? 'selected' : '' ?>>Keep existing type</option>
+                    <select class="t8-select" id="case_type_id" name="case_type_id" required>
+                        <option value="<?= e((string) $existing['case_type_id']) ?>" selected>Keep existing type</option>
                         <?php foreach ($legalCaseTypes as $type): ?>
                             <option value="<?= e((string) $type['id']) ?>" <?= (string) $type['id'] === $formValues['case_type_id'] ? 'selected' : '' ?>><?= e($type['name']) ?></option>
                         <?php endforeach; ?>
@@ -2490,32 +2468,33 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <?php endif; ?>
             </div>
 
-            <?php if ($legalHasCaseMetadata): ?><div class="t8-field">
-                <label class="t8-label" for="subject">Subject</label>
-                <input class="t8-input" type="text" id="subject" name="subject" value="<?= e($formValues['subject']) ?>">
-            </div>
-
             <div class="t8-field t8-form-span-2">
                 <label class="t8-label" for="description">Description / Summary</label>
                 <textarea class="t8-input" id="description" name="description" rows="4"><?= e($formValues['description']) ?></textarea>
             </div>
 
-            <?php if ($legalHasCaseInformation): ?>
-                <div class="t8-field"><label class="t8-label" for="court_agency">Court / Agency</label><input class="t8-input" id="court_agency" name="court_agency" maxlength="200" value="<?= e($formValues['court_agency']) ?>"></div>
-                <div class="t8-field"><label class="t8-label" for="branch_office">Branch / Office</label><input class="t8-input" id="branch_office" name="branch_office" maxlength="150" value="<?= e($formValues['branch_office']) ?>"></div>
-                <div class="t8-field"><label class="t8-label" for="docket_reference">Docket / Reference Number</label><input class="t8-input" id="docket_reference" name="docket_reference" maxlength="150" value="<?= e($formValues['docket_reference']) ?>"></div>
-                <div class="t8-field"><label class="t8-label" for="jurisdiction">Jurisdiction</label><input class="t8-input" id="jurisdiction" name="jurisdiction" maxlength="150" value="<?= e($formValues['jurisdiction']) ?>"></div>
-                <div class="t8-field"><label class="t8-label" for="location">Location</label><input class="t8-input" id="location" name="location" maxlength="200" value="<?= e($formValues['location']) ?>"></div>
-                <div class="t8-field t8-form-span-2"><label class="t8-label" for="legal_basis">Legal Basis / Applicable Law</label><textarea class="t8-input" id="legal_basis" name="legal_basis" rows="3" maxlength="5000"><?= e($formValues['legal_basis']) ?></textarea></div>
-                <div class="t8-field t8-form-span-2"><label class="t8-label" for="current_action">Current Action / Next Step</label><textarea class="t8-input" id="current_action" name="current_action" rows="3" maxlength="5000"><?= e($formValues['current_action']) ?></textarea></div>
+            <?php if ($legalHasCaseMetadata): ?>
+                <details class="t8-form-span-2">
+                    <summary class="t8-label">Advanced / Court Details</summary>
+                    <div class="t8-legal-form-grid">
+                        <?php if ($isAdmin): ?><div class="t8-field">
+                            <label class="t8-label" for="department_id">Department</label>
+                            <select class="t8-select" id="department_id" name="department_id"><option value="">No department</option><?php foreach ($departments as $department): ?><option value="<?= e((string) $department['id']) ?>" <?= (string) $department['id'] === $formValues['department_id'] ? 'selected' : '' ?>><?= e($department['name']) ?></option><?php endforeach; ?></select>
+                        </div><?php else: ?>
+                            <div class="t8-field"><span class="t8-label">Department</span><strong><?= e($formDepartmentName) ?></strong></div>
+                        <?php endif; ?>
+                        <?php if ($legalHasCaseInformation): ?>
+                            <div class="t8-field"><label class="t8-label" for="court_agency">Court / Agency</label><input class="t8-input" id="court_agency" name="court_agency" maxlength="200" value="<?= e($formValues['court_agency']) ?>"></div>
+                            <div class="t8-field"><label class="t8-label" for="branch_office">Branch / Office</label><input class="t8-input" id="branch_office" name="branch_office" maxlength="150" value="<?= e($formValues['branch_office']) ?>"></div>
+                            <div class="t8-field"><label class="t8-label" for="docket_reference">Docket / Reference Number</label><input class="t8-input" id="docket_reference" name="docket_reference" maxlength="150" value="<?= e($formValues['docket_reference']) ?>"></div>
+                            <div class="t8-field"><label class="t8-label" for="jurisdiction">Jurisdiction</label><input class="t8-input" id="jurisdiction" name="jurisdiction" maxlength="150" value="<?= e($formValues['jurisdiction']) ?>"></div>
+                            <div class="t8-field"><label class="t8-label" for="location">Location</label><input class="t8-input" id="location" name="location" maxlength="200" value="<?= e($formValues['location']) ?>"></div>
+                            <div class="t8-field t8-form-span-2"><label class="t8-label" for="legal_basis">Legal Basis / Applicable Law</label><textarea class="t8-input" id="legal_basis" name="legal_basis" rows="3" maxlength="5000"><?= e($formValues['legal_basis']) ?></textarea></div>
+                            <div class="t8-field t8-form-span-2"><label class="t8-label" for="current_action">Current Action / Next Step</label><textarea class="t8-input" id="current_action" name="current_action" rows="3" maxlength="5000"><?= e($formValues['current_action']) ?></textarea></div>
+                        <?php endif; ?>
+                    </div>
+                </details>
             <?php endif; ?>
-
-            <?php if ($isAdmin): ?><div class="t8-field">
-                <label class="t8-label" for="department_id">Department <span class="t8-required">*</span></label>
-                <select class="t8-select" id="department_id" name="department_id" required><option value="">Select a department</option><?php foreach ($departments as $department): ?><option value="<?= e((string) $department['id']) ?>" <?= (string) $department['id'] === $formValues['department_id'] ? 'selected' : '' ?>><?= e($department['name']) ?></option><?php endforeach; ?></select>
-            </div><?php else: ?>
-                <div class="t8-field"><span class="t8-label">Department</span><strong><?= e($formDepartmentName) ?></strong></div>
-            <?php endif; ?><?php endif; ?>
 
             <div class="t8-field">
                 <label class="t8-label" for="status">Status <span class="t8-required">*</span></label>
@@ -2527,7 +2506,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                     <?php endforeach; ?>
                 </select>
                 <?php if ($existing !== null && $existing['status'] === 'closed'): ?>
-                    <span class="t8-help-text">This case is already closed<?= !empty($existing['closed_at']) ? ' (on ' . e(format_date((string) $existing['closed_at'], 'M d, Y')) . ')' : '' ?> and under retention. Manage disposal from its Retention screen, not by changing status here.</span>
+                    <span class="t8-help-text">This case is already closed<?= !empty($existing['closed_at']) ? ' (on ' . e(format_date((string) $existing['closed_at'], 'M j, Y g:i A')) . ')' : '' ?> and under retention. Manage disposal from its Retention screen, not by changing status here.</span>
                 <?php elseif ($existing !== null): ?>
                     <span class="t8-help-text">Setting this to "Closed" registers the case under retention automatically.</span>
                 <?php endif; ?>
@@ -2554,18 +2533,10 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             </div><?php endif; ?>
 
             <?php if ($legalHasCaseMetadata): ?>
-                <div class="t8-field">
-                    <label class="t8-label" for="next_action_date">Next Action Date</label>
-                    <input class="t8-input" type="date" id="next_action_date" name="next_action_date" value="<?= e($formValues['next_action_date']) ?>" min="<?= e($formValues['filed_date']) ?>">
-                </div>
-                <div class="t8-field">
-                    <label class="t8-label" for="closing_date">Closing Date</label>
-                    <input class="t8-input" type="date" id="closing_date" name="closing_date" value="<?= e($formValues['closing_date']) ?>" min="<?= e($formValues['filed_date']) ?>">
-                </div>
             <script>
                 document.addEventListener("DOMContentLoaded", function () {
                     var filedDate = document.getElementById("filed_date");
-                    var dateFields = ["deadline", "next_action_date", "closing_date"]
+                    var dateFields = ["deadline"]
                         .map(function (id) { return document.getElementById(id); })
                         .filter(Boolean);
                     if (!filedDate || dateFields.length === 0) {
@@ -2600,18 +2571,6 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                     <?php endforeach; ?>
                 </select>
             </div><?php else: ?><div class="t8-field"><span class="t8-label">Assigned Legal Officer</span><strong><?= e($formAssignedOfficerName) ?></strong></div><?php endif; ?>
-
-            <?php if ($isAdmin): ?><div class="t8-field">
-                <label class="t8-label" for="supporting_staff_id">Supporting Staff</label>
-                <select class="t8-select" id="supporting_staff_id" name="supporting_staff_id">
-                    <option value="">None</option>
-                    <?php foreach ($assignees as $a): ?>
-                        <option value="<?= e((string) $a['id']) ?>" <?= (string) $a['id'] === $formValues['supporting_staff_id'] ? 'selected' : '' ?>>
-                            <?= e($a['full_name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div><?php else: ?><div class="t8-field"><span class="t8-label">Supporting Staff</span><strong><?= e($formSupportingStaffName) ?></strong></div><?php endif; ?>
 
             <div class="t8-form-actions t8-legal-form-actions">
                 <button class="t8-btn t8-btn-accent" type="submit">
@@ -2696,10 +2655,8 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             <div class="t8-hr-readonly-block">
                 <div class="t8-hr-readonly-item"><span>Filed Date</span><strong><?= e(format_date((string) $case['filed_date'], 'M d, Y')) ?></strong></div>
                 <div class="t8-hr-readonly-item"><span>Deadline</span><strong><?= !empty($case['deadline']) ? e(format_date((string) $case['deadline'], 'M d, Y')) : '—' ?></strong></div>
-                <div class="t8-hr-readonly-item"><span>Next Action</span><strong><?= !empty($case['next_action_date']) ? e(format_date((string) $case['next_action_date'], 'M d, Y')) : '—' ?></strong></div>
-                <div class="t8-hr-readonly-item"><span>Closing Date</span><strong><?= !empty($case['closing_date']) ? e(format_date((string) $case['closing_date'], 'M d, Y')) : '—' ?></strong></div>
+                <?php if ($case['status'] === 'closed' && !empty($case['closed_at'])): ?><div class="t8-hr-readonly-item"><span>Closed At</span><strong><?= e(format_date((string) $case['closed_at'], 'M j, Y g:i A')) ?></strong></div><?php endif; ?>
                 <div class="t8-hr-readonly-item"><span>Assigned Legal Officer</span><strong><?= e((string) $case['assigned_to_name']) ?></strong></div>
-                <div class="t8-hr-readonly-item"><span>Supporting Staff</span><strong><?= e($detailSupportingStaff) ?></strong></div>
                 <div class="t8-hr-readonly-item"><span>Department</span><strong><?= e($detailDepartment) ?></strong></div>
             </div>
             <?php if (trim((string) ($case['subject'] ?? '')) !== ''): ?>
@@ -3374,90 +3331,78 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
 
 <?php else: ?>
 
-    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
-        <?php if ($isAdmin): ?><a class="t8-btn t8-btn-accent" href="<?= e(page_url('legal', ['action' => 'create'])) ?>">
-            <i class="fa-solid fa-plus"></i> New Legal Case
-        </a><?php endif; ?>
-        <?php if ($isAdmin): ?><a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'case_types'])) ?>">
-            <i class="fa-solid fa-list"></i> Manage Case Types
-        </a><?php endif; ?>
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', array_merge($legalListFilters, ['archived' => $archivedFilter ? '0' : '1', 'page' => 1]))) ?>">
-            <i class="fa-solid fa-box-archive"></i> <?= $archivedFilter ? 'View Active' : 'View Archived' ?>
-        </a>
-    </div>
-
-    <div class="t8-card">
-        <div class="t8-card-header">
-            <h2 class="t8-card-title"><?= $archivedFilter ? 'Archived Cases' : 'Legal Cases' ?></h2>
-        </div>
-        <form method="get" action="<?= e(page_url('legal')) ?>" class="t8-filter-grid" style="padding: 0 var(--t8-space-4) var(--t8-space-4);">
+    <?php
+    $legalAdvancedFiltersActive = $operationalFilter !== '' || $priorityFilter !== ''
+        || $departmentFilter !== false || $assignedFilter !== false
+        || $filedFrom !== '' || $filedTo !== '' || $deadlineFrom !== '' || $deadlineTo !== '';
+    ?>
+    <div class="t8-card t8-legal-list-card">
+        <form method="get" action="<?= e(page_url('legal')) ?>" class="t8-legal-filters">
             <input type="hidden" name="page" value="legal">
             <input type="hidden" name="archived" value="<?= $archivedFilter ? '1' : '0' ?>">
-            <div class="t8-field">
-                <label class="t8-label" for="legal-search">Search</label>
-                <input class="t8-input" type="search" id="legal-search" name="search" value="<?= e($searchFilter) ?>" placeholder="Case, subject, type, department...">
-            </div>
-            <div class="t8-field">
-                <label class="t8-label" for="legal-status">Status</label>
+            <div class="t8-legal-quick-filters">
+                <div class="t8-legal-search">
+                    <label class="t8-legal-visually-hidden" for="legal-search">Search cases, subjects, or departments</label>
+                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                    <input class="t8-input" type="search" id="legal-search" name="search" value="<?= e($searchFilter) ?>" placeholder="Search cases, subjects, or departments...">
+                </div>
+                <label class="t8-legal-visually-hidden" for="legal-status">Filter by status</label>
                 <select class="t8-select" id="legal-status" name="status">
-                    <option value="">All statuses</option>
+                    <option value="">All Statuses</option>
                     <?php foreach ($legalStatuses as $status): ?><option value="<?= e($status) ?>" <?= $statusFilter === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?>
                 </select>
-            </div>
-            <div class="t8-field">
-                <label class="t8-label" for="legal-operational">Operational View</label>
-                <select class="t8-select" id="legal-operational" name="operational">
-                    <option value="">All case work</option>
-                    <option value="overdue" <?= $operationalFilter === 'overdue' ? 'selected' : '' ?>>Overdue tasks</option>
-                    <option value="upcoming_deadline" <?= $operationalFilter === 'upcoming_deadline' ? 'selected' : '' ?>>Upcoming deadlines</option>
-                    <option value="upcoming_hearing" <?= $operationalFilter === 'upcoming_hearing' ? 'selected' : '' ?>>Upcoming hearings</option>
-                </select>
-            </div>
-            <?php if ($legalHasPriority): ?>
-                <div class="t8-field">
-                    <label class="t8-label" for="legal-priority">Priority</label>
-                    <select class="t8-select" id="legal-priority" name="priority">
-                        <option value="">All priorities</option>
-                        <?php foreach ($legalPriorities as $priority): ?><option value="<?= e($priority) ?>" <?= $priorityFilter === $priority ? 'selected' : '' ?>><?= e(ucfirst($priority)) ?></option><?php endforeach; ?>
-                    </select>
-                </div>
-            <?php endif; ?>
-            <div class="t8-field">
-                <label class="t8-label" for="legal-case-type">Case Type</label>
+                <label class="t8-legal-visually-hidden" for="legal-case-type">Filter by case type</label>
                 <select class="t8-select" id="legal-case-type" name="case_type">
-                    <option value="">All case types</option>
+                    <option value="">All Case Types</option>
                     <?php foreach ($legalCaseTypes as $caseType): ?><option value="<?= e((string) $caseType['id']) ?>" <?= $caseTypeFilter !== false && (int) $caseType['id'] === $caseTypeFilter ? 'selected' : '' ?>><?= e($caseType['name']) ?></option><?php endforeach; ?>
                 </select>
+                <button class="t8-btn t8-btn-outline t8-legal-filter-toggle" type="button" id="legal-filter-toggle" aria-expanded="<?= $legalAdvancedFiltersActive ? 'true' : 'false' ?>" aria-controls="legal-advanced-filters">
+                    <i class="fa-solid fa-sliders" aria-hidden="true"></i> Filters
+                </button>
+                <?php if (count($legalListFilters) > ($archivedFilter ? 1 : 0)): ?>
+                    <a class="t8-btn t8-btn-ghost t8-legal-clear" href="<?= e(page_url('legal', ['archived' => $archivedFilter ? '1' : '0'])) ?>">Clear</a>
+                <?php endif; ?>
             </div>
-            <?php if ($legalHasCaseMetadata): ?>
-                <div class="t8-field">
-                    <label class="t8-label" for="legal-department">Department</label>
-                    <select class="t8-select" id="legal-department" name="department">
-                        <option value="">All departments</option>
-                        <?php foreach ($departments as $department): ?><option value="<?= e((string) $department['id']) ?>" <?= $departmentFilter !== false && (int) $department['id'] === $departmentFilter ? 'selected' : '' ?>><?= e($department['name']) ?></option><?php endforeach; ?>
-                    </select>
-                </div>
-            <?php endif; ?>
-            <div class="t8-field">
-                <label class="t8-label" for="legal-assignee">Assigned Officer</label>
-                <select class="t8-select" id="legal-assignee" name="assigned_to">
-                    <option value="">All assigned officers</option>
-                    <?php foreach ($legalOfficers as $assignee): ?><option value="<?= e((string) $assignee['id']) ?>" <?= $assignedFilter !== false && (int) $assignee['id'] === $assignedFilter ? 'selected' : '' ?>><?= e($assignee['full_name']) ?></option><?php endforeach; ?>
-                </select>
+            <div class="t8-legal-advanced-filters" id="legal-advanced-filters" <?= $legalAdvancedFiltersActive ? '' : 'hidden' ?>>
+                <?php if ($legalHasPriority): ?>
+                    <div class="t8-field"><label class="t8-label" for="legal-priority">Priority</label><select class="t8-select" id="legal-priority" name="priority"><option value="">All Priorities</option><?php foreach ($legalPriorities as $priority): ?><option value="<?= e($priority) ?>" <?= $priorityFilter === $priority ? 'selected' : '' ?>><?= e(ucfirst($priority)) ?></option><?php endforeach; ?></select></div>
+                <?php endif; ?>
+                <div class="t8-field"><label class="t8-label" for="legal-operational">Operational View</label><select class="t8-select" id="legal-operational" name="operational"><option value="">All Case Work</option><option value="overdue" <?= $operationalFilter === 'overdue' ? 'selected' : '' ?>>Overdue tasks</option><option value="upcoming_deadline" <?= $operationalFilter === 'upcoming_deadline' ? 'selected' : '' ?>>Upcoming deadlines</option><option value="upcoming_hearing" <?= $operationalFilter === 'upcoming_hearing' ? 'selected' : '' ?>>Upcoming hearings</option></select></div>
+                <?php if ($legalHasCaseMetadata): ?>
+                    <div class="t8-field"><label class="t8-label" for="legal-department">Department</label><select class="t8-select" id="legal-department" name="department"><option value="">All Departments</option><?php foreach ($departments as $department): ?><option value="<?= e((string) $department['id']) ?>" <?= $departmentFilter !== false && (int) $department['id'] === $departmentFilter ? 'selected' : '' ?>><?= e($department['name']) ?></option><?php endforeach; ?></select></div>
+                <?php endif; ?>
+                <div class="t8-field"><label class="t8-label" for="legal-assignee">Assigned Officer</label><select class="t8-select" id="legal-assignee" name="assigned_to"><option value="">All Assigned Officers</option><?php foreach ($legalOfficers as $assignee): ?><option value="<?= e((string) $assignee['id']) ?>" <?= $assignedFilter !== false && (int) $assignee['id'] === $assignedFilter ? 'selected' : '' ?>><?= e($assignee['full_name']) ?></option><?php endforeach; ?></select></div>
+                <div class="t8-field"><label class="t8-label" for="legal-filed-from">Filed From</label><input class="t8-input" type="date" id="legal-filed-from" name="filed_from" value="<?= e($filedFrom) ?>"></div>
+                <div class="t8-field"><label class="t8-label" for="legal-filed-to">Filed To</label><input class="t8-input" type="date" id="legal-filed-to" name="filed_to" value="<?= e($filedTo) ?>"></div>
+                <?php if ($legalHasCaseMetadata): ?>
+                    <div class="t8-field"><label class="t8-label" for="legal-deadline-from">Deadline From</label><input class="t8-input" type="date" id="legal-deadline-from" name="deadline_from" value="<?= e($deadlineFrom) ?>"></div>
+                    <div class="t8-field"><label class="t8-label" for="legal-deadline-to">Deadline To</label><input class="t8-input" type="date" id="legal-deadline-to" name="deadline_to" value="<?= e($deadlineTo) ?>"></div>
+                <?php endif; ?>
+                <div class="t8-legal-filter-actions"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-filter" aria-hidden="true"></i> Apply Filters</button></div>
             </div>
-            <div class="t8-field"><label class="t8-label" for="legal-filed-from">Filed From</label><input class="t8-input" type="date" id="legal-filed-from" name="filed_from" value="<?= e($filedFrom) ?>"></div>
-            <div class="t8-field"><label class="t8-label" for="legal-filed-to">Filed To</label><input class="t8-input" type="date" id="legal-filed-to" name="filed_to" value="<?= e($filedTo) ?>"></div>
-            <?php if ($legalHasCaseMetadata): ?>
-                <div class="t8-field"><label class="t8-label" for="legal-deadline-from">Deadline From</label><input class="t8-input" type="date" id="legal-deadline-from" name="deadline_from" value="<?= e($deadlineFrom) ?>"></div>
-                <div class="t8-field"><label class="t8-label" for="legal-deadline-to">Deadline To</label><input class="t8-input" type="date" id="legal-deadline-to" name="deadline_to" value="<?= e($deadlineTo) ?>"></div>
-            <?php endif; ?>
-            <div style="display:flex; gap:8px; align-items:end;"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-filter"></i> Apply Filters</button><a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['archived' => $archivedFilter ? '1' : '0'])) ?>">Clear</a></div>
         </form>
+        <script>
+            (() => {
+                const filterForm = document.querySelector('.t8-legal-filters');
+                const filterToggle = document.getElementById('legal-filter-toggle');
+                const advancedFilters = document.getElementById('legal-advanced-filters');
+
+                filterToggle?.addEventListener('click', () => {
+                    const isExpanded = filterToggle.getAttribute('aria-expanded') === 'true';
+                    filterToggle.setAttribute('aria-expanded', String(!isExpanded));
+                    advancedFilters.hidden = isExpanded;
+                });
+
+                ['legal-status', 'legal-case-type'].forEach((filterId) => {
+                    document.getElementById(filterId)?.addEventListener('change', () => filterForm.requestSubmit());
+                });
+            })();
+        </script>
         <?php if ($cases === []): ?>
             <div class="t8-empty"><?= count($legalListFilters) > ($archivedFilter ? 1 : 0) ? 'No legal cases match the selected filters.' : ($archivedFilter ? 'No archived cases.' : 'No legal cases yet.') ?></div>
         <?php else: ?>
             <div class="t8-table-wrap">
-                <table class="t8-table">
+                <table class="t8-table t8-legal-cases-table">
                     <thead>
                         <tr>
                             <th>Case No.</th>
@@ -3482,8 +3427,8 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                                 : null;
                             ?>
                             <tr>
-                                <td><?= e((string) ($c['case_number'] ?? ('CASE-' . str_pad((string) $c['id'], 6, '0', STR_PAD_LEFT)))) ?></td>
-                                <td><a href="<?= e(page_url('legal', ['action' => 'view', 'id' => (int) $c['id']])) ?>"><?= e($c['title']) ?></a></td>
+                                <td class="t8-table-ref"><?= e((string) ($c['case_number'] ?? ('CASE-' . str_pad((string) $c['id'], 6, '0', STR_PAD_LEFT)))) ?></td>
+                                <td><a class="t8-legal-case-title" href="<?= e(page_url('legal', ['action' => 'view', 'id' => (int) $c['id']])) ?>"><?= e($c['title']) ?></a></td>
                                 <td><?= e($c['case_type_name']) ?><?= !(bool) $c['case_type_active'] ? ' (Inactive)' : '' ?></td>
                                 <?php if ($legalHasCaseMetadata): ?><td><?= e((string) ($c['subject'] ?? '—')) ?></td>
                                 <td><?= e((string) ($c['department_name'] ?? '—')) ?></td><?php endif; ?>
