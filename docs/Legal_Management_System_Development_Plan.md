@@ -789,6 +789,14 @@ Oct 20
 
 The dashboard should help legal staff act on upcoming work, rather than only display decorative statistics.
 
+### Phase 17 Completion Checklist
+
+- [x] The Legal Dashboard is available to administrators and Legal Officers through the existing server-side legal authorization boundary.
+- [x] Dashboard cards show total active cases, open cases, upcoming deadlines, upcoming hearings, overdue tasks, and recently closed cases.
+- [x] Upcoming deadline and scheduled hearing queues are limited to the next 30 days, scoped to the viewer's assigned, supporting-staff, or active-task cases, and link to the case workspace.
+- [x] Overdue tasks are computed from pending or in-progress tasks whose due date has passed, with archived and closed cases excluded.
+- [x] The dashboard loads the existing responsive dashboard styles and provides an explicit return path to the case list.
+
 ---
 
 # 20. Phase 18 — Search and Filtering
@@ -818,6 +826,13 @@ Additional operational filters:
 - Overdue
 - Upcoming Deadline
 - Upcoming Hearing
+
+### Phase 18 Completion Checklist
+
+- [x] Legal case search covers case number, title, subject, party name, and docket/reference number through the existing relational records.
+- [x] The list retains status, case type, department, priority, assigned officer, filed-date, and deadline filters with server-side validation.
+- [x] Operational filters show cases with overdue tasks, deadlines in the next 30 days, or scheduled hearings in the next 30 days.
+- [x] Search and operational filters preserve authorization scoping and pagination state.
 
 ---
 
@@ -868,6 +883,13 @@ audit_logs
 
 Avoid creating duplicate user, employee, department, or document tables.
 
+### Phase 19 Completion Checklist
+
+- [x] Legal cases use separate relational tables for parties, tasks, hearings, documents, notes, communications, resolutions, and shared audit/timeline data.
+- [x] Shared users, departments, parties, documents, and audit logs are reused instead of duplicated.
+- [x] Foreign keys, unique constraints, indexes, and database checks protect legal relationships and supported status/type values.
+- [x] Additive legal migrations are provided for existing databases and the fresh-install schema contains the same legal structure.
+
 ---
 
 # 22. Phase 20 — Validation and Security
@@ -903,6 +925,14 @@ Apply the same security principles used by the rest of the RAM YUM system:
 - Secure file upload handling
 - Audit logging
 - Input/output escaping
+
+### Phase 20 Completion Checklist
+
+- [x] Unauthorized roles and unassigned users are rejected by server-side legal and document authorization checks.
+- [x] Date ordering, required assignments, duplicate parties, lifecycle transitions, closed cases, and archived cases are validated server-side.
+- [x] Legal mutations use CSRF validation, prepared statements, audit logging, and transactional mutation/audit handling.
+- [x] Legal document uploads and downloads continue through the existing MIME, storage, retention, and DMS authorization controls.
+- [x] Legal content is escaped on output, and the complete legal regression suite plus document authorization matrix pass.
 
 ---
 

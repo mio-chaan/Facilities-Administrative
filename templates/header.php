@@ -17,7 +17,7 @@ $page      = $page ?? current_page();
 
     <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>">
     <link rel="stylesheet" href="<?= e(asset('css/components.css')) ?>">
-    <?php if ($page === 'dashboard'): ?>
+    <?php if (in_array($page, ['dashboard', 'legal'], true)): ?>
         <link rel="stylesheet" href="<?= e(asset('css/dashboard.css')) ?>">
         <!-- REDESIGN: Chart.js powers the Monthly Reservation Trend card
              (see modules/dashboard/index.php + public/js/dashboard.js).

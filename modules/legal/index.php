@@ -289,6 +289,98 @@ $legalOfficers = $pdo->query(
 $departments = $legalHasCaseMetadata ? $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) : [];
 
 switch ($action) {
+    case 'dashboard':
+        $dashboardStats = [
+            'total_active' => 0,
+            'open' => 0,
+            'upcoming_deadlines' => 0,
+            'upcoming_hearings' => 0,
+            'overdue_tasks' => 0,
+            'recently_closed' => 0,
+        ];
+        $dashboardDeadlines = [];
+        $dashboardHearings = [];
+        $dashboardScope = [];
+        $dashboardParams = [];
+        if (!$isAdmin) {
+            $dashboardAccess = ['lc.assigned_to = :dashboard_assigned_to'];
+            $dashboardParams['dashboard_assigned_to'] = $currentUserId;
+            if ($legalHasCaseCreationFields) {
+                $dashboardAccess[] = 'lc.supporting_staff_id = :dashboard_supporting_staff';
+                $dashboardParams['dashboard_supporting_staff'] = $currentUserId;
+            }
+            if ($legalHasTaskSchema) {
+                $dashboardAccess[] = "EXISTS (SELECT 1 FROM team8_legal_case_tasks dashboard_scope_task WHERE dashboard_scope_task.case_id = lc.id AND dashboard_scope_task.assigned_to = :dashboard_task_assigned AND dashboard_scope_task.status <> 'cancelled')";
+                $dashboardParams['dashboard_task_assigned'] = $currentUserId;
+            }
+            $dashboardScope[] = '(' . implode(' OR ', $dashboardAccess) . ')';
+        }
+        $dashboardScopeSql = $dashboardScope === [] ? '1 = 1' : implode(' AND ', $dashboardScope);
+        $dashboardWhereSql = "lc.status NOT IN ('closed', 'archived') AND " . $dashboardScopeSql;
+        try {
+            $dashboardCount = $pdo->prepare(
+                "SELECT
+                    SUM(lc.status NOT IN ('closed', 'archived')) AS total_active,
+                    SUM(lc.status = 'open') AS open_cases,
+                    SUM(lc.status NOT IN ('closed', 'archived') AND lc.deadline BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)) AS upcoming_deadlines
+                 FROM team8_legal_cases lc WHERE " . $dashboardScopeSql
+            );
+            $dashboardCount->execute($dashboardParams);
+            $dashboardCounts = $dashboardCount->fetch(PDO::FETCH_ASSOC) ?: [];
+            $dashboardStats['total_active'] = (int) ($dashboardCounts['total_active'] ?? 0);
+            $dashboardStats['open'] = (int) ($dashboardCounts['open_cases'] ?? 0);
+            $dashboardStats['upcoming_deadlines'] = (int) ($dashboardCounts['upcoming_deadlines'] ?? 0);
+
+            $recentClosedStmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM team8_legal_cases lc
+                 WHERE lc.status = 'closed'
+                   AND " . ($legalHasClosedAt ? 'lc.closed_at' : 'lc.closing_date') . " >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                   AND " . $dashboardScopeSql
+            );
+            $recentClosedStmt->execute($dashboardParams);
+            $dashboardStats['recently_closed'] = (int) $recentClosedStmt->fetchColumn();
+
+            if ($legalHasTaskSchema) {
+                $overdueTaskStmt = $pdo->prepare(
+                    "SELECT COUNT(*) FROM team8_legal_case_tasks task
+                     JOIN team8_legal_cases lc ON lc.id = task.case_id
+                     WHERE task.status IN ('pending', 'in_progress') AND task.due_date < CURDATE()
+                       AND lc.status NOT IN ('closed', 'archived')
+                       AND " . ($isAdmin ? '1 = 1' : 'task.assigned_to = :dashboard_overdue_assigned')
+                );
+                $overdueTaskStmt->execute($isAdmin ? [] : ['dashboard_overdue_assigned' => $currentUserId]);
+                $dashboardStats['overdue_tasks'] = (int) $overdueTaskStmt->fetchColumn();
+            }
+
+            $deadlineStmt = $pdo->prepare(
+                'SELECT lc.id, lc.case_number, lc.title, lc.deadline, u.full_name AS assigned_to_name
+                 FROM team8_legal_cases lc JOIN users u ON u.id = lc.assigned_to
+                 WHERE ' . $dashboardWhereSql . ' AND lc.deadline BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+                 ORDER BY lc.deadline ASC, lc.id ASC LIMIT 10'
+            );
+            $deadlineStmt->execute($dashboardParams);
+            $dashboardDeadlines = $deadlineStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if ($legalHasHearingSchema) {
+                $hearingWhere = ["h.status = 'scheduled'", 'h.event_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)', $dashboardWhereSql];
+                $hearingCountStmt = $pdo->prepare(
+                    'SELECT COUNT(*) FROM team8_legal_case_hearings h JOIN team8_legal_cases lc ON lc.id = h.case_id WHERE ' . implode(' AND ', $hearingWhere)
+                );
+                $hearingCountStmt->execute($dashboardParams);
+                $dashboardStats['upcoming_hearings'] = (int) $hearingCountStmt->fetchColumn();
+                $hearingStmt = $pdo->prepare(
+                    'SELECT h.case_id, h.event_date, h.event_time, h.venue, h.hearing_type, lc.case_number, lc.title
+                     FROM team8_legal_case_hearings h JOIN team8_legal_cases lc ON lc.id = h.case_id
+                     WHERE ' . implode(' AND ', $hearingWhere) . ' ORDER BY h.event_date ASC, h.event_time ASC, h.id ASC LIMIT 10'
+                );
+                $hearingStmt->execute($dashboardParams);
+                $dashboardHearings = $hearingStmt->fetchAll(PDO::FETCH_ASSOC);
+            }
+        } catch (PDOException $e) {
+            $errors[] = 'Could not load the legal dashboard. Please verify the legal migrations are applied.';
+        }
+        break;
+
     case 'case_types':
         t8_require_role(['admin']);
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -2026,6 +2118,7 @@ switch ($action) {
 }
 
 $showForm = in_array($action, ['create', 'edit'], true);
+$showDashboard = $action === 'dashboard';
 $showDetails = $action === 'view';
 $showResolution = $action === 'resolution';
 $showTimeline = $action === 'timeline';
@@ -2037,7 +2130,7 @@ $showParties = $action === 'parties';
 $showDocuments = $action === 'documents';
 $showRetention = $action === 'retention';
 $showCaseTypes = $action === 'case_types';
-$showList = !$showForm && !$showDetails && !$showResolution && !$showTimeline && !$showCommunications && !$showNotes && !$showHearings && !$showTasks && !$showParties && !$showDocuments && !$showRetention && !$showCaseTypes;
+$showList = !$showForm && !$showDashboard && !$showDetails && !$showResolution && !$showTimeline && !$showCommunications && !$showNotes && !$showHearings && !$showTasks && !$showParties && !$showDocuments && !$showRetention && !$showCaseTypes;
 
 $currentCaseType = null;
 $formStatusOptions = [];
@@ -2095,6 +2188,7 @@ if ($showList) {
     $filedTo = trim((string) ($_GET['filed_to'] ?? ''));
     $deadlineFrom = trim((string) ($_GET['deadline_from'] ?? ''));
     $deadlineTo = trim((string) ($_GET['deadline_to'] ?? ''));
+    $operationalFilter = (string) ($_GET['operational'] ?? '');
     $page = t8_legal_page_number($_GET['page'] ?? 1);
     $pageSize = 25;
     $where = [$archivedFilter ? "lc.status = 'archived'" : "lc.status <> 'archived'"];
@@ -2122,18 +2216,36 @@ if ($showList) {
     }
     if ($searchFilter !== '') {
         $searchColumns = ['lc.title LIKE :search', 'CAST(lc.id AS CHAR) LIKE :search_id', 'u.full_name LIKE :search_assignee', 'ct.name LIKE :search_type'];
+        if ($legalHasCaseCreationFields) {
+            $searchColumns[] = 'lc.case_number LIKE :search_case_number';
+        }
         if ($legalHasCaseMetadata) {
             $searchColumns[] = 'lc.subject LIKE :search_subject';
             $searchColumns[] = 'dep.name LIKE :search_department';
+        }
+        if ($legalHasCaseInformation) {
+            $searchColumns[] = 'lc.docket_reference LIKE :search_docket';
+        }
+        if ($legalHasPartySchema) {
+            $searchColumns[] = 'EXISTS (SELECT 1 FROM team8_legal_case_parties search_cp JOIN team8_parties search_party ON search_party.id = search_cp.party_id WHERE search_cp.case_id = lc.id AND search_party.name LIKE :search_party)';
         }
         $where[] = '(' . implode(' OR ', $searchColumns) . ')';
         $params['search'] = '%' . $searchFilter . '%';
         $params['search_id'] = '%' . preg_replace('/^CASE-0*/', '', strtoupper($searchFilter)) . '%';
         $params['search_assignee'] = '%' . $searchFilter . '%';
         $params['search_type'] = '%' . $searchFilter . '%';
+        if ($legalHasCaseCreationFields) {
+            $params['search_case_number'] = '%' . $searchFilter . '%';
+        }
         if ($legalHasCaseMetadata) {
             $params['search_subject'] = '%' . $searchFilter . '%';
             $params['search_department'] = '%' . $searchFilter . '%';
+        }
+        if ($legalHasCaseInformation) {
+            $params['search_docket'] = '%' . $searchFilter . '%';
+        }
+        if ($legalHasPartySchema) {
+            $params['search_party'] = '%' . $searchFilter . '%';
         }
     }
     foreach ([['filed_from', 'filedFrom', '>='], ['filed_to', 'filedTo', '<='], ['deadline_from', 'deadlineFrom', '>='], ['deadline_to', 'deadlineTo', '<=']] as [$field, $variable, $operator]) {
@@ -2154,6 +2266,13 @@ if ($showList) {
             $params['task_assigned_access'] = $currentUserId;
         }
         $where[] = '(' . implode(' OR ', $caseAccessConditions) . ')';
+    }
+    if ($operationalFilter === 'overdue' && $legalHasTaskSchema) {
+        $where[] = "EXISTS (SELECT 1 FROM team8_legal_case_tasks operational_task WHERE operational_task.case_id = lc.id AND operational_task.status IN ('pending', 'in_progress') AND operational_task.due_date < CURDATE())";
+    } elseif ($operationalFilter === 'upcoming_deadline' && $legalHasCaseMetadata) {
+        $where[] = 'lc.deadline BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)';
+    } elseif ($operationalFilter === 'upcoming_hearing' && $legalHasHearingSchema) {
+        $where[] = "EXISTS (SELECT 1 FROM team8_legal_case_hearings operational_hearing WHERE operational_hearing.case_id = lc.id AND operational_hearing.status = 'scheduled' AND operational_hearing.event_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY))";
     }
 
     $from = " FROM team8_legal_cases lc
@@ -2185,6 +2304,7 @@ if ($showList) {
         'filed_to' => $filedTo,
         'deadline_from' => $deadlineFrom,
         'deadline_to' => $deadlineTo,
+        'operational' => $operationalFilter,
     ], static fn ($value): bool => $value !== '' && $value !== null);
 }
 
@@ -2301,7 +2421,32 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
     <div class="t8-alert t8-alert-danger">The legal case creation migration must be applied before this form can be used.</div>
 <?php endif; ?>
 
-<?php if ($showForm): ?>
+<?php if ($showDashboard): ?>
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>"><i class="fa-solid fa-list"></i> Case List</a>
+    </div>
+    <div class="t8-dashboard-summary-grid" style="margin-bottom:var(--t8-space-4)">
+        <?php foreach ([
+            'TOTAL ACTIVE CASES' => ['total_active', 'fa-scale-balanced'],
+            'OPEN CASES' => ['open', 'fa-folder-open'],
+            'UPCOMING DEADLINES' => ['upcoming_deadlines', 'fa-calendar-days'],
+            'UPCOMING HEARINGS' => ['upcoming_hearings', 'fa-gavel'],
+            'OVERDUE TASKS' => ['overdue_tasks', 'fa-triangle-exclamation'],
+            'RECENTLY CLOSED' => ['recently_closed', 'fa-check-double'],
+        ] as $label => [$key, $icon]): ?>
+            <div class="t8-card t8-dashboard-stat-card"><div class="t8-dashboard-stat-icon" aria-hidden="true"><i class="fa-solid <?= e($icon) ?>"></i></div><div class="t8-dashboard-stat-body"><p class="t8-help-text"><?= e($label) ?></p><div class="t8-dashboard-stat-value"><?= e((string) $dashboardStats[$key]) ?></div></div></div>
+        <?php endforeach; ?>
+    </div>
+    <div class="t8-main-grid">
+        <div class="t8-card"><div class="t8-card-header"><h2 class="t8-card-title">Upcoming Deadlines</h2></div>
+            <?php if ($dashboardDeadlines === []): ?><div class="t8-empty">No upcoming deadlines in the next 30 days.</div><?php else: ?><div class="t8-table-wrap"><table class="t8-table"><thead><tr><th>Case</th><th>Title</th><th>Deadline</th><th>Assigned To</th></tr></thead><tbody><?php foreach ($dashboardDeadlines as $deadline): ?><tr><td><a href="<?= e(page_url('legal', ['action' => 'view', 'id' => (int) $deadline['id']])) ?>"><?= e((string) ($deadline['case_number'] ?? 'CASE-' . str_pad((string) $deadline['id'], 6, '0', STR_PAD_LEFT))) ?></a></td><td><?= e((string) $deadline['title']) ?></td><td><?= e(format_date((string) $deadline['deadline'], 'M d, Y')) ?></td><td><?= e((string) $deadline['assigned_to_name']) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
+        </div>
+        <div class="t8-card"><div class="t8-card-header"><h2 class="t8-card-title">Upcoming Hearings</h2></div>
+            <?php if ($dashboardHearings === []): ?><div class="t8-empty">No scheduled hearings in the next 30 days.</div><?php else: ?><div class="t8-table-wrap"><table class="t8-table"><thead><tr><th>Case</th><th>Proceeding</th><th>Date</th><th>Venue</th></tr></thead><tbody><?php foreach ($dashboardHearings as $hearing): ?><tr><td><a href="<?= e(page_url('legal', ['action' => 'view', 'id' => (int) $hearing['case_id']])) ?>"><?= e((string) ($hearing['case_number'] ?? 'CASE-' . str_pad((string) $hearing['case_id'], 6, '0', STR_PAD_LEFT))) ?></a></td><td><?= e((string) $hearing['hearing_type']) ?></td><td><?= e(format_date((string) $hearing['event_date'], 'M d, Y')) ?><?= !empty($hearing['event_time']) ? ' ' . e(substr((string) $hearing['event_time'], 0, 5)) : '' ?></td><td><?= e((string) ($hearing['venue'] ?: '—')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
+        </div>
+    </div>
+
+<?php elseif ($showForm): ?>
 
     <div class="t8-card">
         <div class="t8-card-header">
@@ -2503,6 +2648,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
 <?php elseif ($showDetails): ?>
 
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'dashboard'])) ?>"><i class="fa-solid fa-chart-line"></i> Legal Dashboard</a>
         <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>"><i class="fa-solid fa-arrow-left"></i> Back to Cases</a>
         <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $caseId])) ?>"><i class="fa-solid fa-paperclip"></i> Documents</a>
         <?php if ($legalHasPartySchema): ?>
@@ -3256,6 +3402,15 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <select class="t8-select" id="legal-status" name="status">
                     <option value="">All statuses</option>
                     <?php foreach ($legalStatuses as $status): ?><option value="<?= e($status) ?>" <?= $statusFilter === $status ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $status))) ?></option><?php endforeach; ?>
+                </select>
+            </div>
+            <div class="t8-field">
+                <label class="t8-label" for="legal-operational">Operational View</label>
+                <select class="t8-select" id="legal-operational" name="operational">
+                    <option value="">All case work</option>
+                    <option value="overdue" <?= $operationalFilter === 'overdue' ? 'selected' : '' ?>>Overdue tasks</option>
+                    <option value="upcoming_deadline" <?= $operationalFilter === 'upcoming_deadline' ? 'selected' : '' ?>>Upcoming deadlines</option>
+                    <option value="upcoming_hearing" <?= $operationalFilter === 'upcoming_hearing' ? 'selected' : '' ?>>Upcoming hearings</option>
                 </select>
             </div>
             <?php if ($legalHasPriority): ?>
