@@ -129,6 +129,10 @@
     margin-bottom: var(--t8-space-2);
     color: var(--t8-ink);
 }
+.t8-required {
+    color: #dc2626;
+    font-weight: 600;
+}
 .t8-input, .t8-select, .t8-textarea {
     width: 100%;
     padding: 12px 16px;

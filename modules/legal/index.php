@@ -180,7 +180,7 @@ switch ($action) {
                 'title'       => trim((string) ($_POST['title'] ?? '')),
                 'subject'     => trim((string) ($_POST['subject'] ?? '')),
                 'department_id' => (string) ($_POST['department_id'] ?? ''),
-                'status'      => (string) ($_POST['status'] ?? 'open'),
+                'status'      => $action === 'create' ? 'open' : (string) ($_POST['status'] ?? $formValues['status']),
                 'filed_date'  => trim((string) ($_POST['filed_date'] ?? '')),
                 'deadline'    => trim((string) ($_POST['deadline'] ?? '')),
                 'assigned_to' => (string) ($_POST['assigned_to'] ?? ''),
@@ -569,10 +569,11 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
               action="<?= e(page_url('legal', array_filter(['action' => $action, 'id' => $_GET['id'] ?? null]))) ?>"
               class="t8-legal-form-grid"
               novalidate>
+            <p class="t8-help-text t8-required-legend">* Required field</p>
             <?= t8_csrf_field() ?>
 
             <div class="t8-field t8-form-span-2">
-                <label class="t8-label" for="title">Case Title</label>
+                <label class="t8-label" for="title">Case Title <span class="t8-required">*</span></label>
                 <input class="t8-input" type="text" id="title" name="title"
                        value="<?= e($formValues['title']) ?>" required>
             </div>
@@ -587,24 +588,26 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <select class="t8-select" id="department_id" name="department_id"><option value="">Not assigned</option><?php foreach ($departments as $department): ?><option value="<?= e((string) $department['id']) ?>" <?= (string) $department['id'] === $formValues['department_id'] ? 'selected' : '' ?>><?= e($department['name']) ?></option><?php endforeach; ?></select>
             </div><?php endif; ?>
 
-            <div class="t8-field">
-                <label class="t8-label" for="status">Status</label>
-                <select class="t8-select" id="status" name="status" required>
-                    <?php foreach (T8_LEGAL_STATUSES as $s): ?>
-                        <option value="<?= e($s) ?>" <?= $s === $formValues['status'] ? 'selected' : '' ?>>
-                            <?= e(ucwords(str_replace('_', ' ', $s))) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-                <?php if ($existing !== null && $existing['status'] === 'closed'): ?>
-                    <span class="t8-help-text">This case is already closed<?= !empty($existing['closed_at']) ? ' (on ' . e(format_date((string) $existing['closed_at'], 'M d, Y')) . ')' : '' ?> and under retention. Manage disposal from its Retention screen, not by changing status here.</span>
-                <?php else: ?>
-                    <span class="t8-help-text">Setting this to "Closed" registers the case under retention automatically.</span>
-                <?php endif; ?>
-            </div>
+            <?php if ($action === 'edit'): ?>
+                <div class="t8-field">
+                    <label class="t8-label" for="status">Status</label>
+                    <select class="t8-select" id="status" name="status" required data-current-status="<?= e((string) ($existing['status'] ?? $formValues['status'])) ?>">
+                        <?php foreach (T8_LEGAL_STATUSES as $s): ?>
+                            <option value="<?= e($s) ?>" <?= $s === $formValues['status'] ? 'selected' : '' ?>>
+                                <?= e(ucwords(str_replace('_', ' ', $s))) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php if ($existing !== null && $existing['status'] === 'closed'): ?>
+                        <span class="t8-help-text">This case is already closed<?= !empty($existing['closed_at']) ? ' (on ' . e(format_date((string) $existing['closed_at'], 'M d, Y')) . ')' : '' ?> and under retention. Manage disposal from its Retention screen, not by changing status here.</span>
+                    <?php else: ?>
+                        <span class="t8-help-text">Setting this to "Closed" registers the case under retention automatically.</span>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
 
             <div class="t8-field">
-                <label class="t8-label" for="filed_date">Filed Date</label>
+                <label class="t8-label" for="filed_date">Filed Date <span class="t8-required">*</span></label>
                 <input class="t8-input" type="date" id="filed_date" name="filed_date"
                        value="<?= e($formValues['filed_date']) ?>" required>
             </div>
@@ -615,7 +618,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             </div><?php endif; ?>
 
             <div class="t8-field">
-                <label class="t8-label" for="assigned_to">Assigned To</label>
+                <label class="t8-label" for="assigned_to">Assigned To <span class="t8-required">*</span></label>
                 <select class="t8-select" id="assigned_to" name="assigned_to" required>
                     <option value="">Select a person…</option>
                     <?php foreach ($assignees as $a): ?>
@@ -634,6 +637,29 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             </div>
         </form>
     </div>
+
+    <?php if ($action === 'edit'): ?>
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                const form = document.querySelector('.t8-legal-form-grid');
+                const statusSelect = document.getElementById('status');
+                if (!form || !statusSelect) {
+                    return;
+                }
+
+                const currentStatus = statusSelect.dataset.currentStatus || statusSelect.value;
+                form.addEventListener('submit', function (event) {
+                    const nextStatus = statusSelect.value;
+                    if (currentStatus !== 'closed' && nextStatus === 'closed') {
+                        const confirmed = window.confirm('Closing this case will register it under retention. Do you want to continue?');
+                        if (!confirmed) {
+                            event.preventDefault();
+                        }
+                    }
+                });
+            });
+        </script>
+    <?php endif; ?>
 
 <?php elseif ($showDocuments): ?>
 
