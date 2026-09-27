@@ -140,7 +140,6 @@
     border: 0;
 }
 
-.t8-legal-cases-table { min-width: 980px; }
 .t8-legal-cases-table th { white-space: nowrap; }
 .t8-legal-cases-table td { vertical-align: middle; }
 .t8-legal-cases-table .t8-table-ref { font-size: 0.78rem; }

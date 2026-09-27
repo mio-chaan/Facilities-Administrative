@@ -1,0 +1,79 @@
+-- ============================================================================
+-- Legal Case Status Migration
+-- Date: 2026-09-26
+--
+-- Purpose:
+--   1. Migrate existing 'open' cases into 'under_review' (the new intake
+--      state). 'open' was ambiguous — new cases are now created directly
+--      in 'under_review' because every new case requires screening.
+--   2. Deactivate the 'open' status so it no longer appears in dropdowns,
+--      filters, or the status changer menu for new cases.
+--
+-- Safety:
+--   - 'open' is NOT deleted; existing rows (if any) that still reference
+--     it remain readable, and the Edit form preserves the current value.
+--   - Run the SELECT checks below BEFORE the UPDATEs.
+--
+-- Rollback (if needed):
+--   UPDATE team8_legal_case_statuses SET is_active = 1 WHERE status_code = 'open';
+--   UPDATE team8_legal_cases SET status = 'open' WHERE status = 'under_review'
+--     AND id IN (<ids you migrated>);
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- PRE-FLIGHT CHECKS — inspect these before running the UPDATEs.
+-- ---------------------------------------------------------------------------
+
+-- How many cases are currently 'open'?
+SELECT COUNT(*) AS open_case_count
+FROM team8_legal_cases
+WHERE status = 'open' AND deleted_at IS NULL;
+
+-- Breakdown of all statuses (sanity check)
+SELECT status, COUNT(*) AS total
+FROM team8_legal_cases
+WHERE deleted_at IS NULL
+GROUP BY status
+ORDER BY total DESC;
+
+-- ---------------------------------------------------------------------------
+-- MIGRATION
+-- ---------------------------------------------------------------------------
+
+-- 1. Move every 'open' case to 'under_review'.
+--    If some cases are already past screening, migrate them individually
+--    to 'active' instead of running this blanket UPDATE.
+UPDATE team8_legal_cases
+SET status = 'under_review',
+    updated_at = NOW()
+WHERE status = 'open'
+  AND deleted_at IS NULL;
+
+-- 2. Deactivate the 'open' status so it stops appearing in new-case
+--    dropdowns and the quick status changer.
+UPDATE team8_legal_case_statuses
+SET is_active = 0
+WHERE status_code = 'open';
+
+-- ---------------------------------------------------------------------------
+-- POST-FLIGHT VERIFICATION
+-- ---------------------------------------------------------------------------
+
+-- No case should remain 'open'
+SELECT COUNT(*) AS remaining_open_cases
+FROM team8_legal_cases
+WHERE status = 'open' AND deleted_at IS NULL;
+-- Expected: 0
+
+-- 'open' should now be inactive
+SELECT status_code, is_active
+FROM team8_legal_case_statuses
+WHERE status_code = 'open';
+-- Expected: open | 0
+
+-- Final distribution
+SELECT status, COUNT(*) AS total
+FROM team8_legal_cases
+WHERE deleted_at IS NULL
+GROUP BY status
+ORDER BY total DESC;

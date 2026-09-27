@@ -487,8 +487,7 @@ switch ($action) {
                 'deadline'    => (string) ($existing['deadline'] ?? ''),
                 'assigned_to' => (string) $existing['assigned_to'],
             ]
-            : ['title' => '', 'description' => '', 'court_agency' => '', 'branch_office' => '', 'docket_reference' => '', 'jurisdiction' => '', 'location' => '', 'legal_basis' => '', 'current_action' => '', 'case_type_id' => '', 'department_id' => '', 'status' => 'open', 'priority' => 'medium', 'filed_date' => date('Y-m-d'), 'deadline' => '', 'assigned_to' => (string) ($legalOfficers[0]['id'] ?? $currentUserId)];
-
+           : ['title' => '', 'description' => '', 'court_agency' => '', 'branch_office' => '', 'docket_reference' => '', 'jurisdiction' => '', 'location' => '', 'legal_basis' => '', 'current_action' => '', 'case_type_id' => '', 'department_id' => '', 'status' => 'under_review', 'priority' => 'medium', 'filed_date' => date('Y-m-d'), 'deadline' => '', 'assigned_to' => (string) ($legalOfficers[0]['id'] ?? $currentUserId)];
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $formValues = [
                 'title'       => trim((string) ($_POST['title'] ?? '')),
@@ -502,7 +501,7 @@ switch ($action) {
                 'current_action' => trim((string) ($_POST['current_action'] ?? '')),
                 'case_type_id' => trim((string) ($_POST['case_type_id'] ?? '')),
                 'department_id' => $isAdmin ? (string) ($_POST['department_id'] ?? '') : (string) ($existing['department_id'] ?? ''),
-                'status'      => (string) ($_POST['status'] ?? ''),
+                'status'      => (string) ($_POST['status'] ?? ($existing['status'] ?? 'under_review')),
                 'priority'    => (string) ($_POST['priority'] ?? $formValues['priority']),
                 'filed_date'  => trim((string) ($_POST['filed_date'] ?? '')),
                 'deadline'    => trim((string) ($_POST['deadline'] ?? '')),
@@ -539,9 +538,9 @@ switch ($action) {
                 if (!in_array($formValues['status'], $legalEditableStatuses, true) && !$unchangedInactiveStatus) {
                     $errors[] = 'Invalid status selected.';
                 }
-                if ($existing === null && $formValues['status'] !== 'open') {
-                    $errors[] = 'New legal cases must start in Open status.';
-                } elseif ($existing !== null
+                                if ($existing === null && $formValues['status'] !== 'under_review') {
+                                        $errors[] = 'New legal cases must start in Under Review status.';
+                                } elseif ($existing !== null
                     && $formValues['status'] !== $existing['status']
                     && !t8_legal_case_status_transition_is_allowed((string) $existing['status'], $formValues['status'])
                 ) {
@@ -1782,6 +1781,103 @@ switch ($action) {
         redirect(page_url('legal', ['action' => 'parties', 'id' => $caseId]));
         break;
 
+     // ---------------------------------------------------------------
+    // PHASE 3+ — Quick status changer from the list view's row menu.
+    // Mirrors the validation and side effects of the Edit form's
+    // status dropdown, but without requiring the user to open the
+    // full edit form. Same transition rules, same resolution
+    // requirement, same retention hook on first close.
+    // ---------------------------------------------------------------
+    case 'change_status':
+        t8_require_role(['admin', 'legal_officer']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            redirect(page_url('legal'));
+        }
+        if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            t8_flash_set('danger', 'Your session expired. Please try again.');
+            redirect(page_url('legal'));
+        }
+
+        $caseId = (int) ($_POST['case_id'] ?? 0);
+        $nextStatus = (string) ($_POST['next_status'] ?? '');
+        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
+
+        if (!$case) {
+            t8_flash_set('danger', 'Legal case not found.');
+            redirect(page_url('legal'));
+        }
+        if ($case['status'] === 'archived') {
+            t8_flash_set('danger', 'Archived cases must be restored before changing status.');
+            redirect(page_url('legal', ['archived' => '1']));
+        }
+        if (!in_array($nextStatus, $legalEditableStatuses, true)
+            || !t8_legal_case_status_transition_is_allowed((string) $case['status'], $nextStatus)
+        ) {
+            t8_flash_set('danger', 'That case status transition is not allowed.');
+            redirect(page_url('legal'));
+        }
+
+        // Resolved/Closed require a resolution record first — same guard
+        // as the Edit form's submit handler above.
+        if (in_array($nextStatus, ['resolved', 'closed'], true)) {
+            if (!$legalHasResolutionSchema) {
+                t8_flash_set('danger', 'Apply the case resolution migration before resolving or closing a case.');
+                redirect(page_url('legal'));
+            }
+            $resolutionExistsStmt = $pdo->prepare('SELECT id FROM team8_legal_case_resolutions WHERE case_id = :case_id');
+            $resolutionExistsStmt->execute(['case_id' => $caseId]);
+            if ($resolutionExistsStmt->fetchColumn() === false) {
+                t8_flash_set('danger', 'Add a resolution record before setting this case to Resolved or Closed.');
+                redirect(page_url('legal', ['action' => 'resolution', 'id' => $caseId]));
+            }
+        }
+
+        // Only the FIRST transition into 'closed' stamps closed_at and
+        // triggers retention registration — same logic as the Edit form.
+        $wasAlreadyClosed = $case['status'] === 'closed';
+        $justClosed = $legalHasClosedAt && $nextStatus === 'closed' && !$wasAlreadyClosed;
+
+        try {
+            $pdo->beginTransaction();
+            $sql = 'UPDATE team8_legal_cases SET status = :status';
+            $params = ['status' => $nextStatus, 'id' => $caseId];
+            if ($justClosed) {
+                $sql .= ', closed_at = NOW()';
+            }
+            $sql .= ' WHERE id = :id';
+            $pdo->prepare($sql)->execute($params);
+
+            t8_audit_log(
+                $pdo,
+                $currentUserId,
+                'legal_case',
+                $caseId,
+                'status_change',
+                (string) $case['status'],
+                $nextStatus,
+                true
+            );
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            t8_flash_set('danger', 'The case status could not be changed.');
+            redirect(page_url('legal'));
+        }
+
+        if ($justClosed) {
+            $savedCase = t8_legal_case_fetch($pdo, $caseId);
+            if ($savedCase !== null) {
+                t8_legal_register_retention($pdo, $savedCase, $currentUserId);
+            }
+        }
+
+        t8_flash_set('success', 'Case status changed to ' . ucwords(str_replace('_', ' ', $nextStatus)) . '.');
+        redirect(page_url('legal'));
+        break;
+
     case 'archive':
     case 'restore':
         t8_require_role(['admin']);
@@ -2112,7 +2208,7 @@ if ($showForm && $existing !== null) {
 }
 if ($showForm) {
     if ($action === 'create') {
-        $formStatusOptions = in_array('open', $legalEditableStatuses, true) ? ['open'] : [];
+                $formStatusOptions = in_array('under_review', $legalEditableStatuses, true) ? ['under_review'] : [];
     } else {
         $formStatusOptions[] = (string) $existing['status'];
         $caseResolutionExists = false;
@@ -2277,7 +2373,7 @@ if ($showList) {
 function t8_legal_status_badge(string $status): string
 {
     $map = [
-        'open'        => 't8-badge-pending',
+        'open'         => 't8-badge-pending', // legacy — retained for pre-migration rows
         'under_review' => 't8-badge-pending',
         'active'       => 't8-badge-approved',
         'resolved'     => 't8-badge-approved',
@@ -2307,6 +2403,8 @@ function t8_legal_task_status_badge(string $status): string
  */
 function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, bool $legalHasCaseMetadata, bool $isMonitoring, ?array $retentionRecord): void
 {
+    global $legalEditableStatuses;
+
     $id = (int) $c['id'];
     $ref = (string) ($c['case_number'] ?? ('CASE-' . str_pad((string) $id, 6, '0', STR_PAD_LEFT)));
     ?>
@@ -2333,10 +2431,35 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             <button type="button" class="t8-row-menu-item t8-row-copy-ref" role="menuitem" data-copy="<?= e($ref) ?>">
                 <i class="fa-solid fa-copy"></i> Copy Case Ref
             </button>
-            <div class="t8-row-menu-divider"></div>
-            <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $id])) ?>">
-                <i class="fa-solid fa-paperclip"></i> Documents
-            </a>
+                     <?php
+            // Quick status changer — only renders legal next-statuses for
+            // this case's current status, so the menu can never offer an
+            // invalid transition. Server-side validation still runs in the
+            // change_status handler above; this is purely a convenience.
+            $legalNextStatuses = [];
+            foreach ($legalEditableStatuses as $candidateStatus) {
+                if (t8_legal_case_status_transition_is_allowed((string) $c['status'], $candidateStatus)) {
+                    $legalNextStatuses[] = $candidateStatus;
+                }
+            }
+            ?>
+            <?php if (!$archivedFilter && $c['status'] !== 'archived' && $legalNextStatuses !== []): ?>
+                <div class="t8-row-menu-divider"></div>
+                <div class="t8-row-menu-label" role="presentation">Change Status</div>
+                <?php foreach ($legalNextStatuses as $legalNextStatus): ?>
+                    <?php $legalNeedsResolution = in_array($legalNextStatus, ['resolved', 'closed'], true); ?>
+                    <form method="post" action="<?= e(page_url('legal', ['action' => 'change_status'])) ?>"
+                          onsubmit="return confirm('Change status to <?= e(ucwords(str_replace('_', ' ', $legalNextStatus))) ?>?<?= $legalNeedsResolution ? ' A resolution record must already exist.' : '' ?>');">
+                        <?= t8_csrf_field() ?>
+                        <input type="hidden" name="case_id" value="<?= e((string) $id) ?>">
+                        <input type="hidden" name="next_status" value="<?= e($legalNextStatus) ?>">
+                        <button class="t8-row-menu-item" type="submit" role="menuitem">
+                            <i class="fa-solid fa-arrow-right"></i>
+                            Move to <?= e(ucwords(str_replace('_', ' ', $legalNextStatus))) ?>
+                        </button>
+                    </form>
+                <?php endforeach; ?>
+            <?php endif; ?>
             <?php if ($c['status'] === 'closed'): ?>
                 <a class="t8-row-menu-item" role="menuitem" href="<?= e(page_url('legal', ['action' => 'retention', 'id' => $id])) ?>">
                     <i class="fa-solid fa-box-archive"></i> <?= $retentionRecord !== null ? 'Manage Retention' : 'View Retention' ?>
@@ -2434,15 +2557,10 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
         <form method="post"
               action="<?= e(page_url('legal', array_filter(['action' => $action, 'id' => $_GET['id'] ?? null]))) ?>"
               class="t8-legal-form-grid">
-            <p class="t8-help-text t8-required-legend">* Required field</p>
+           
             <?= t8_csrf_field() ?>
 
             <div class="t8-field">
-                <label class="t8-label" for="case_number">Case Number</label>
-                <input class="t8-input" type="text" id="case_number" value="<?= $action === 'edit' ? e((string) ($existing['case_number'] ?? ('CASE-' . str_pad((string) $existing['id'], 6, '0', STR_PAD_LEFT)))) : 'Generated when saved' ?>" readonly>
-            </div>
-
-            <div class="t8-field t8-form-span-2">
                 <label class="t8-label" for="title">Case Title <span class="t8-required">*</span></label>
                 <input class="t8-input" type="text" id="title" name="title"
                        value="<?= e($formValues['title']) ?>" maxlength="200" required>
@@ -2475,7 +2593,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
 
             <?php if ($legalHasCaseMetadata): ?>
                 <details class="t8-form-span-2">
-                    <summary class="t8-label">Advanced / Court Details</summary>
+                    <summary class="t8-label">Other Details</summary>
                     <div class="t8-legal-form-grid">
                         <?php if ($isAdmin): ?><div class="t8-field">
                             <label class="t8-label" for="department_id">Department</label>
@@ -2496,7 +2614,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 </details>
             <?php endif; ?>
 
-            <div class="t8-field">
+            <?php if ($action === 'edit'): ?><div class="t8-field">
                 <label class="t8-label" for="status">Status <span class="t8-required">*</span></label>
                 <select class="t8-select" id="status" name="status" required data-current-status="<?= e((string) ($existing['status'] ?? $formValues['status'])) ?>">
                     <?php foreach ($formStatusOptions as $s): ?>
@@ -2510,7 +2628,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <?php elseif ($existing !== null): ?>
                     <span class="t8-help-text">Setting this to "Closed" registers the case under retention automatically.</span>
                 <?php endif; ?>
-            </div>
+            </div><?php endif; ?>
 
             <?php if ($legalHasPriority): ?><div class="t8-field">
                 <label class="t8-label" for="priority">Priority <span class="t8-required">*</span></label>
@@ -3408,8 +3526,6 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                             <th>Case No.</th>
                             <th>Title</th>
                             <th>Case Type</th>
-                            <?php if ($legalHasCaseMetadata): ?><th>Subject</th>
-                            <th>Department</th><?php endif; ?>
                             <th>Status</th>
                             <?php if ($legalHasPriority): ?><th>Priority</th><?php endif; ?>
                             <th>Filed Date</th>
@@ -3430,8 +3546,6 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                                 <td class="t8-table-ref"><?= e((string) ($c['case_number'] ?? ('CASE-' . str_pad((string) $c['id'], 6, '0', STR_PAD_LEFT)))) ?></td>
                                 <td><a class="t8-legal-case-title" href="<?= e(page_url('legal', ['action' => 'view', 'id' => (int) $c['id']])) ?>"><?= e($c['title']) ?></a></td>
                                 <td><?= e($c['case_type_name']) ?><?= !(bool) $c['case_type_active'] ? ' (Inactive)' : '' ?></td>
-                                <?php if ($legalHasCaseMetadata): ?><td><?= e((string) ($c['subject'] ?? '—')) ?></td>
-                                <td><?= e((string) ($c['department_name'] ?? '—')) ?></td><?php endif; ?>
                                 <td>
                                     <span class="t8-badge <?= t8_legal_status_badge($c['status']) ?>">
                                         <?= e(ucwords(str_replace('_', ' ', $c['status']))) ?>

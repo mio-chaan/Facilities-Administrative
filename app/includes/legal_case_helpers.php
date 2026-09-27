@@ -67,15 +67,14 @@ function t8_legal_task_display_status(array $task, ?string $today = null): strin
 function t8_legal_case_status_transition_is_allowed(string $currentStatus, string $nextStatus): bool
 {
     $transitions = [
-        'open' => ['under_review'],
         'under_review' => ['active'],
-        'active' => ['resolved'],
-        'resolved' => ['closed'],
+        'active'       => ['resolved', 'under_review'],
+        'resolved'     => ['closed', 'active'],
+        'closed'       => [],
     ];
 
     return in_array($nextStatus, $transitions[$currentStatus] ?? [], true);
 }
-
 function t8_legal_document_types(): array
 {
     return [

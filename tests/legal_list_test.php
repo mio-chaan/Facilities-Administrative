@@ -43,7 +43,14 @@ foreach (['case_type_id', 'department_id', 'priority_filter', 'filter_assigned_t
     $assert(str_contains($source, $required), "Legal list implementation is missing {$required}.");
 }
 $assert(str_contains($source, '<th>Case No.</th>'), 'Legal cases should display their generated case number.');
-$assert(str_contains($source, '<th>Subject</th>'), 'The list should retain Subject for legacy cases.');
+$casesTableStart = strpos($source, 'class="t8-table t8-legal-cases-table"');
+$casesTableEnd = $casesTableStart === false ? false : strpos($source, '</table>', $casesTableStart);
+$casesTable = $casesTableStart === false || $casesTableEnd === false
+    ? ''
+    : substr($source, $casesTableStart, $casesTableEnd - $casesTableStart);
+$assert($casesTable !== '', 'Legal cases table markup should be present.');
+$assert(!str_contains($casesTable, '<th>Subject</th>'), 'Legal cases should not display the obsolete Subject column.');
+$assert(!str_contains($casesTable, '<th>Department</th>'), 'Legal cases should not display the obsolete Department column.');
 $assert(str_contains($source, 'lc.subject LIKE :search_subject'), 'Subject should remain searchable for legacy cases.');
 $assert(str_contains($source, "\$c['case_number']"), 'The list and detail menu should use the persisted case number.');
 $assert(str_contains($source, 'if (!$isAdmin)'), 'Legal list must retain non-admin authorization scoping.');

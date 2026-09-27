@@ -56,10 +56,12 @@ $assert(str_contains($source, '$pdo->beginTransaction();'), 'Number allocation a
 $assert(str_contains($caseForm, 'name="department_id"') && !str_contains($caseForm, 'name="department_id" required'), 'Department should be optional.');
 $caseFormMarkup = preg_replace('/<\?.*?\?>/s', '', $caseForm);
 $assert(is_string($caseFormMarkup), 'The case form markup should be readable.');
-foreach (['title', 'case_type_id', 'status', 'priority', 'filed_date', 'assigned_to'] as $requiredField) {
+foreach (['title', 'case_type_id', 'priority', 'filed_date', 'assigned_to'] as $requiredField) {
     $assert(preg_match('/name="' . preg_quote($requiredField, '/') . '"[^>]*required/', $caseFormMarkup) === 1, "{$requiredField} should be required in the primary form.");
 }
-$assert(str_contains($source, "'status' => 'open'") && str_contains($source, "'priority' => 'medium'"), 'Status and Priority should default to Open and Medium on create.');
+$assert(str_contains($source, "'status'      => (string) (\$_POST['status'] ?? (\$existing['status'] ?? 'under_review'))"), 'New cases should default to Under Review when no status is submitted.');
+$assert(str_contains($caseForm, "<?php if (\$action === 'edit'): ?><div class=\"t8-field\">"), 'Status transitions should remain available only when editing an existing case.');
+$assert(str_contains($source, "'status' => 'under_review'") && str_contains($source, "'priority' => 'medium'"), 'Status and Priority should default to Under Review and Medium on create.');
 $assert(str_contains($caseForm, 'name="deadline"') && !preg_match('/name="deadline"[^>]*required/', $caseForm), 'Deadline should remain optional and visible.');
 $assert(str_contains($caseForm, 'name="description"') && !preg_match('/name="description"[^>]*required/', $caseForm), 'Description should remain optional and visible.');
 $assert(str_contains($caseForm, '<details') && str_contains($caseForm, 'Advanced / Court Details'), 'Optional details should be grouped in a collapsed Advanced / Court Details section.');
