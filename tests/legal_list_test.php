@@ -62,5 +62,6 @@ $assert(str_contains($priorityMigration, 'ADD COLUMN priority'), 'Upgrade migrat
 $assert(str_contains($priorityMigration, "SET priority = 'medium'"), 'Priority migration should normalize legacy records.');
 $assert(str_contains($source, 'name="priority"'), 'Create/edit form should expose priority.');
 $assert(str_contains($source, '<th>Priority</th>'), 'Legal list should display priority.');
+$assert(str_contains($source, '$pageSize = 5;'), 'Legal case pagination should show five cases per page.');
 
 echo "Legal list checks passed.\n";

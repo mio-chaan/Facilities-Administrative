@@ -64,16 +64,20 @@ $assert(str_contains($caseForm, "<?php if (\$action === 'edit'): ?><div class=\"
 $assert(str_contains($source, "'status' => 'under_review'") && str_contains($source, "'priority' => 'medium'"), 'Status and Priority should default to Under Review and Medium on create.');
 $assert(str_contains($caseForm, 'name="deadline"') && !preg_match('/name="deadline"[^>]*required/', $caseForm), 'Deadline should remain optional and visible.');
 $assert(str_contains($caseForm, 'name="description"') && !preg_match('/name="description"[^>]*required/', $caseForm), 'Description should remain optional and visible.');
-$assert(str_contains($caseForm, '<details') && str_contains($caseForm, 'Advanced / Court Details'), 'Optional details should be grouped in a collapsed Advanced / Court Details section.');
+$assert(str_contains($caseForm, '<details') && str_contains($caseForm, 'Filing Information'), 'Optional details should be grouped in a collapsed Filing Information section.');
 $assert(!str_contains($caseForm, 'name="subject"'), 'Subject must not be editable in the case form.');
 $assert(!str_contains($caseForm, 'name="supporting_staff_id"'), 'Supporting Staff must not be editable in the case form.');
 $assert(!str_contains($caseForm, 'name="next_action_date"'), 'Next Action Date must not be editable in the case form.');
 $assert(!str_contains($caseForm, 'name="closing_date"'), 'Closing Date must not be editable in the case form.');
 $assert(str_contains($source, '$legalHasCaseCreationFields || !$legalHasCaseMetadata || !$legalHasPriority'), 'The create form should require its Phase 2 and Phase 3 migrations.');
 $assert(str_contains($source, '$legalHasCaseInformation'), 'Case information fields should be migration-gated.');
-foreach (['court_agency', 'branch_office', 'docket_reference', 'jurisdiction', 'location', 'legal_basis', 'current_action'] as $field) {
+foreach (['court_agency', 'docket_reference', 'jurisdiction', 'legal_basis', 'current_action'] as $field) {
     $assert(str_contains($caseForm, 'name="' . $field . '"'), "Advanced case details should include {$field}.");
 }
+$assert(!str_contains($caseForm, 'name="branch_office"'), 'Branch / Office should not be editable in the case form.');
+$assert(!str_contains($caseForm, 'name="location"'), 'Location should not be editable in the case form.');
+$assert(!str_contains($source, "'Branch / Office' => 'branch_office'"), 'Branch / Office should not appear in case details.');
+$assert(!str_contains($source, "'Location' => 'location'"), 'Location should not appear in case details.');
 $assert(str_contains($source, "'department_id' => \$departmentId"), 'An empty Department should be bound as NULL instead of integer zero.');
 $assert(str_contains($source, "'description' => \$formValues['description'] !== '' ? \$formValues['description'] : null"), 'An empty Description should be persisted as NULL.');
 $assert(str_contains($source, "'deadline' => \$formValues['deadline'] !== '' ? \$formValues['deadline'] : null"), 'An empty Deadline should be persisted as NULL.');

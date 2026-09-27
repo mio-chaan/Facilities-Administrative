@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legal Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --surface-color: #ffffff;
+            --border-color: #e5e7eb;
+            --text-primary: #111827;
+            --text-secondary: #6b7280;
+            --primary-red: #b91c1c;
+            --primary-red-hover: #991b1b;
+            
+            /* Metric Card Colors */
+            --metric-red-bg: #fee2e2;
+            --metric-red-icon: #ef4444;
+            --metric-orange-bg: #ffedd5;
+            --metric-orange-icon: #f97316;
+            --metric-green-bg: #dcfce7;
+            --metric-green-icon: #22c55e;
+            --metric-purple-bg: #f3e8ff;
+            --metric-purple-icon: #a855f7;
+            --metric-blue-bg: #e0f2fe;
+            --metric-blue-icon: #0ea5e9;
+            --metric-yellow-bg: #fef9c3;
+            --metric-yellow-icon: #eab308;
+
+            /* Status Colors */
+            --status-review-bg: #fef3c7;
+            --status-review-text: #b45309;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            line-height: 1.5;
+            padding: 2rem;
+        }
+
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        /* --- Top Header Section --- */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .header-title h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #000;
+        }
+
+        .header-title p {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .btn-outline {
+            background-color: var(--surface-color);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .btn-outline:hover {
+            background-color: #f3f4f6;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-red);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-red-hover);
+        }
+
+        /* --- Metrics Section --- */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .metric-card {
+            background-color: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .metric-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        .metric-content {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .metric-label {
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #000;
+            line-height: 1.2;
+        }
+
+        /* --- Middle Widgets Section --- */
+        .widgets-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1rem;
+        }
+
+        .widget-card {
+            background-color: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .widget-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .widget-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .widget-body {
+            padding: 0;
+            flex-grow: 1;
+        }
+
+        /* Upcoming Deadlines Table */
+        .mini-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+
+        .mini-table th {
+            text-align: left;
+            padding: 0.75rem 1.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--border-color);
+            background-color: #f9fafb;
+        }
+
+        .mini-table td {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .mini-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .case-link {
+            color: var(--primary-red);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        /* Empty State for Hearings */
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 150px;
+            padding: 2rem;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        /* --- Bottom Section: Main Table --- */
+        .main-table-section {
+            background-color: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .table-toolbar {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .search-box {
+            flex-grow: 1;
+            position: relative;
+            min-width: 250px;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 0.5rem 1rem 0.5rem 2.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 0.875rem;
+            outline: none;
+        }
+
+        .search-box input:focus {
+            border-color: #a1a1aa;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .filter-select {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 0.875rem;
+            background-color: var(--surface-color);
+            outline: none;
+            cursor: pointer;
+        }
+
+        .main-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+
+        .main-table th {
+            text-align: left;
+            padding: 0.75rem 1rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--border-color);
+            background-color: #f9fafb;
+            white-space: nowrap;
+        }
+
+        .main-table td {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            vertical-align: middle;
+        }
+
+        .main-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .main-table tr:hover {
+            background-color: #f8fafc;
+        }
+
+        /* Badges & Status */
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-under-review {
+            background-color: var(--status-review-bg);
+            color: var(--status-review-text);
+        }
+
+        .priority-text {
+            color: var(--text-primary);
+        }
+
+        .action-btn {
+            background: none;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+
+        .action-btn:hover {
+            background-color: #f3f4f6;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .widgets-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .page-header {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .header-actions {
+                justify-content: flex-start;
+            }
+            .main-table-section {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container">
+    
+    <!-- Header Section -->
+    <header class="page-header">
+        <div class="header-title">
+            <h1>Legal Cases</h1>
+            <p>Track legal cases and their supporting documents.</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-outline">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                Dashboard
+            </button>
+            <button class="btn btn-outline">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                Manage Case Types
+            </button>
+            <button class="btn btn-outline">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+                View Archived
+            </button>
+            <button class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                New Legal Case
+            </button>
+        </div>
+    </header>
+
+    <!-- Metrics Grid -->
+    <section class="metrics-grid">
+        <!-- Card 1 -->
+        <div class="metric-card">
+            <div class="metric-icon" style="background-color: var(--metric-red-bg); color: var(--metric-red-icon);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"></path><path d="M5 7h14"></path><path d="M8 7v10a4 4 0 0 0 8 0V7"></path></svg>
+            </div>
+            <div class="metric-content">
+                <span class="metric-label">Total Active Cases</span>
+                <span class="metric-value">2</span>
+            </div>
+        </div>
+        <!-- Card 2 -->
+        <div class="metric-card">
+            <div class="metric-icon" style="background-color: var(--metric-orange-bg); color: var(--metric-orange-icon);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            </div>
+            <div class="metric-content">
+                <span class="metric-label">Open Cases</span>
+                <span class="metric-value">0</span>
+            </div>
+        </div>
+        <!-- Card 3 -->
+        <div class="metric-card">
+            <div class="metric-icon" style="background-color: var(--metric-green-bg); color: var(--metric-green-icon);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+            </div>
+            <div class="metric-content">
+                <span class="metric-label">Upcoming Deadlines</span>
+                <span class="metric-value">1</span>
+            </div>
+        </div>
+        <!-- Card 4 -->
+        <div class="metric-card">
+            <div class="metric-icon" style="background-color: var(--metric-purple-bg); color: var(--metric-purple-icon);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+            </div>
+            <div class="metric-content">
+                <span class="metric-label">Upcoming Hearings</span>
+                <span class="metric-value">0</span>
+            </div>
+        </div>
+        <!-- Card 5 -->
+        <div class="metric-card">
+            <div class="metric-icon" style="background-color: var(--metric-blue-bg); color: var(--metric-blue-icon);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </div>
+            <div class="metric-content">
+                <span class="metric-label">Overdue Tasks</span>
+                <span class="metric-value">0</span>
+            </div>
+        </div>
+        <!-- Card 6 -->
+        <div class="metric-card">
+            <div class="metric-icon" style="background-color: var(--metric-yellow-bg); color: var(--metric-yellow-icon);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            </div>
+            <div class="metric-content">
+                <span class="metric-label">Recently Closed</span>
+                <span class="metric-value">0</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Widgets Section (Deadlines & Hearings) -->
+    <section class="widgets-grid">
+        <!-- Upcoming Deadlines Widget -->
+        <div class="widget-card">
+            <div class="widget-header">
+                <h2>Upcoming Deadlines</h2>
+            </div>
+            <div class="widget-body">
+                <table class="mini-table">
+                    <thead>
+                        <tr>
+                            <th>Case</th>
+                            <th>Title</th>
+                            <th>Deadline</th>
+                            <th>Assigned To</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><a href="#" class="case-link">LC-2026-001</a></td>
+                            <td>Case One</td>
+                            <td>Oct 05, 2026</td>
+                            <td>Legal Lena</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Upcoming Hearings Widget -->
+        <div class="widget-card">
+            <div class="widget-header">
+                <h2>Upcoming Hearings</h2>
+            </div>
+            <div class="widget-body">
+                <div class="empty-state">
+                    No scheduled hearings in the next 30 days.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Table Section -->
+    <section class="main-table-section">
+        <!-- Toolbar -->
+        <div class="table-toolbar">
+            <div class="search-box">
+                <span class="search-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                </span>
+                <input type="text" placeholder="Search cases, subjects, or departments...">
+            </div>
+            <div class="filter-group">
+                <select class="filter-select">
+                    <option>All Statuses</option>
+                    <option>Under Review</option>
+                    <option>Open</option>
+                    <option>Closed</option>
+                </select>
+                <select class="filter-select">
+                    <option>All Case Types</option>
+                    <option>Labor</option>
+                    <option>Government / Regulatory</option>
+                </select>
+                <button class="btn btn-outline">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+                    Filters
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Data Table -->
+        <table class="main-table">
+            <thead>
+                <tr>
+                    <th>Case No.</th>
+                    <th>Title</th>
+                    <th>Case Type</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Filed Date</th>
+                    <th>Deadline</th>
+                    <th>Assigned To</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>LC-2026-002</td>
+                    <td><a href="#" class="case-link">asd</a></td>
+                    <td>Labor</td>
+                    <td><span class="status-badge status-under-review">Under Review</span></td>
+                    <td class="priority-text">Medium</td>
+                    <td>Sep 27, 2026</td>
+                    <td>—</td>
+                    <td>Legal Lena</td>
+                    <td>
+                        <button class="action-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+                        </button>
+                    </td>
+                </tr>
+                <tr>
+                    <td>LC-2026-001</td>
+                    <td><a href="#" class="case-link">Case One</a></td>
+                    <td>Government / Regulatory</td>
+                    <td><span class="status-badge status-under-review">Under Review</span></td>
+                    <td class="priority-text">High</td>
+                    <td>Sep 27, 2026</td>
+                    <td>Oct 05, 2026</td>
+                    <td>Legal Lena</td>
+                    <td>
+                        <button class="action-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+                        </button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+</div>
+
+</body>
+</html>
