@@ -584,10 +584,8 @@ switch ($action) {
                 ) {
                     $errors[] = 'Select an active legal case type.';
                 }
-                $deadlineRequired = $formValues['status'] !== 'under_review';
-
-                if ($deadlineRequired && $formValues['deadline'] === '') {
-                    $errors[] = 'Deadline is required once the case leaves Under Review.';
+                if ($formValues['deadline'] === '') {
+                    $errors[] = 'Deadline is required.';
                 } elseif ($formValues['deadline'] !== '' && !t8_legal_is_valid_iso_date($formValues['deadline'])) {
                     $errors[] = 'Deadline must be a valid date.';
                 } elseif ($formValues['deadline'] !== ''
@@ -863,7 +861,7 @@ switch ($action) {
             $resolutionInput = [
                 'resolution_type' => (string) ($_POST['resolution_type'] ?? ''),
                 'resolution_summary' => trim((string) ($_POST['resolution_summary'] ?? '')),
-                'resolved_date' => trim((string) ($_POST['resolved_date'] ?? '')),
+                'resolved_date' => $resolution === null ? date('Y-m-d') : (string) $resolution['resolved_date'],
                 'final_outcome' => trim((string) ($_POST['final_outcome'] ?? '')),
                 'supporting_legal_document_id' => (string) ($_POST['supporting_legal_document_id'] ?? ''),
             ];
@@ -877,12 +875,6 @@ switch ($action) {
                 }
                 if ($resolutionInput['resolution_summary'] === '' || mb_strlen($resolutionInput['resolution_summary']) > 5000) {
                     $errors[] = 'Resolution summary is required and must be 5000 characters or fewer.';
-                }
-                if (!t8_legal_is_valid_iso_date($resolutionInput['resolved_date'])
-                    || !t8_legal_case_date_is_not_before_filed((string) $case['filed_date'], $resolutionInput['resolved_date'])
-                    || $resolutionInput['resolved_date'] > date('Y-m-d')
-                ) {
-                    $errors[] = 'Resolved date must be valid, on or after the filed date, and not in the future.';
                 }
                 if (mb_strlen($resolutionInput['final_outcome']) > 5000) {
                     $errors[] = 'Final outcome must be 5000 characters or fewer.';
@@ -2707,7 +2699,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
 
             <?php if ($legalHasCaseMetadata): ?><div class="t8-field">
                 <label class="t8-label" for="deadline">Deadline <span class="t8-required">*</span></label>
-                <input class="t8-input" type="date" id="deadline" name="deadline" value="<?= e($formValues['deadline']) ?>" data-t8-date-rule="future">
+                <input class="t8-input" type="date" id="deadline" name="deadline" value="<?= e($formValues['deadline']) ?>" data-t8-date-rule="future" required>
             </div><?php endif; ?>
 
             <?php if ($legalHasCaseMetadata): ?>
@@ -2715,16 +2707,9 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 document.addEventListener("DOMContentLoaded", function () {
                     var filedDate = document.getElementById("filed_date");
                     var deadlineInput = document.getElementById("deadline");
-                    var statusSelect = document.getElementById("status");
                     var dateFields = [deadlineInput].filter(Boolean);
                     if (!filedDate || dateFields.length === 0) {
                         return;
-                    }
-
-                    function syncDeadlineRequired() {
-                        if (!deadlineInput) { return; }
-                        var status = statusSelect ? statusSelect.value : "under_review";
-                        deadlineInput.required = status !== "under_review";
                     }
 
                     function syncDateMinimums() {
@@ -2738,10 +2723,6 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                     }
 
                     filedDate.addEventListener("change", syncDateMinimums);
-                    if (statusSelect) {
-                        statusSelect.addEventListener("change", syncDeadlineRequired);
-                    }
-                    syncDeadlineRequired();
                     syncDateMinimums();
                     window.setTimeout(syncDateMinimums, 0);
                 });
@@ -2848,12 +2829,11 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                         'Docket / Reference Number' => 'docket_reference',
                         'Jurisdiction' => 'jurisdiction',
                     ] as $label => $field): ?>
-                        <?php if (!empty($case[$field])): ?>
-                            <div class="t8-legal-overview-item">
-                                <span class="t8-legal-overview-label"><?= e($label) ?></span>
-                                <strong class="t8-legal-overview-value"><?= e((string) $case[$field]) ?></strong>
-                            </div>
-                        <?php endif; ?>
+                        <?php $value = trim((string) ($case[$field] ?? '')); ?>
+                        <div class="t8-legal-overview-item">
+                            <span class="t8-legal-overview-label"><?= e($label) ?></span>
+                            <strong class="t8-legal-overview-value"><?= e($value !== '' ? $value : '—') ?></strong>
+                        </div>
                     <?php endforeach; ?>
                 </div>
                 <?php if (!empty($case['legal_basis'])): ?>
@@ -2969,7 +2949,6 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <form method="post" action="<?= e(page_url('legal', ['action' => 'resolution', 'id' => $caseId])) ?>" class="t8-legal-form-grid">
                     <?= t8_csrf_field() ?>
                     <div class="t8-field"><label class="t8-label" for="resolution_type">Resolution Type</label><select class="t8-select" id="resolution_type" name="resolution_type" required><option value="">Select type</option><?php foreach ($legalResolutionTypes as $type): ?><option value="<?= e($type) ?>" <?= $resolutionInput['resolution_type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></div>
-                    <div class="t8-field"><label class="t8-label" for="resolved_date">Resolved Date</label><input class="t8-input" type="date" id="resolved_date" name="resolved_date" min="<?= e((string) $case['filed_date']) ?>" max="<?= e(date('Y-m-d')) ?>" value="<?= e($resolutionInput['resolved_date']) ?>" required></div>
                     <div class="t8-field t8-form-span-2"><label class="t8-label" for="resolution_summary">Resolution Summary</label><textarea class="t8-input" id="resolution_summary" name="resolution_summary" rows="4" maxlength="5000" required><?= e($resolutionInput['resolution_summary']) ?></textarea></div>
                     <div class="t8-field t8-form-span-2"><label class="t8-label" for="final_outcome">Final Outcome</label><textarea class="t8-input" id="final_outcome" name="final_outcome" rows="3" maxlength="5000"><?= e($resolutionInput['final_outcome']) ?></textarea></div>
                     <div class="t8-field t8-form-span-2"><label class="t8-label" for="resolution_document">Supporting Document</label><select class="t8-select" id="resolution_document" name="supporting_legal_document_id"><option value="">None</option><?php foreach ($resolutionDocuments as $document): ?><option value="<?= e((string) $document['id']) ?>" <?= $resolutionInput['supporting_legal_document_id'] === (string) $document['id'] ? 'selected' : '' ?>><?= e($document['title']) ?></option><?php endforeach; ?></select></div>

@@ -31,7 +31,7 @@ $schema = file_get_contents(__DIR__ . '/../database/schema.sql');
 $migration = file_get_contents(__DIR__ . '/../database/migrations/2026_09_26_legal_case_creation.sql');
 $helper = file_get_contents(__DIR__ . '/../app/includes/legal_case_helpers.php');
 $source = file_get_contents(__DIR__ . '/../modules/legal/index.php');
-$formStart = strpos($source, '<?php elseif ($showForm): ?>');
+$formStart = strpos($source, '<?php if ($showForm): ?>');
 $formEnd = strpos($source, '</form>', $formStart);
 $assert($formStart !== false && $formEnd !== false, 'The case form should remain present.');
 $caseForm = substr($source, $formStart, $formEnd - $formStart);
@@ -56,13 +56,14 @@ $assert(str_contains($source, '$pdo->beginTransaction();'), 'Number allocation a
 $assert(str_contains($caseForm, 'name="department_id"') && !str_contains($caseForm, 'name="department_id" required'), 'Department should be optional.');
 $caseFormMarkup = preg_replace('/<\?.*?\?>/s', '', $caseForm);
 $assert(is_string($caseFormMarkup), 'The case form markup should be readable.');
-foreach (['title', 'case_type_id', 'priority', 'filed_date', 'assigned_to'] as $requiredField) {
+foreach (['title', 'case_type_id', 'priority', 'filed_date', 'deadline', 'assigned_to'] as $requiredField) {
     $assert(preg_match('/name="' . preg_quote($requiredField, '/') . '"[^>]*required/', $caseFormMarkup) === 1, "{$requiredField} should be required in the primary form.");
 }
 $assert(str_contains($source, "'status'      => (string) (\$_POST['status'] ?? (\$existing['status'] ?? 'under_review'))"), 'New cases should default to Under Review when no status is submitted.');
 $assert(str_contains($caseForm, "<?php if (\$action === 'edit'): ?><div class=\"t8-field\">"), 'Status transitions should remain available only when editing an existing case.');
 $assert(str_contains($source, "'status' => 'under_review'") && str_contains($source, "'priority' => 'medium'"), 'Status and Priority should default to Under Review and Medium on create.');
-$assert(str_contains($caseForm, 'name="deadline"') && !preg_match('/name="deadline"[^>]*required/', $caseForm), 'Deadline should remain optional and visible.');
+$assert(str_contains($source, "if (\$formValues['deadline'] === '')") && str_contains($source, 'Deadline is required.'), 'Deadline should be required by server-side validation.');
+$assert(!str_contains($caseForm, 'syncDeadlineRequired'), 'Deadline should not become optional based on case status.');
 $assert(str_contains($caseForm, 'name="description"') && !preg_match('/name="description"[^>]*required/', $caseForm), 'Description should remain optional and visible.');
 $assert(str_contains($caseForm, '<details') && str_contains($caseForm, 'Filing Information'), 'Optional details should be grouped in a collapsed Filing Information section.');
 $assert(!str_contains($caseForm, 'name="subject"'), 'Subject must not be editable in the case form.');
