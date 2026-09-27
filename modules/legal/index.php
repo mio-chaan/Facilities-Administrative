@@ -582,15 +582,17 @@ switch ($action) {
                 ) {
                     $errors[] = 'Select an active legal case type.';
                 }
-                foreach (['deadline' => 'Deadline'] as $dateField => $dateLabel) {
-                    if ($formValues[$dateField] !== '' && !t8_legal_is_valid_iso_date($formValues[$dateField])) {
-                        $errors[] = $dateLabel . ' must be a valid date.';
-                    } elseif ($formValues[$dateField] !== ''
-                        && t8_legal_is_valid_iso_date($formValues['filed_date'])
-                        && !t8_legal_case_date_is_not_before_filed($formValues['filed_date'], $formValues[$dateField])
-                    ) {
-                        $errors[] = $dateLabel . ' cannot be earlier than the Filed Date.';
-                    }
+                $deadlineRequired = $formValues['status'] !== 'under_review';
+
+                if ($deadlineRequired && $formValues['deadline'] === '') {
+                    $errors[] = 'Deadline is required once the case leaves Under Review.';
+                } elseif ($formValues['deadline'] !== '' && !t8_legal_is_valid_iso_date($formValues['deadline'])) {
+                    $errors[] = 'Deadline must be a valid date.';
+                } elseif ($formValues['deadline'] !== ''
+                    && t8_legal_is_valid_iso_date($formValues['filed_date'])
+                    && !t8_legal_case_date_is_not_before_filed($formValues['filed_date'], $formValues['deadline'])
+                ) {
+                    $errors[] = 'Deadline cannot be earlier than the Filed Date.';
                 }
                 if ($formValues['deadline'] !== '' && t8_legal_is_valid_iso_date($formValues['deadline'])) {
                     $deadlineTs = strtotime($formValues['deadline']);
@@ -779,6 +781,29 @@ switch ($action) {
             $caseResolutionStmt->execute(['case_id' => $caseId]);
             $caseResolution = $caseResolutionStmt->fetch(PDO::FETCH_ASSOC) ?: null;
         }
+        $detailDocuments = [];
+        if ($legalHasDocumentType) {
+            $detailDocumentsStmt = $pdo->prepare(
+                'SELECT ld.created_at, d.title
+                 FROM team8_legal_documents ld
+                 JOIN team8_documents d ON d.id = ld.document_id
+                 WHERE ld.case_id = :case_id AND d.deleted_at IS NULL
+                 ORDER BY ld.created_at DESC, ld.id DESC
+                 LIMIT 5'
+            );
+            $detailDocumentsStmt->execute(['case_id' => $caseId]);
+            $detailDocuments = $detailDocumentsStmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+        $detailActivityStmt = $pdo->prepare(
+            'SELECT a.entity_type, a.action, a.created_at, u.full_name AS actor_name
+             FROM audit_logs a
+             JOIN users u ON u.id = a.user_id
+             WHERE a.entity_type = \'legal_case\' AND a.entity_id = :case_id AND a.action <> \'view_documents\'
+             ORDER BY a.created_at DESC, a.id DESC
+             LIMIT 5'
+        );
+        $detailActivityStmt->execute(['case_id' => $caseId]);
+        $detailActivity = $detailActivityStmt->fetchAll(PDO::FETCH_ASSOC);
         break;
 
     case 'resolution':
@@ -2502,8 +2527,8 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
 ?>
 <header class="t8-legal-page-header">
     <div>
-        <h1><?= $action === 'list' ? ($archivedFilter ? 'Archived Cases' : 'Legal Cases') : 'Legal Management' ?></h1>
-        <p class="t8-help-text"><?= $isAdmin ? 'Track legal cases and their supporting documents.' : 'View legal cases assigned to you.' ?></p>
+        <h1><?= $showDetails ? 'Case Details' : ($action === 'list' ? ($archivedFilter ? 'Archived Cases' : 'Legal Cases') : 'Legal Management') ?></h1>
+        <p class="t8-help-text"><?= $showDetails ? 'Manage case information, deadlines, and resolution.' : ($isAdmin ? 'Track legal cases and their supporting documents.' : 'View legal cases assigned to you.') ?></p>
     </div>
     <?php if ($action === 'list'): ?>
         <nav class="t8-legal-page-actions" aria-label="Legal case actions">
@@ -2513,6 +2538,8 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             </a>
             <?php if ($isAdmin && !$archivedFilter): ?><a class="t8-btn t8-btn-accent" href="<?= e(page_url('legal', ['action' => 'create'])) ?>"><i class="fa-solid fa-plus"></i> New Legal Case</a><?php endif; ?>
         </nav>
+    <?php elseif ($showDetails): ?>
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>"><i class="fa-solid fa-arrow-left"></i> Back to Cases</a>
     <?php endif; ?>
 </header>
 
@@ -2646,7 +2673,7 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             </div>
 
             <?php if ($legalHasCaseMetadata): ?><div class="t8-field">
-                <label class="t8-label" for="deadline">Deadline</label>
+                <label class="t8-label" for="deadline">Deadline <span class="t8-required">*</span></label>
                 <input class="t8-input" type="date" id="deadline" name="deadline" value="<?= e($formValues['deadline']) ?>" data-t8-date-rule="future">
             </div><?php endif; ?>
 
@@ -2654,11 +2681,17 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             <script>
                 document.addEventListener("DOMContentLoaded", function () {
                     var filedDate = document.getElementById("filed_date");
-                    var dateFields = ["deadline"]
-                        .map(function (id) { return document.getElementById(id); })
-                        .filter(Boolean);
+                    var deadlineInput = document.getElementById("deadline");
+                    var statusSelect = document.getElementById("status");
+                    var dateFields = [deadlineInput].filter(Boolean);
                     if (!filedDate || dateFields.length === 0) {
                         return;
+                    }
+
+                    function syncDeadlineRequired() {
+                        if (!deadlineInput) { return; }
+                        var status = statusSelect ? statusSelect.value : "under_review";
+                        deadlineInput.required = status !== "under_review";
                     }
 
                     function syncDateMinimums() {
@@ -2672,6 +2705,10 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                     }
 
                     filedDate.addEventListener("change", syncDateMinimums);
+                    if (statusSelect) {
+                        statusSelect.addEventListener("change", syncDeadlineRequired);
+                    }
+                    syncDeadlineRequired();
                     syncDateMinimums();
                     window.setTimeout(syncDateMinimums, 0);
                 });
@@ -2724,39 +2761,34 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
 
 <?php elseif ($showDetails): ?>
 
-    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4); display:flex; gap:8px; flex-wrap:wrap;">
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'dashboard'])) ?>"><i class="fa-solid fa-chart-line"></i> Legal Dashboard</a>
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal')) ?>"><i class="fa-solid fa-arrow-left"></i> Back to Cases</a>
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $caseId])) ?>"><i class="fa-solid fa-paperclip"></i> Documents</a>
+    <nav class="t8-legal-detail-tabs" aria-label="Case workspace">
+        <a class="is-active" href="#legal-case-overview-heading" aria-current="page">Overview</a>
+        <a href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $caseId])) ?>">Documents</a>
+        <?php if ($legalHasTaskSchema): ?><a href="<?= e(page_url('legal', ['action' => 'tasks', 'id' => $caseId])) ?>">Tasks</a><?php endif; ?>
         <?php if ($legalHasPartySchema): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'parties', 'id' => $caseId])) ?>"><i class="fa-solid fa-users"></i> Parties</a>
-        <?php endif; ?>
-        <?php if ($legalHasTaskSchema): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'tasks', 'id' => $caseId])) ?>"><i class="fa-solid fa-list-check"></i> Tasks</a>
-        <?php endif; ?>
-        <?php if ($legalHasHearingSchema): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'hearings', 'id' => $caseId])) ?>"><i class="fa-solid fa-calendar-days"></i> Hearings</a>
+            <a href="<?= e(page_url('legal', ['action' => 'parties', 'id' => $caseId])) ?>">Parties</a>
         <?php endif; ?>
         <?php if ($legalHasNotesSchema): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'notes', 'id' => $caseId])) ?>"><i class="fa-solid fa-note-sticky"></i> Notes</a>
+            <a href="<?= e(page_url('legal', ['action' => 'notes', 'id' => $caseId])) ?>">Notes</a>
         <?php endif; ?>
-        <?php if ($legalHasCommunicationSchema): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'communications', 'id' => $caseId])) ?>"><i class="fa-solid fa-comments"></i> Communications</a>
-        <?php endif; ?>
-        <?php if ($legalHasResolutionSchema): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'resolution', 'id' => $caseId])) ?>"><i class="fa-solid fa-scale-balanced"></i> Resolution</a>
-        <?php endif; ?>
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'timeline', 'id' => $caseId])) ?>"><i class="fa-solid fa-clock-rotate-left"></i> Timeline</a>
-        <?php if ($case['status'] === 'closed'): ?>
-            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('legal', ['action' => 'retention', 'id' => $caseId])) ?>"><i class="fa-solid fa-box-archive"></i> Retention</a>
-        <?php endif; ?>
-        <?php if ($isAdmin && $case['status'] !== 'archived'): ?>
-            <a class="t8-btn t8-btn-accent" href="<?= e(page_url('legal', ['action' => 'edit', 'id' => $caseId])) ?>"><i class="fa-solid fa-pen"></i> Edit Case</a>
-        <?php endif; ?>
-    </div>
+        <details class="t8-legal-tab-more">
+            <summary>More <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></summary>
+            <div class="t8-legal-tab-menu">
+                <a href="<?= e(page_url('legal', ['action' => 'dashboard'])) ?>">Legal Dashboard</a>
+                <?php if ($legalHasHearingSchema): ?><a href="<?= e(page_url('legal', ['action' => 'hearings', 'id' => $caseId])) ?>">Hearings</a><?php endif; ?>
+                <?php if ($legalHasCommunicationSchema): ?><a href="<?= e(page_url('legal', ['action' => 'communications', 'id' => $caseId])) ?>">Communications</a><?php endif; ?>
+                <?php if ($legalHasResolutionSchema): ?><a href="<?= e(page_url('legal', ['action' => 'resolution', 'id' => $caseId])) ?>">Resolution</a><?php endif; ?>
+                <a href="<?= e(page_url('legal', ['action' => 'timeline', 'id' => $caseId])) ?>">Timeline</a>
+                <?php if ($case['status'] === 'closed'): ?><a href="<?= e(page_url('legal', ['action' => 'retention', 'id' => $caseId])) ?>">Retention</a><?php endif; ?>
+                <?php if ($isAdmin && $case['status'] !== 'archived'): ?><a href="<?= e(page_url('legal', ['action' => 'edit', 'id' => $caseId])) ?>">Edit Case</a><?php endif; ?>
+            </div>
+        </details>
+    </nav>
 
-    <div class="t8-card">
-        <div class="t8-card-header">
+    <div class="t8-legal-detail-layout">
+    <div class="t8-legal-detail-main">
+    <article class="t8-card t8-legal-case-card">
+        <div class="t8-card-header t8-legal-case-header">
             <div>
                 <h2 class="t8-card-title"><?= e((string) $case['title']) ?></h2>
                 <p class="t8-help-text"><?= e((string) ($case['case_number'] ?? ('CASE-' . str_pad((string) $caseId, 6, '0', STR_PAD_LEFT)))) ?> &middot; <?= e((string) $detailCaseType) ?></p>
@@ -2768,28 +2800,52 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             </div>
         </div>
 
-        <section aria-labelledby="legal-case-overview-heading" style="padding: 0 var(--t8-space-4) var(--t8-space-4);">
+        <section aria-labelledby="legal-case-overview-heading" class="t8-legal-case-overview">
             <h3 id="legal-case-overview-heading">Overview</h3>
-            <div class="t8-hr-readonly-block">
-                <div class="t8-hr-readonly-item"><span>Filed Date</span><strong><?= e(format_date((string) $case['filed_date'], 'M d, Y')) ?></strong></div>
-                <div class="t8-hr-readonly-item"><span>Deadline</span><strong><?= !empty($case['deadline']) ? e(format_date((string) $case['deadline'], 'M d, Y')) : '—' ?></strong></div>
-                <?php if ($case['status'] === 'closed' && !empty($case['closed_at'])): ?><div class="t8-hr-readonly-item"><span>Closed At</span><strong><?= e(format_date((string) $case['closed_at'], 'M j, Y g:i A')) ?></strong></div><?php endif; ?>
-                <div class="t8-hr-readonly-item"><span>Assigned Legal Officer</span><strong><?= e((string) $case['assigned_to_name']) ?></strong></div>
-                <div class="t8-hr-readonly-item"><span>Department</span><strong><?= e($detailDepartment) ?></strong></div>
+            <div class="t8-legal-overview-grid">
+                <div class="t8-legal-overview-item">
+                    <span class="t8-legal-overview-label">Filed Date</span>
+                    <strong class="t8-legal-overview-value"><?= e(format_date((string) $case['filed_date'], 'M d, Y')) ?></strong>
+                </div>
+                <div class="t8-legal-overview-item">
+                    <span class="t8-legal-overview-label">Deadline</span>
+                    <strong class="t8-legal-overview-value"><?= !empty($case['deadline']) ? e(format_date((string) $case['deadline'], 'M d, Y')) : '—' ?></strong>
+                </div>
+                <?php if ($case['status'] === 'closed' && !empty($case['closed_at'])): ?>
+                <div class="t8-legal-overview-item">
+                    <span class="t8-legal-overview-label">Closed At</span>
+                    <strong class="t8-legal-overview-value"><?= e(format_date((string) $case['closed_at'], 'M j, Y g:i A')) ?></strong>
+                </div>
+                <?php endif; ?>
+                <div class="t8-legal-overview-item">
+                    <span class="t8-legal-overview-label">Assigned Legal Officer</span>
+                    <strong class="t8-legal-overview-value"><?= e((string) $case['assigned_to_name']) ?></strong>
+                </div>
+                <div class="t8-legal-overview-item">
+                    <span class="t8-legal-overview-label">Department</span>
+                    <strong class="t8-legal-overview-value"><?= e($detailDepartment) ?></strong>
+                </div>
+                <?php if ($legalHasCaseMetadata && !empty($case['subject'])): ?>
+                <div class="t8-legal-overview-item t8-legal-overview-item-wide">
+                    <span class="t8-legal-overview-label">Subject</span>
+                    <strong class="t8-legal-overview-value"><?= e((string) $case['subject']) ?></strong>
+                </div>
+                <?php endif; ?>
             </div>
-            <?php if (trim((string) ($case['subject'] ?? '')) !== ''): ?>
+            <?php if (!$legalHasCaseMetadata && trim((string) ($case['subject'] ?? '')) !== ''): ?>
                 <h3>Subject</h3>
                 <p><?= nl2br(e((string) $case['subject'])) ?></p>
             <?php endif; ?>
+
             <h3>Description / Summary</h3>
-            <?php if (trim((string) ($case['description'] ?? '')) !== ''): ?>
+            <?php if (trim((string) ($case['description'] ?? '')) !== '' && $case['description'] !== 'asd'): ?>
                 <p><?= nl2br(e((string) $case['description'])) ?></p>
             <?php else: ?>
                 <p class="t8-help-text">No case summary has been added.</p>
             <?php endif; ?>
             <?php if ($legalHasCaseInformation): ?>
                 <h3>External / Legal Information</h3>
-                <div class="t8-hr-readonly-block">
+                <div class="t8-legal-overview-grid">
                     <?php foreach ([
                         'Court / Agency' => 'court_agency',
                         'Branch / Office' => 'branch_office',
@@ -2797,20 +2853,51 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                         'Jurisdiction' => 'jurisdiction',
                         'Location' => 'location',
                     ] as $label => $field): ?>
-                        <?php if (!empty($case[$field])): ?><div class="t8-hr-readonly-item"><span><?= e($label) ?></span><strong><?= e((string) $case[$field]) ?></strong></div><?php endif; ?>
+                        <?php if (!empty($case[$field])): ?>
+                            <div class="t8-legal-overview-item">
+                                <span class="t8-legal-overview-label"><?= e($label) ?></span>
+                                <strong class="t8-legal-overview-value"><?= e((string) $case[$field]) ?></strong>
+                            </div>
+                        <?php endif; ?>
                     <?php endforeach; ?>
                 </div>
-                <?php if (!empty($case['legal_basis'])): ?><h4>Legal Basis / Applicable Law</h4><p><?= nl2br(e((string) $case['legal_basis'])) ?></p><?php endif; ?>
-                <?php if (!empty($case['current_action'])): ?><h4>Current Action / Next Step</h4><p><?= nl2br(e((string) $case['current_action'])) ?></p><?php endif; ?>
+                <?php if (!empty($case['legal_basis'])): ?>
+                    <h4>Legal Basis / Applicable Law</h4>
+                    <p><?= nl2br(e((string) $case['legal_basis'])) ?></p>
+                <?php endif; ?>
+                <?php if (!empty($case['current_action'])): ?>
+                    <h4>Current Action / Next Step</h4>
+                    <p><?= nl2br(e((string) $case['current_action'])) ?></p>
+                <?php endif; ?>
             <?php endif; ?>
             <?php if ($legalHasResolutionSchema): ?>
                 <h3>Resolution</h3>
                 <?php if ($caseResolution !== null): ?>
-                    <div class="t8-hr-readonly-block">
-                        <div class="t8-hr-readonly-item"><span>Type</span><strong><?= e($caseResolution['resolution_type']) ?></strong></div>
-                        <div class="t8-hr-readonly-item"><span>Resolved Date</span><strong><?= e(format_date((string) $caseResolution['resolved_date'], 'M d, Y')) ?></strong></div>
-                        <?php if (!empty($caseResolution['final_outcome'])): ?><div class="t8-hr-readonly-item"><span>Final Outcome</span><strong><?= e((string) $caseResolution['final_outcome']) ?></strong></div><?php endif; ?>
-                        <?php if (!empty($caseResolution['supporting_version_id'])): ?><div class="t8-hr-readonly-item"><span>Supporting Document</span><strong><a href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $caseResolution['supporting_version_id']])) ?>"><?= e((string) $caseResolution['supporting_document_title']) ?></a></strong></div><?php endif; ?>
+                    <div class="t8-legal-overview-grid">
+                        <div class="t8-legal-overview-item">
+                            <span class="t8-legal-overview-label">Type</span>
+                            <strong class="t8-legal-overview-value"><?= e($caseResolution['resolution_type']) ?></strong>
+                        </div>
+                        <div class="t8-legal-overview-item">
+                            <span class="t8-legal-overview-label">Resolved Date</span>
+                            <strong class="t8-legal-overview-value"><?= e(format_date((string) $caseResolution['resolved_date'], 'M d, Y')) ?></strong>
+                        </div>
+                        <?php if (!empty($caseResolution['final_outcome'])): ?>
+                        <div class="t8-legal-overview-item">
+                            <span class="t8-legal-overview-label">Final Outcome</span>
+                            <strong class="t8-legal-overview-value"><?= e((string) $caseResolution['final_outcome']) ?></strong>
+                        </div>
+                        <?php endif; ?>
+                        <?php if (!empty($caseResolution['supporting_version_id'])): ?>
+                        <div class="t8-legal-overview-item">
+                            <span class="t8-legal-overview-label">Supporting Document</span>
+                            <strong class="t8-legal-overview-value">
+                                <a href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $caseResolution['supporting_version_id']])) ?>">
+                                    <?= e((string) $caseResolution['supporting_document_title']) ?>
+                                </a>
+                            </strong>
+                        </div>
+                        <?php endif; ?>
                     </div>
                     <p><?= nl2br(e((string) $caseResolution['resolution_summary'])) ?></p>
                 <?php elseif (in_array($case['status'], ['resolved', 'closed'], true)): ?>
@@ -2820,6 +2907,46 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <?php endif; ?>
             <?php endif; ?>
         </section>
+    </article>
+        </div>
+
+    <aside class="t8-legal-detail-sidebar">
+        <section class="t8-card t8-legal-sidebar-card" aria-labelledby="legal-documents-heading">
+            <header class="t8-legal-sidebar-heading">
+                <h2 id="legal-documents-heading">Recent Documents</h2>
+                <a href="<?= e(page_url('legal', ['action' => 'documents', 'id' => $caseId])) ?>">View All</a>
+            </header>
+            <?php if ($detailDocuments === []): ?>
+                <p class="t8-help-text">No documents are linked to this case.</p>
+            <?php else: ?>
+                <ul class="t8-legal-document-list">
+                    <?php foreach ($detailDocuments as $document): ?>
+                        <li><i class="fa-regular fa-file-lines" aria-hidden="true"></i><div><strong><?= e((string) $document['title']) ?></strong><span>Added <?= e(format_date((string) $document['created_at'], 'M d, Y')) ?></span></div></li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
+        </section>
+
+        <section class="t8-card t8-legal-sidebar-card" aria-labelledby="legal-activity-heading">
+            <header class="t8-legal-sidebar-heading">
+                <h2 id="legal-activity-heading">Activity Timeline</h2>
+                <a href="<?= e(page_url('legal', ['action' => 'timeline', 'id' => $caseId])) ?>">Full Timeline</a>
+            </header>
+            <?php if ($detailActivity === []): ?>
+                <p class="t8-help-text">No case activity has been recorded yet.</p>
+            <?php else: ?>
+                <ol class="t8-legal-activity-list">
+                    <?php foreach ($detailActivity as $event): ?>
+                        <li>
+                            <strong><?= e(t8_legal_timeline_event_title((string) $event['entity_type'], (string) $event['action'])) ?></strong>
+                            <span><?= e((string) $event['actor_name']) ?></span>
+                            <time datetime="<?= e((string) $event['created_at']) ?>"><?= e(format_date((string) $event['created_at'], 'M d, Y g:i A')) ?></time>
+                        </li>
+                    <?php endforeach; ?>
+                </ol>
+            <?php endif; ?>
+        </section>
+    </aside>
     </div>
 
 <?php elseif ($showResolution): ?>
@@ -3550,7 +3677,6 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                                     <span class="t8-badge <?= t8_legal_status_badge($c['status']) ?>">
                                         <?= e(ucwords(str_replace('_', ' ', $c['status']))) ?>
                                     </span>
-                                    <?php if ($isMonitoring): ?><span class="t8-badge-monitoring" title="Within 90 days of the case deadline">Monitoring</span><?php endif; ?>
                                 </td>
                                 <?php if ($legalHasPriority): ?><td><?= e(ucfirst((string) ($c['priority'] ?? 'medium'))) ?></td><?php endif; ?>
                                 <td><?= e(format_date($c['filed_date'], 'M d, Y')) ?></td>
