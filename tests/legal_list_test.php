@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 function page_url(string $page, array $query = []): string
 {
-    return '/index.php?' . http_build_query(array_merge(['route' => $page], $query));
+    return '/index.php?' . http_build_query(array_merge(['page' => $page], $query));
 }
 
 function e(string $value): string
@@ -27,10 +27,11 @@ $assert(t8_legal_page_number('3') === 3, 'Valid page should be preserved.');
 $assert(t8_legal_page_number('999') === 100, 'Page should be capped at 100.');
 $assert(t8_legal_page_number('1 OR 1=1') === 1, 'Invalid page input should normalize safely.');
 
-$url = t8_legal_page_url(2, ['search' => 'employee complaint', 'status' => 'open', 'page' => 1]);
+$url = t8_legal_page_url(2, ['search' => 'employee complaint', 'status' => 'open']);
+$assert(str_contains($url, 'page=legal'), 'Pagination URL should preserve the legal route.');
 $assert(str_contains($url, 'search=employee+complaint'), 'Pagination URL should preserve search.');
 $assert(str_contains($url, 'status=open'), 'Pagination URL should preserve status.');
-$assert(str_contains($url, 'page=2'), 'Existing page value must not override the requested page.');
+$assert(str_contains($url, 'legal_page=2'), 'Pagination URL should set the requested legal page.');
 
 ob_start();
 t8_legal_pagination(1, 2, ['search' => 'employee']);

@@ -15,7 +15,7 @@
 | Visitor Management | `team8_visitors` |
 | Document Management | `team8_document_categories`, `team8_documents`, `team8_document_versions` |
 | Records Retention and Compliance | `team8_retention_schedules`, `team8_records`, `team8_compliance_checks` |
-| Legal Management | `team8_legal_case_types`, `team8_legal_case_statuses`, `team8_legal_party_types`, `team8_legal_cases`, `team8_legal_case_parties`, `team8_legal_case_tasks`, `team8_legal_case_hearings`, `team8_legal_case_notes`, `team8_legal_documents`, `team8_legal_case_resolutions`, `team8_legal_case_communications` |
+| Legal Management | `team8_legal_case_types`, `team8_legal_case_statuses`, `team8_legal_party_types`, `team8_legal_cases`, `team8_legal_case_parties`, `team8_legal_case_tasks`, `team8_legal_case_hearings`, `team8_legal_case_notes`, `team8_legal_documents`, `team8_legal_case_resolutions` |
 | Contract Management | `team8_contracts`, `team8_parties`, `team8_contract_parties`, `team8_contract_documents`, `team8_contract_history`, `team8_contract_obligations` |
 | HR Document Automation | `team8_incident_reports`, `team8_notice_to_explain`, `team8_explanations`, `team8_memorandums`, `team8_memorandum_recipients`, `team8_certificates`, `team8_certificate_recipients`, `team8_hr_document_versions` |
 
@@ -28,7 +28,6 @@
 - `team8_legal_case_tasks` stores task status as pending, in progress, completed, or cancelled. Overdue is computed from `due_date` for pending and in-progress tasks and is never stored.
 - `team8_legal_case_hearings` stores dated proceedings with optional time, venue, purpose, and notes; supported statuses are scheduled, completed, postponed, and cancelled.
 - `team8_legal_case_notes` stores append-only internal notes with their case, author, and database creation timestamp.
-- `team8_legal_case_communications` stores manual incoming/outgoing records; an optional attachment references a legal-document link already belonging to that case.
 - `team8_legal_case_resolutions` stores one resolution per case and may reference a legal-document link supporting the outcome.
 - `team8_legal_documents` links cases to shared `team8_documents` records and stores a legal-specific document type and note; removing a link never deletes the underlying document or versions.
 - Legal cases use the `archived` status for module archiving; `archived_from_status` preserves the prior status for restore. Retention-record archival remains separate.
@@ -44,7 +43,8 @@
 - Existing databases must apply `2026_09_26_legal_case_hearings.sql` to add hearing and proceeding storage; do not run it after importing `schema.sql`.
 - Existing databases must apply `2026_09_26_legal_case_documents.sql` to add the legal-specific document type; legacy links default to `Other`.
 - Existing databases must apply `2026_09_26_legal_case_notes.sql` to add append-only legal case notes.
-- Existing databases must apply `2026_09_26_legal_case_communications.sql` after the legal-document type migration to add communication records.
+- `2026_09_26_legal_case_communications.sql` is retained as historical migration history and must not be applied to current databases.
+- Before retiring an existing communications table, back up or export its records, then apply `2026_09_27_retire_legal_case_communications.sql`. This permanently drops the table and its records; do not run it against production until the backup/export is verified.
 - Existing databases must apply `2026_09_26_legal_case_resolutions.sql` after the legal-document type migration to add the resolution workflow.
 
 ## Setup

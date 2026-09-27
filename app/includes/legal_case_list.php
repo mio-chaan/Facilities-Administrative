@@ -9,7 +9,7 @@ function t8_legal_page_number($value): int
 
 function t8_legal_page_url(int $page, array $filters): string
 {
-    return page_url('legal', array_filter(array_merge($filters, ['page' => $page]), static fn ($value): bool => $value !== '' && $value !== null));
+    return page_url('legal', array_filter(array_merge($filters, ['legal_page' => $page]), static fn ($value): bool => $value !== '' && $value !== null));
 }
 
 function t8_legal_pagination(int $page, int $totalPages, array $filters): void

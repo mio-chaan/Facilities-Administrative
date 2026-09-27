@@ -164,15 +164,6 @@ function t8_legal_has_resolution_schema(PDO $pdo): bool
     }
 }
 
-function t8_legal_has_communication_schema(PDO $pdo): bool
-{
-    try {
-        return (bool) $pdo->query("SHOW TABLES LIKE 'team8_legal_case_communications'")->fetch(PDO::FETCH_ASSOC);
-    } catch (Throwable $e) {
-        return false;
-    }
-}
-
 $legalHasCaseMetadata = t8_legal_has_case_metadata($pdo);
 $legalHasClosedAt = t8_legal_has_closed_at($pdo);
 $legalHasPriority = t8_legal_has_priority($pdo);
@@ -183,10 +174,8 @@ $legalHasTaskSchema = t8_legal_has_task_schema($pdo);
 $legalHasHearingSchema = t8_legal_has_hearing_schema($pdo);
 $legalHasDocumentType = t8_legal_has_document_type($pdo);
 $legalHasNotesSchema = t8_legal_has_notes_schema($pdo);
-$legalHasCommunicationSchema = t8_legal_has_communication_schema($pdo);
 $legalHasResolutionSchema = t8_legal_has_resolution_schema($pdo);
 $legalDocumentTypes = t8_legal_document_types();
-$legalCommunicationTypes = t8_legal_communication_types();
 $legalResolutionTypes = t8_legal_resolution_types();
 $legalPriorities = ['low', 'medium', 'high', 'urgent'];
 $legalStatuses = $pdo->query(
@@ -287,6 +276,10 @@ $legalOfficers = $pdo->query(
      ORDER BY u.full_name"
 )->fetchAll(PDO::FETCH_ASSOC);
 $departments = $legalHasCaseMetadata ? $pdo->query('SELECT id, name FROM departments ORDER BY name')->fetchAll(PDO::FETCH_ASSOC) : [];
+
+if ($action === 'communications') {
+    redirect(page_url('legal', ['action' => 'view', 'id' => (int) ($_GET['id'] ?? 0)]));
+}
 
 switch ($action) {
     case 'dashboard':
@@ -1368,159 +1361,6 @@ switch ($action) {
         $caseNotes = $notesStmt->fetchAll(PDO::FETCH_ASSOC);
         break;
 
-    case 'communications':
-        $caseId = (int) ($_GET['id'] ?? 0);
-        $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
-        if (!$case) {
-            t8_flash_set('danger', 'Legal case not found.');
-            redirect(page_url('legal'));
-        }
-        $communications = [];
-        $communicationInput = [
-            'date' => '',
-            'time' => '',
-            'type' => '',
-            'direction' => 'incoming',
-            'sender' => '',
-            'recipient' => '',
-            'subject' => '',
-            'summary' => '',
-            'attachment_legal_document_id' => '',
-        ];
-        $caseLegalDocuments = [];
-        if (!$legalHasCommunicationSchema) {
-            $errors[] = 'Apply database/migrations/2026_09_26_legal_case_communications.sql before managing communications.';
-            break;
-        }
-
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            t8_require_role(['admin', 'legal_officer']);
-            $communicationInput = [
-                'date' => trim((string) ($_POST['communication_date'] ?? '')),
-                'time' => trim((string) ($_POST['communication_time'] ?? '')),
-                'type' => (string) ($_POST['communication_type'] ?? ''),
-                'direction' => (string) ($_POST['direction'] ?? ''),
-                'sender' => trim((string) ($_POST['sender'] ?? '')),
-                'recipient' => trim((string) ($_POST['recipient'] ?? '')),
-                'subject' => trim((string) ($_POST['subject'] ?? '')),
-                'summary' => trim((string) ($_POST['summary'] ?? '')),
-                'attachment_legal_document_id' => (string) ($_POST['attachment_legal_document_id'] ?? ''),
-            ];
-            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
-                $errors[] = 'Your session expired. Please try again.';
-            } elseif ($case['status'] === 'archived') {
-                $errors[] = 'Archived cases cannot be changed.';
-            } else {
-                if (!t8_legal_is_valid_iso_date($communicationInput['date'])) {
-                    $errors[] = 'Enter a valid communication date.';
-                }
-                if ($communicationInput['time'] !== '' && !t8_legal_is_valid_iso_time($communicationInput['time'])) {
-                    $errors[] = 'Enter a valid communication time.';
-                }
-                if (!in_array($communicationInput['type'], $legalCommunicationTypes, true)) {
-                    $errors[] = 'Select a valid communication type.';
-                }
-                if (!in_array($communicationInput['direction'], ['incoming', 'outgoing'], true)) {
-                    $errors[] = 'Select Incoming or Outgoing direction.';
-                }
-                foreach (['sender' => 200, 'recipient' => 200, 'subject' => 200, 'summary' => 5000] as $field => $maxLength) {
-                    if (($field === 'summary' && $communicationInput[$field] === '') || mb_strlen($communicationInput[$field]) > $maxLength) {
-                        $errors[] = ucwords(str_replace('_', ' ', $field)) . ' is required and must be ' . $maxLength . ' characters or fewer.';
-                    }
-                }
-
-                $attachmentId = null;
-                if ($communicationInput['attachment_legal_document_id'] !== '') {
-                    $attachmentId = filter_var($communicationInput['attachment_legal_document_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-                    if ($attachmentId === false) {
-                        $errors[] = 'Select a valid attached legal document.';
-                    } else {
-                        $attachmentStmt = $pdo->prepare(
-                            'SELECT id FROM team8_legal_documents WHERE id = :id AND case_id = :case_id'
-                        );
-                        $attachmentStmt->execute(['id' => $attachmentId, 'case_id' => $caseId]);
-                        if ($attachmentStmt->fetchColumn() === false) {
-                            $errors[] = 'The selected document is not attached to this case.';
-                        }
-                    }
-                }
-
-                if (!$errors) {
-                    $communicationTime = $communicationInput['time'] === ''
-                        ? null
-                        : (strlen($communicationInput['time']) === 5 ? $communicationInput['time'] . ':00' : $communicationInput['time']);
-                    $insertCommunication = $pdo->prepare(
-                        'INSERT INTO team8_legal_case_communications
-                            (case_id, communication_date, communication_time, communication_type, direction, sender, recipient, subject, summary, attachment_legal_document_id, recorded_by)
-                         VALUES (:case_id, :communication_date, :communication_time, :communication_type, :direction, :sender, :recipient, :subject, :summary, :attachment_legal_document_id, :recorded_by)'
-                    );
-                    try {
-                        $pdo->beginTransaction();
-                        $insertCommunication->execute([
-                            'case_id' => $caseId,
-                            'communication_date' => $communicationInput['date'],
-                            'communication_time' => $communicationTime,
-                            'communication_type' => $communicationInput['type'],
-                            'direction' => $communicationInput['direction'],
-                            'sender' => $communicationInput['sender'] !== '' ? $communicationInput['sender'] : null,
-                            'recipient' => $communicationInput['recipient'] !== '' ? $communicationInput['recipient'] : null,
-                            'subject' => $communicationInput['subject'] !== '' ? $communicationInput['subject'] : null,
-                            'summary' => $communicationInput['summary'],
-                            'attachment_legal_document_id' => $attachmentId,
-                            'recorded_by' => $currentUserId,
-                        ]);
-                        t8_audit_log(
-                            $pdo,
-                            $currentUserId,
-                            'legal_case',
-                            $caseId,
-                            'record_communication',
-                            null,
-                            json_encode([
-                                'date' => $communicationInput['date'],
-                                'type' => $communicationInput['type'],
-                                'direction' => $communicationInput['direction'],
-                                'attachment_legal_document_id' => $attachmentId,
-                            ], JSON_THROW_ON_ERROR),
-                            true
-                        );
-                        $pdo->commit();
-                        t8_flash_set('success', 'Communication recorded.');
-                        redirect(page_url('legal', ['action' => 'communications', 'id' => $caseId]));
-                    } catch (Throwable $e) {
-                        if ($pdo->inTransaction()) {
-                            $pdo->rollBack();
-                        }
-                        $errors[] = 'The communication could not be recorded.';
-                    }
-                }
-            }
-        }
-
-        $caseLegalDocumentsStmt = $pdo->prepare(
-            'SELECT ld.id, d.title
-             FROM team8_legal_documents ld
-             JOIN team8_documents d ON d.id = ld.document_id
-             WHERE ld.case_id = :case_id AND d.deleted_at IS NULL
-             ORDER BY d.title'
-        );
-        $caseLegalDocumentsStmt->execute(['case_id' => $caseId]);
-        $caseLegalDocuments = $caseLegalDocumentsStmt->fetchAll(PDO::FETCH_ASSOC);
-        $communicationsStmt = $pdo->prepare(
-            'SELECT c.*, u.full_name AS recorder_name, ld.document_id AS attachment_document_id,
-                    d.title AS attachment_title, v.id AS attachment_version_id
-             FROM team8_legal_case_communications c
-             JOIN users u ON u.id = c.recorded_by
-             LEFT JOIN team8_legal_documents ld ON ld.id = c.attachment_legal_document_id
-             LEFT JOIN team8_documents d ON d.id = ld.document_id
-             LEFT JOIN team8_document_versions v ON v.document_id = d.id AND v.version_no = d.current_version
-             WHERE c.case_id = :case_id
-             ORDER BY c.communication_date DESC, c.communication_time DESC, c.id DESC'
-        );
-        $communicationsStmt->execute(['case_id' => $caseId]);
-        $communications = $communicationsStmt->fetchAll(PDO::FETCH_ASSOC);
-        break;
-
     case 'timeline':
         $caseId = (int) ($_GET['id'] ?? 0);
         $case = $caseId ? t8_legal_case_fetch($pdo, $caseId) : null;
@@ -1981,8 +1821,12 @@ switch ($action) {
             } elseif (mb_strlen($description) > 500) {
                 $errors[] = 'Document note must be 500 characters or fewer.';
             } else {
-                $documentStmt = $pdo->prepare('SELECT id FROM team8_documents WHERE id = :id AND deleted_at IS NULL');
-                $documentStmt->execute(['id' => $documentId]);
+                $documentStmt = $pdo->prepare(
+                    'SELECT d.id FROM team8_documents d
+                     JOIN team8_document_categories c ON c.id = d.category_id AND c.name = :category_name
+                     WHERE d.id = :id AND d.deleted_at IS NULL'
+                );
+                $documentStmt->execute(['id' => $documentId, 'category_name' => 'Legal']);
                 $alreadyAttached = $pdo->prepare('SELECT id FROM team8_legal_documents WHERE case_id = :case_id AND document_id = :document_id');
                 $alreadyAttached->execute(['case_id' => $caseId, 'document_id' => $documentId]);
                 if ($documentStmt->fetchColumn() === false) {
@@ -2029,15 +1873,17 @@ switch ($action) {
             'SELECT ld.*, d.title AS document_title, v.id AS version_id
              FROM team8_legal_documents ld
              JOIN team8_documents d ON d.id = ld.document_id
+               JOIN team8_document_categories c ON c.id = d.category_id AND c.name = :category_name
              JOIN team8_document_versions v ON v.document_id = d.id AND v.version_no = d.current_version
              WHERE ld.case_id = :case_id
              ORDER BY ld.created_at DESC'
         );
-        $attachedDocs->execute(['case_id' => $caseId]);
+           $attachedDocs->execute(['case_id' => $caseId, 'category_name' => 'Legal']);
         $attachedDocs = $attachedDocs->fetchAll(PDO::FETCH_ASSOC);
 
         $availableDocs = $pdo->prepare(
             'SELECT d.id, d.title FROM team8_documents d
+             JOIN team8_document_categories c ON c.id = d.category_id AND c.name = :category_name
              WHERE d.deleted_at IS NULL
                AND NOT EXISTS (
                    SELECT 1 FROM team8_legal_documents ld
@@ -2045,7 +1891,7 @@ switch ($action) {
                )
              ORDER BY d.title'
         );
-        $availableDocs->execute(['case_id' => $caseId]);
+        $availableDocs->execute(['case_id' => $caseId, 'category_name' => 'Legal']);
         $availableDocs = $availableDocs->fetchAll(PDO::FETCH_ASSOC);
         break;
 
@@ -2077,33 +1923,20 @@ switch ($action) {
                     $pdo->rollBack();
                     t8_flash_set('danger', 'Document link not found.');
                 } else {
-                    $communicationReference = false;
-                    if ($legalHasCommunicationSchema) {
-                        $communicationStmt = $pdo->prepare(
-                            'SELECT id FROM team8_legal_case_communications WHERE attachment_legal_document_id = :link_id LIMIT 1'
-                        );
-                        $communicationStmt->execute(['link_id' => $linkId]);
-                        $communicationReference = $communicationStmt->fetchColumn() !== false;
-                    }
-                    if ($communicationReference) {
-                        $pdo->rollBack();
-                        t8_flash_set('danger', 'This document is referenced by a recorded communication and cannot be unlinked.');
-                    } else {
-                        $pdo->prepare('DELETE FROM team8_legal_documents WHERE id = :id AND case_id = :case_id')
-                            ->execute(['id' => $linkId, 'case_id' => $caseId]);
-                        t8_audit_log(
-                            $pdo,
-                            $currentUserId,
-                            'legal_case',
-                            $caseId,
-                            'detach_document',
-                            json_encode(['link_id' => $linkId, 'document_id' => (int) $documentLink['document_id'], 'type' => $documentLink['legal_document_type']], JSON_THROW_ON_ERROR),
-                            null,
-                            true
-                        );
-                        $pdo->commit();
-                        t8_flash_set('success', 'Document removed from case.');
-                    }
+                    $pdo->prepare('DELETE FROM team8_legal_documents WHERE id = :id AND case_id = :case_id')
+                        ->execute(['id' => $linkId, 'case_id' => $caseId]);
+                    t8_audit_log(
+                        $pdo,
+                        $currentUserId,
+                        'legal_case',
+                        $caseId,
+                        'detach_document',
+                        json_encode(['link_id' => $linkId, 'document_id' => (int) $documentLink['document_id'], 'type' => $documentLink['legal_document_type']], JSON_THROW_ON_ERROR),
+                        null,
+                        true
+                    );
+                    $pdo->commit();
+                    t8_flash_set('success', 'Document unlinked from case.');
                 }
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
@@ -2208,7 +2041,6 @@ $showDashboard = in_array($action, ['dashboard', 'list'], true);
 $showDetails = $action === 'view';
 $showResolution = $action === 'resolution';
 $showTimeline = $action === 'timeline';
-$showCommunications = $action === 'communications';
 $showNotes = $action === 'notes';
 $showHearings = $action === 'hearings';
 $showTasks = $action === 'tasks';
@@ -2216,8 +2048,8 @@ $showParties = $action === 'parties';
 $showDocuments = $action === 'documents';
 $showRetention = $action === 'retention';
 $showCaseTypes = $action === 'case_types';
-$showCaseWorkspace = in_array($action, ['view', 'documents', 'tasks', 'parties', 'notes', 'hearings', 'communications', 'resolution'], true);
-$showList = !$showForm && !$showDetails && !$showResolution && !$showTimeline && !$showCommunications && !$showNotes && !$showHearings && !$showTasks && !$showParties && !$showDocuments && !$showRetention && !$showCaseTypes;
+$showCaseWorkspace = in_array($action, ['view', 'documents', 'tasks', 'parties', 'notes', 'hearings', 'resolution'], true);
+$showList = !$showForm && !$showDetails && !$showResolution && !$showTimeline && !$showNotes && !$showHearings && !$showTasks && !$showParties && !$showDocuments && !$showRetention && !$showCaseTypes;
 
 $currentCaseType = null;
 $formStatusOptions = [];
@@ -2271,7 +2103,7 @@ if ($showList) {
     $deadlineFrom = trim((string) ($_GET['deadline_from'] ?? ''));
     $deadlineTo = trim((string) ($_GET['deadline_to'] ?? ''));
     $operationalFilter = (string) ($_GET['operational'] ?? '');
-    $page = t8_legal_page_number($_GET['page'] ?? 1);
+    $page = t8_legal_page_number($_GET['legal_page'] ?? 1);
     $pageSize = 5;
     $where = [$archivedFilter ? "lc.status = 'archived'" : "lc.status <> 'archived'"];
     $params = [];
@@ -2559,7 +2391,6 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
                 <a href="<?= e(page_url('legal', ['action' => $tabAction, 'id' => $caseId])) ?>" <?= $isActiveTab ? 'class="is-active" aria-current="page"' : '' ?>><?= e($tabLabel) ?></a>
             <?php endforeach; ?>
             <?php if ($legalHasHearingSchema): ?><a href="<?= e(page_url('legal', ['action' => 'hearings', 'id' => $caseId])) ?>" <?= $action === 'hearings' ? 'class="is-active" aria-current="page"' : '' ?>>Hearings</a><?php endif; ?>
-            <?php if ($legalHasCommunicationSchema): ?><a href="<?= e(page_url('legal', ['action' => 'communications', 'id' => $caseId])) ?>" <?= $action === 'communications' ? 'class="is-active" aria-current="page"' : '' ?>>Communication</a><?php endif; ?>
             <?php if ($legalHasResolutionSchema): ?><a href="<?= e(page_url('legal', ['action' => 'resolution', 'id' => $caseId])) ?>" <?= $action === 'resolution' ? 'class="is-active" aria-current="page"' : '' ?>>Resolution</a><?php endif; ?>
         </nav>
 
@@ -2994,59 +2825,6 @@ function t8_legal_render_menu(array $c, bool $isAdmin, bool $archivedFilter, boo
             </div>
         <?php endif; ?>
     </div>
-
-<?php elseif ($showCommunications): ?>
-
-    <div class="t8-card">
-        <div class="t8-card-header"><h2 class="t8-card-title">Communications &mdash; <?= e((string) $case['title']) ?></h2></div>
-        <?php if (!$legalHasCommunicationSchema): ?>
-            <div class="t8-alert t8-alert-danger">Apply the legal case communications migration before recording communications.</div>
-        <?php else: ?>
-            <?php if ($communications === []): ?>
-                <div class="t8-empty">No communications have been recorded for this case.</div>
-            <?php else: ?>
-                <div class="t8-table-wrap">
-                    <table class="t8-table">
-                        <thead><tr><th>Date</th><th>Type / Direction</th><th>Sender / Recipient</th><th>Subject / Summary</th><th>Attachment</th><th>Recorded By</th></tr></thead>
-                        <tbody>
-                            <?php foreach ($communications as $communication): ?>
-                                <tr>
-                                    <td><?= e(format_date((string) $communication['communication_date'], 'M d, Y')) ?><?= !empty($communication['communication_time']) ? '<br>' . e(date('g:i A', strtotime((string) $communication['communication_time']))) : '' ?></td>
-                                    <td><?= e((string) $communication['communication_type']) ?><br><?= e(ucfirst((string) $communication['direction'])) ?></td>
-                                    <td><?= e((string) ($communication['sender'] ?: '—')) ?><br><?= e((string) ($communication['recipient'] ?: '—')) ?></td>
-                                    <td><strong><?= e((string) ($communication['subject'] ?: '—')) ?></strong><br><?= nl2br(e((string) $communication['summary'])) ?></td>
-                                    <td><?php if (!empty($communication['attachment_version_id'])): ?><a href="<?= e(page_url('documents', ['action' => 'download', 'version_id' => $communication['attachment_version_id']])) ?>"><i class="fa-solid fa-download"></i> <?= e((string) $communication['attachment_title']) ?></a><?php else: ?>—<?php endif; ?></td>
-                                    <td><?= e($communication['recorder_name']) ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endif; ?>
-
-            <?php if ($case['status'] !== 'archived'): ?>
-                <section style="padding: var(--t8-space-4);">
-                    <h3>Record Communication</h3>
-                    <form method="post" action="<?= e(page_url('legal', ['action' => 'communications', 'id' => $caseId])) ?>" class="t8-legal-form-grid">
-                        <?= t8_csrf_field() ?>
-                        <div class="t8-field"><label class="t8-label" for="communication_date">Date</label><input class="t8-input" type="date" id="communication_date" name="communication_date" value="<?= e($communicationInput['date']) ?>" required></div>
-                        <div class="t8-field"><label class="t8-label" for="communication_time">Time</label><input class="t8-input" type="time" id="communication_time" name="communication_time" value="<?= e($communicationInput['time']) ?>"></div>
-                        <div class="t8-field"><label class="t8-label" for="communication_type">Communication Type</label><select class="t8-select" id="communication_type" name="communication_type" required><option value="">Select type</option><?php foreach ($legalCommunicationTypes as $type): ?><option value="<?= e($type) ?>" <?= $communicationInput['type'] === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></div>
-                        <div class="t8-field"><label class="t8-label" for="communication_direction">Direction</label><select class="t8-select" id="communication_direction" name="direction" required><option value="incoming" <?= $communicationInput['direction'] === 'incoming' ? 'selected' : '' ?>>Incoming</option><option value="outgoing" <?= $communicationInput['direction'] === 'outgoing' ? 'selected' : '' ?>>Outgoing</option></select></div>
-                        <div class="t8-field"><label class="t8-label" for="communication_sender">Sender</label><input class="t8-input" id="communication_sender" name="sender" maxlength="200" value="<?= e($communicationInput['sender']) ?>"></div>
-                        <div class="t8-field"><label class="t8-label" for="communication_recipient">Recipient</label><input class="t8-input" id="communication_recipient" name="recipient" maxlength="200" value="<?= e($communicationInput['recipient']) ?>"></div>
-                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="communication_subject">Subject</label><input class="t8-input" id="communication_subject" name="subject" maxlength="200" value="<?= e($communicationInput['subject']) ?>"></div>
-                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="communication_summary">Summary</label><textarea class="t8-input" id="communication_summary" name="summary" rows="4" maxlength="5000" required><?= e($communicationInput['summary']) ?></textarea></div>
-                        <div class="t8-field t8-form-span-2"><label class="t8-label" for="communication_attachment">Attached Legal Document</label><select class="t8-select" id="communication_attachment" name="attachment_legal_document_id"><option value="">None</option><?php foreach ($caseLegalDocuments as $legalDocument): ?><option value="<?= e((string) $legalDocument['id']) ?>" <?= $communicationInput['attachment_legal_document_id'] === (string) $legalDocument['id'] ? 'selected' : '' ?>><?= e($legalDocument['title']) ?></option><?php endforeach; ?></select></div>
-                        <div class="t8-form-actions"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-plus"></i> Record Communication</button></div>
-                    </form>
-                </section>
-            <?php else: ?>
-                <div class="t8-alert t8-alert-info">Archived cases are read-only.</div>
-            <?php endif; ?>
-        <?php endif; ?>
-    </div>
-    </section>
 
 <?php elseif ($showNotes): ?>
 

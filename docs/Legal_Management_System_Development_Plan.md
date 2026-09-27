@@ -514,7 +514,9 @@ Documents = formal stored records/files
 
 ---
 
-# 13. Phase 11 — Communications
+# 13. Phase 11 — Communications (Retired)
+
+This feature was retired on 2026-09-27. The following requirements and checklist are preserved as project history; new installations no longer include communications storage or UI.
 
 The system should be able to record important communications related to a case.
 

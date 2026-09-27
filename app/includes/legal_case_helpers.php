@@ -91,19 +91,6 @@ function t8_legal_document_types(): array
     ];
 }
 
-function t8_legal_communication_types(): array
-{
-    return [
-        'Email',
-        'Letter',
-        'Government Communication',
-        'Internal Communication',
-        'External Counsel Communication',
-        'Phone Call',
-        'Other',
-    ];
-}
-
 function t8_legal_resolution_types(): array
 {
     return [
@@ -136,7 +123,6 @@ function t8_legal_timeline_event_title(string $entityType, string $action): stri
             'attach_document' => 'Document attached',
             'detach_document' => 'Document detached',
             'add_note' => 'Internal note added',
-            'record_communication' => 'Communication recorded',
             'document_download' => 'Document downloaded',
             'retention_archived' => 'Retention record archived',
             'disposal_requested' => 'Disposal requested',
@@ -192,13 +178,6 @@ function t8_legal_timeline_event_detail(array $event): string
         return implode('; ', array_filter([
             isset($payload['event_date']) ? 'Date ' . (string) $payload['event_date'] : '',
             isset($payload['hearing_type']) ? (string) $payload['hearing_type'] : '',
-        ]));
-    }
-    if ($entityType === 'legal_case' && $action === 'record_communication' && is_array($payload)) {
-        return implode('; ', array_filter([
-            isset($payload['date']) ? 'Date ' . (string) $payload['date'] : '',
-            isset($payload['type']) ? (string) $payload['type'] : '',
-            isset($payload['direction']) ? ucfirst((string) $payload['direction']) : '',
         ]));
     }
     if ($action === 'resolution_recorded') {
