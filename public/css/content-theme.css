@@ -1,0 +1,30 @@
+.t8-main {
+    background-color: #fbf1e3;
+    background-image:
+        radial-gradient(ellipse 48px 16px at 0 50%, transparent 62%, rgba(172,126,44,.13) 65% 69%, transparent 72%),
+        radial-gradient(ellipse 48px 16px at 48px 50%, transparent 62%, rgba(172,126,44,.12) 65% 69%, transparent 72%);
+    background-position: 0 0, 48px 28px;
+    background-size: 96px 56px;
+    background-repeat: repeat;
+}
+
+.t8-main .t8-card:not(:hover),
+.t8-main .t8-facility-card:not(:hover),
+.t8-main .t8-docs-kpi:not(:hover),
+.t8-main .t8-retention-kpi:not(:hover) {
+    background-color: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+
+.t8-main .t8-table-wrap {
+    background-color: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+
+.t8-main .t8-table { background-color: #fff; }
+
+.t8-main .t8-input,
+.t8-main .t8-select,
+.t8-main .t8-textarea {
+    background-color: #fff;
+}

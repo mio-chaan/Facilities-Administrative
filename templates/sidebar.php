@@ -1,0 +1,83 @@
+<?php
+/**
+ * templates/sidebar.php
+ *
+ * Dark maroon sidebar with the RAM-YUM logo and route-based navigation.
+ * Icons are a local display mapping for each route and do not affect
+ * the route configuration itself.
+ */
+declare(strict_types=1);
+
+$t8Routes = require __DIR__ . '/../app/config/routes.php';
+$active   = current_page() === 'compliance_reports_all' ? 'retention' : current_page();
+$t8CurrentRole = function_exists('t8_current_role') ? t8_current_role() : null;
+$t8LegalOfficerHiddenPages = ['retention', 'legal', 'contracts'];
+
+$t8NavIcons = [
+    'dashboard'   => 'fa-gauge-high',
+    'reservation' => 'fa-calendar-check',
+    'facilities'  => 'fa-building',
+    'visitor'     => 'fa-id-card-clip',
+    'documents'   => 'fa-file-lines',
+    'retention'   => 'fa-box-archive',
+    'legal'       => 'fa-scale-balanced',
+    'contracts'   => 'fa-file-contract',
+    'audit'       => 'fa-clipboard-list',
+];
+
+$t8NavGroups = [
+    'Operations' => ['reservation', 'facilities', 'visitor'],
+    'Document & Records Management' => ['documents', 'contracts', 'legal', 'audit', 'retention'],
+];
+
+$t8RenderNavItem = static function (string $key) use ($t8Routes, $t8NavIcons, $active, $t8CurrentRole, $t8LegalOfficerHiddenPages): void {
+    if (!isset($t8Routes[$key])) {
+        return;
+    }
+
+    $route = $t8Routes[$key];
+    if (!empty($route['roles']) && !t8_has_role($route['roles'])) {
+        return;
+    }
+    if (!empty($route['hidden'])) {
+        return;
+    }
+    if ($t8CurrentRole === 'legal_officer' && in_array($key, $t8LegalOfficerHiddenPages, true)) {
+        return;
+    }
+    ?>
+    <a href="<?= e(page_url($key)) ?>"
+            class="t8-sidebar-link<?= $active === $key ? ' t8-sidebar-link-active' : '' ?>"
+            title="<?= e($route['label']) ?>"
+            aria-label="<?= e($route['label']) ?>">
+        <i class="fa-solid <?= e($t8NavIcons[$key] ?? 'fa-circle-dot') ?>"></i>
+        <span class="t8-sidebar-label"><?= e($route['label']) ?></span>
+    </a>
+    <?php
+};
+?>
+<aside class="t8-sidebar" id="t8Sidebar">
+    <div class="t8-sidebar-brand">
+        <img class="t8-sidebar-logo" src="<?= e(asset('img/ramyumlogo.jpg')) ?>" alt="<?= e(APP_NAME) ?> logo">
+        <div class="t8-sidebar-brand-text">
+            <div class="t8-sidebar-brand-name">RAM YUM</div>
+            <div class="t8-sidebar-brand-tag">Facilities &amp; Administration</div>
+        </div>
+    </div>
+
+    <nav class="t8-sidebar-nav">
+        <?php $t8RenderNavItem('dashboard'); ?>
+
+        <?php foreach ($t8NavGroups as $t8GroupLabel => $t8GroupKeys): ?>
+            <div class="t8-sidebar-section-title"><?= e($t8GroupLabel) ?></div>
+            <?php foreach ($t8GroupKeys as $t8GroupKey): ?>
+                <?php $t8RenderNavItem($t8GroupKey); ?>
+            <?php endforeach; ?>
+        <?php endforeach; ?>
+    </nav>
+
+    <button class="t8-sidebar-collapse-btn" id="t8SidebarCollapseToggle" type="button" aria-label="Expand sidebar">
+        <i class="fa-solid fa-angles-right"></i>
+        <span>Expand</span>
+    </button>
+</aside>

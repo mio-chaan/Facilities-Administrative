@@ -1,0 +1,182 @@
+/* =========================================================
+   row-menu.css
+   Shared row "meatball" action menu + View Details modal, used by
+   Contract Management, Visitor Management, and Legal Management.
+   This mirrors the pattern already in public/css/reservation.css
+   (.t8-res-menu-* / .t8-res-detail-*) for Facilities Reservation's
+   "All Reservations" table, generalized under a .t8-row- prefix so
+   every module that wants it can share one stylesheet + one JS
+   controller (public/js/row-menu.js) instead of re-implementing the
+   portal/positioning logic per page.
+   ========================================================= */
+
+.t8-row-menu { position: relative; display: inline-flex; }
+.t8-row-menu-trigger {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 1px solid var(--t8-border);
+    background: #fff;
+    color: var(--t8-text-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .95rem;
+    flex-shrink: 0;
+    transition: all .15s ease;
+}
+.t8-row-menu-trigger:hover,
+.t8-row-menu-trigger.is-active {
+    background: var(--t8-secondary);
+    color: var(--t8-primary);
+    border-color: var(--t8-primary);
+}
+.t8-row-menu-panel {
+    display: none;
+    min-width: 220px;
+    padding: 6px;
+    border: 1px solid var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    background: #fff;
+    box-shadow: var(--t8-shadow-lift);
+    flex-direction: column;
+}
+.t8-row-menu-panel.t8-portal-open {
+    display: flex;
+    position: fixed;
+    z-index: 1000;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity .12s ease, transform .12s ease;
+}
+.t8-row-menu-panel.t8-portal-open.t8-portal-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+.t8-row-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
+    border: none;
+    background: none;
+    border-radius: 6px;
+    font-size: .84rem;
+    font-family: inherit;
+    color: var(--t8-ink);
+    cursor: pointer;
+    text-align: left;
+    text-decoration: none;
+}
+.t8-row-menu-item i { width: 16px; text-align: center; color: var(--t8-text-muted); font-size: .85rem; }
+.t8-row-menu-item:hover { background: var(--t8-secondary); }
+.t8-row-menu-item.t8-danger { color: var(--t8-danger); }
+.t8-row-menu-item.t8-danger i { color: var(--t8-danger); }
+.t8-row-menu-item.t8-danger:hover { background: #fdeceb; }
+.t8-row-menu-item.t8-success { color: #2e7d32; }
+.t8-row-menu-item.t8-success i { color: #2e7d32; }
+.t8-row-menu-item.t8-success:hover { background: #eaf6ee; }
+.t8-row-menu-divider { height: 1px; background: var(--t8-border); margin: 6px 4px; }
+.t8-row-menu-panel form { margin: 0; }
+.t8-row-menu-panel form .t8-row-menu-item { width: 100%; }
+
+/* Row action cells that pair a quick primary button with the
+   meatball trigger (e.g. "Check In" + the menu). */
+.t8-row-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* ---- View Details modal (generic, filled via JS from a trigger's
+   data-* attributes - see public/js/row-menu.js) ---- */
+.t8-detail-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+    width: min(560px, calc(100% - 32px));
+    max-height: 88vh;
+    border: 0;
+    border-radius: var(--t8-radius);
+    padding: 0;
+    box-shadow: 0 24px 60px rgba(0,0,0,.28);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+.t8-detail-modal:not([open]) { display: none; }
+.t8-detail-modal::backdrop { background: rgba(36,17,17,.45); }
+.t8-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--t8-border);
+}
+.t8-detail-header h2 { margin: 0 0 4px; font-size: 1.02rem; color: var(--t8-ink); }
+.t8-detail-ref { font-family: var(--t8-font-data); font-size: .72rem; color: var(--t8-text-muted); }
+.t8-detail-close {
+    background: none;
+    border: none;
+    font-size: 1.3rem;
+    line-height: 1;
+    color: var(--t8-text-muted);
+    cursor: pointer;
+    padding: 4px;
+}
+.t8-detail-body { padding: 18px 22px; overflow-y: auto; }
+.t8-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 18px;
+    margin-bottom: 8px;
+}
+.t8-detail-item { display: flex; flex-direction: column; gap: 2px; }
+.t8-detail-item span {
+    font-size: .66rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--t8-text-muted);
+    font-weight: 700;
+}
+.t8-detail-item strong { font-size: .86rem; color: var(--t8-ink); font-weight: 600; }
+.t8-detail-item.full { grid-column: 1 / -1; }
+.t8-detail-section {
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--t8-primary);
+    font-weight: 700;
+    margin: 16px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.t8-detail-notes {
+    background: var(--t8-secondary);
+    border: 1px dashed var(--t8-border);
+    border-radius: var(--t8-radius-sm);
+    padding: 12px 14px;
+    font-size: .85rem;
+    color: var(--t8-text);
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
+.t8-detail-notes.is-empty { color: var(--t8-text-muted); font-style: italic; }
+.t8-detail-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 14px 22px;
+    border-top: 1px solid var(--t8-border);
+}
+@media (max-width: 480px) {
+    .t8-detail-grid { grid-template-columns: 1fr; }
+}

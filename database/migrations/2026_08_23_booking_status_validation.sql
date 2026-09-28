@@ -1,0 +1,6 @@
+-- Booking lifecycle statuses are VARCHAR columns in the shared schema, so no
+-- ALTER is necessary. This migration documents the values introduced by the
+-- booking-validation rules: expired visitor and reservation requests.
+--
+-- Existing rows are intentionally not mass-updated here. The application
+-- transitions them with an audit entry when it next evaluates the booking.
