@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-$footerPage = current_page();
+$page = $page ?? current_page();
 ?>
 <footer class="t8-footer">
     <p>&copy; <?= date('Y') ?> <?= e(APP_NAME) ?> — Team 8 (RAM YUM)</p>
@@ -9,32 +9,32 @@ $footerPage = current_page();
 <script src="<?= e(asset('js/app.js')) ?>"></script>
 <script src="<?= e(asset('js/global-search.js')) ?>"></script>
 <script src="<?= e(asset('js/context-bar.js')) ?>"></script>
-<?php if ($footerPage === 'dashboard'): ?>
+<?php if ($page === 'dashboard'): ?>
     <script src="<?= e(asset('js/dashboard.js')) ?>"></script>
 <?php endif; ?>
-<?php if ($footerPage === 'reservation' || $footerPage === 'contracts'): ?>
+<?php if ($page === 'reservation' || $page === 'contracts'): ?>
     <script src="<?= e(asset('js/validation.js')) ?>"></script>
 <?php endif; ?>
-<?php if ($footerPage === 'reservation'): ?>
+<?php if ($page === 'reservation'): ?>
     <script src="<?= e(asset('js/reservation.js')) ?>"></script>
 <?php endif; ?>
-<?php if ($footerPage === 'contracts'): ?>
+<?php if (in_array($page, ['contracts', 'party_registry'], true)): ?>
     <script src="<?= e(asset('js/contracts.js')) ?>"></script>
 <?php endif; ?>
-<?php if ($footerPage === 'facilities'): ?>
+<?php if ($page === 'facilities'): ?>
     <script src="<?= e(asset('js/facilities.js')) ?>"></script>
 <?php endif; ?>
-<?php if ($footerPage === 'visitor'): ?>
+<?php if ($page === 'visitor'): ?>
     <script src="<?= e(asset('js/visitor.js')) ?>"></script>
 <?php endif; ?>
-<?php if ($footerPage === 'documents'): ?>
+<?php if ($page === 'documents'): ?>
     <script src="<?= e(asset('js/documents.js')) ?>"></script>
     <script src="<?= e(asset('js/row-menu.js')) ?>"></script>
 <?php endif; ?>
-<?php if ($footerPage === 'retention'): ?>
+<?php if ($page === 'retention'): ?>
     <script src="<?= e(asset('js/retention.js')) ?>"></script>
 <?php endif; ?>
-<?php if (in_array($footerPage, ['contracts', 'visitor', 'legal'], true)): ?>
+<?php if (in_array($page, ['contracts', 'visitor', 'legal'], true)): ?>
     <!-- Shared meatball-menu / View Details controller - see
          public/js/row-menu.js. Loaded after visitor.js on the visitor
          page so it can take over the Scheduled Visits row menu too. -->

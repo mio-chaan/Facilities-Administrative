@@ -17,7 +17,7 @@ $page      = $page ?? current_page();
 
     <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>">
     <link rel="stylesheet" href="<?= e(asset('css/components.css')) ?>">
-    <?php if (in_array($page, ['dashboard', 'legal'], true)): ?>
+    <?php if ($page === 'dashboard'): ?>
         <link rel="stylesheet" href="<?= e(asset('css/dashboard.css')) ?>">
         <!-- REDESIGN: Chart.js powers the Monthly Reservation Trend card
              (see modules/dashboard/index.php + public/js/dashboard.js).
@@ -47,13 +47,10 @@ $page      = $page ?? current_page();
         <link rel="stylesheet" href="<?= e(asset('css/documents.css')) ?>">
         <link rel="stylesheet" href="<?= e(asset('css/row-menu.css')) ?>">
     <?php endif; ?>
-    <?php if ($page === 'retention'): ?>
+    <?php if (in_array($page, ['retention', 'compliance_reports_all'], true)): ?>
         <link rel="stylesheet" href="<?= e(asset('css/retention.css')) ?>">
     <?php endif; ?>
-    <?php if ($page === 'legal'): ?>
-        <link rel="stylesheet" href="<?= e(asset('css/legal.css')) ?>">
-    <?php endif; ?>
-    <?php if ($page === 'legal' || $page === 'contracts'): ?>
+    <?php if (in_array($page, ['legal', 'contracts', 'party_registry'], true)): ?>
         <link rel="stylesheet" href="<?= e(asset('css/contract-lifecycle.css')) ?>">
     <?php endif; ?>
     <?php if (in_array($page, ['contracts', 'visitor', 'legal'], true)): ?>
@@ -65,6 +62,7 @@ $page      = $page ?? current_page();
              "All Reservations" table). -->
         <link rel="stylesheet" href="<?= e(asset('css/row-menu.css')) ?>">
     <?php endif; ?>
+    <link rel="stylesheet" href="<?= e(asset('css/content-theme.css')) ?>">
 </head>
 <body>
 <?php $flashes = t8_flash_get(); ?>

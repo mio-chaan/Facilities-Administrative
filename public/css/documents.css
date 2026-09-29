@@ -31,13 +31,14 @@
 .t8-docs-hero-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .t8-docs-hero .t8-help-text { margin: 0; }
-.t8-docs-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.t8-docs-kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .t8-docs-kpi {
     display: flex;
     align-items: center;
     gap: 13px;
     min-width: 0;
-    min-height: 92px;
+    min-height: 90px;
+    height: 90px;
     padding: 16px;
     background: var(--t8-surface);
     border: 1px solid var(--t8-border);
@@ -144,12 +145,22 @@
     display: grid;
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
     gap: var(--t8-space-4);
-    align-items: start;
+    align-items: stretch;
 }
 .t8-docs-stack {
     display: flex;
     flex-direction: column;
     gap: var(--t8-space-4);
+}
+.t8-docs-layout > .t8-card {
+    min-height: 235px;
+    height: 100%;
+}
+.t8-docs-stack > .t8-card {
+    min-height: 235px;
+}
+.t8-docs-layout > .t8-card:last-child {
+    min-height: 420px;
 }
 .t8-docs-grid-2 {
     display: grid;
@@ -222,11 +233,6 @@
 .t8-docs-recent-body a { font-weight: 600; color: var(--t8-ink); }
 .t8-docs-recent-body a:hover { color: var(--t8-primary); }
 .t8-docs-recent-item .t8-badge { margin-left: auto; }
-.t8-docs-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 24px 12px; text-align: center; color: var(--t8-text-muted); }
-.t8-docs-empty i { margin-bottom: 4px; color: var(--t8-primary-light); font-size: 2rem; }
-.t8-docs-empty strong { color: var(--t8-ink); font-size: .95rem; }
-.t8-docs-empty .t8-btn { margin-top: 8px; }
-
 /* ---- Statistics / Pending Actions cards ---- */
 .t8-docs-stat-list { display: flex; flex-direction: column; }
 .t8-docs-stat {

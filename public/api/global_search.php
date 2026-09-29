@@ -34,8 +34,23 @@ $addResults = static function (array &$target, string $module, array $rows): voi
 
 $search = static function (string $sql, array $params = []) use ($pdo): array {
     try {
+        $expandedParams = [];
+        foreach ($params as $name => $value) {
+            $occurrence = 0;
+            $pattern = '/(?<!:):' . preg_quote((string) $name, '/') . '(?![a-zA-Z0-9_])/';
+            $sql = preg_replace_callback(
+                $pattern,
+                static function () use (&$expandedParams, &$occurrence, $name, $value): string {
+                    $occurrence++;
+                    $expandedName = (string) $name . '_' . $occurrence;
+                    $expandedParams[$expandedName] = $value;
+                    return ':' . $expandedName;
+                },
+                $sql
+            );
+        }
         $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
+        $stmt->execute($expandedParams);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         return [];
@@ -166,12 +181,12 @@ if (t8_has_role(['admin', 'legal_officer'])) {
     }
     $legalRows = $search(
         "SELECT lc.id, lc.title, CONCAT('Case #', lc.id, ' | ', lc.status, ' | ', COALESCE(lc.subject, '')) AS details
-         FROM team8_legal_cases lc WHERE lc.status <> 'archived' AND {$legalWhere}
+         FROM team8_legal_cases lc WHERE lc.deleted_at IS NULL AND {$legalWhere}
          ORDER BY lc.created_at DESC LIMIT 8",
         $legalParams
     );
     foreach ($legalRows as &$row) {
-        $row['url'] = page_url('legal', $isAdmin ? ['action' => 'edit', 'id' => $row['id']] : []);
+        $row['url'] = page_url('legal', t8_has_role('admin') ? ['action' => 'edit', 'id' => $row['id']] : []);
     }
     unset($row);
     $addResults($results, 'Legal Cases', $legalRows);

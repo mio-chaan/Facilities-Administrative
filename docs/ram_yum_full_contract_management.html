@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>RAM YUM — Contract Management</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif']},colors:{brand:{50:'#fdf3f4',100:'#fbe5e7',200:'#f5cbd0',500:'#9e1c28',600:'#7a151f',700:'#5c1017',800:'#3f0a10'},surface:'#f8fafc'}}}}
+</script>
+<style>
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:5px}
+.view{display:none}.view.active{display:block}
+.modal{display:none}.modal.active{display:flex}
+.drawer{transform:translateX(100%);transition:.25s}.drawer.open{transform:translateX(0)}
+.tab.active{color:#9e1c28;border-bottom:2px solid #9e1c28}
+.toast{display:none}.toast.show{display:block}
+</style>
+</head>
+<body class="bg-surface text-slate-800 font-sans min-h-screen">
+
+<!-- SIDEBAR -->
+<aside class="fixed left-0 top-0 bottom-0 w-64 bg-brand-800 text-white hidden lg:flex flex-col z-40">
+ <div class="h-16 flex items-center px-6 border-b border-white/10">
+  <div class="w-8 h-8 rounded-full bg-white text-brand-800 flex items-center justify-center font-bold mr-3">R</div>
+  <div><div class="font-bold">RAM YUM</div><div class="text-[10px] text-brand-100/70 uppercase tracking-wider">Facilities & Admin</div></div>
+ </div>
+ <nav class="p-4 space-y-1 text-sm">
+  <a class="block px-3 py-2.5 rounded-lg text-brand-100/80 hover:bg-white/5" href="#">▦ &nbsp; Dashboard</a>
+  <div class="pt-4 pb-1 px-3 text-[10px] uppercase font-bold text-brand-100/50">Document & Records</div>
+  <a class="block px-3 py-2.5 rounded-lg text-brand-100/80 hover:bg-white/5" href="#">▤ &nbsp; Document Management</a>
+  <button onclick="showView('contracts')" class="w-full text-left px-3 py-2.5 rounded-lg bg-white/10 text-white font-medium">▧ &nbsp; Contract Management</button>
+  <button onclick="showView('parties')" class="w-full text-left px-3 py-2.5 rounded-lg text-brand-100/80 hover:bg-white/5">♙ &nbsp; Parties</button>
+ </nav>
+ <div class="mt-auto p-4 border-t border-white/10">
+  <div class="flex gap-3 items-center"><div class="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center text-xs font-bold">DT</div><div><div class="text-sm">Dev Tester</div><div class="text-xs text-brand-100/60">Administrator</div></div></div>
+ </div>
+</aside>
+
+<main class="lg:ml-64 min-h-screen">
+<header class="h-16 bg-white border-b border-slate-200 px-6 lg:px-8 flex items-center justify-between sticky top-0 z-30">
+ <div><h1 id="pageTitle" class="text-xl font-bold text-slate-900">Contract Management</h1><p id="pageSub" class="text-xs text-slate-500">Manage contracts throughout their lifecycle.</p></div>
+ <div class="flex gap-2">
+  <button onclick="showView('parties')" class="hidden md:block px-3 py-2 text-sm border border-slate-300 rounded-lg">Parties</button>
+  <button onclick="showView('create')" class="px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-lg text-sm font-medium">+ New Contract</button>
+ </div>
+</header>
+
+<!-- CONTRACT REGISTRY -->
+<section id="contracts" class="view active p-6 lg:p-8 max-w-7xl mx-auto">
+ <div class="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
+  <div class="bg-white border rounded-xl p-4"><p class="text-xs text-slate-500">Total</p><b class="text-2xl">42</b></div>
+  <div class="bg-white border rounded-xl p-4"><p class="text-xs text-slate-500">Draft</p><b class="text-2xl">7</b></div>
+  <div class="bg-white border rounded-xl p-4"><p class="text-xs text-slate-500">For Review</p><b class="text-2xl">3</b></div>
+  <div class="bg-white border rounded-xl p-4"><p class="text-xs text-slate-500">For Approval</p><b class="text-2xl">2</b></div>
+  <div class="bg-white border rounded-xl p-4"><p class="text-xs text-slate-500">Active</p><b class="text-2xl">24</b></div>
+  <div class="bg-white border rounded-xl p-4"><p class="text-xs text-slate-500">Expiring Soon</p><b class="text-2xl text-amber-600">6</b></div>
+ </div>
+
+ <div class="bg-white border rounded-xl shadow-sm">
+  <div class="p-5 border-b flex flex-col lg:flex-row gap-3 lg:items-center">
+   <div class="flex-1 relative"><span class="absolute left-3 top-2.5 text-slate-400">⌕</span><input id="contractSearch" oninput="filterContracts()" class="w-full pl-9 px-3 py-2.5 border rounded-lg text-sm" placeholder="Search contract number, title, party..."></div>
+   <select id="statusFilter" onchange="filterContracts()" class="px-3 py-2.5 border rounded-lg text-sm"><option value="">All Status</option><option>Draft</option><option>For Review</option><option>For Approval</option><option>Active</option><option>Expired</option><option>Terminated</option><option>Archived</option></select>
+   <select class="px-3 py-2.5 border rounded-lg text-sm"><option>All Types</option><option>Service Agreement</option><option>Lease Agreement</option><option>Supply Agreement</option><option>NDA</option><option>Employment Contract</option></select>
+  </div>
+  <div class="overflow-x-auto">
+   <table class="w-full text-sm">
+    <thead class="bg-slate-50 text-xs uppercase text-slate-500"><tr><th class="text-left px-6 py-3">Contract</th><th class="text-left px-4 py-3">Party</th><th class="text-left px-4 py-3">Period</th><th class="text-left px-4 py-3">Officer</th><th class="text-left px-4 py-3">Status</th><th class="text-right px-6 py-3">Action</th></tr></thead>
+    <tbody id="contractRows" class="divide-y">
+     <tr data-text="CON-2026-00001 abc food supply corporation supply agreement" data-status="Active">
+      <td class="px-6 py-4"><button onclick="showView('details')" class="text-left"><b class="hover:text-brand-600">CON-2026-00001</b><p class="text-xs text-slate-500">Supply Agreement</p></button></td>
+      <td class="px-4 py-4">ABC Food Supply Corporation</td><td class="px-4 py-4">Jan 01, 2026 — Dec 31, 2026</td><td class="px-4">Dev Tester</td>
+      <td class="px-4"><span class="px-2 py-1 rounded bg-green-50 text-green-700 text-xs">Active</span></td><td class="px-6 text-right"><button onclick="showView('details')" class="text-brand-600 text-xs font-medium">View</button></td>
+     </tr>
+     <tr data-text="CON-2026-00008 nippon equipment trading lease agreement" data-status="Expiring Soon">
+      <td class="px-6 py-4"><button onclick="showView('details')" class="text-left"><b class="hover:text-brand-600">CON-2026-00008</b><p class="text-xs text-slate-500">Lease Agreement</p></button></td>
+      <td class="px-4">Nippon Equipment Trading Co.</td><td class="px-4">Oct 01, 2025 — Oct 01, 2026</td><td class="px-4">Dev Tester</td>
+      <td class="px-4"><span class="px-2 py-1 rounded bg-amber-50 text-amber-700 text-xs">Expiring Soon</span></td><td class="px-6 text-right"><button onclick="showView('details')" class="text-brand-600 text-xs font-medium">View</button></td>
+     </tr>
+     <tr data-text="CON-2026-00014 marketing services agreement" data-status="For Approval">
+      <td class="px-6 py-4"><button onclick="showView('details')" class="text-left"><b class="hover:text-brand-600">CON-2026-00014</b><p class="text-xs text-slate-500">Marketing Services Agreement</p></button></td>
+      <td class="px-4">Sakura Media Studio</td><td class="px-4">Oct 15, 2026 — Oct 15, 2027</td><td class="px-4">Dev Tester</td>
+      <td class="px-4"><span class="px-2 py-1 rounded bg-purple-50 text-purple-700 text-xs">For Approval</span></td><td class="px-6 text-right"><button onclick="showView('details')" class="text-brand-600 text-xs font-medium">View</button></td>
+     </tr>
+     <tr data-text="CON-2026-00019 nda confidential agreement" data-status="Draft">
+      <td class="px-6 py-4"><button onclick="showView('details')" class="text-left"><b class="hover:text-brand-600">CON-2026-00019</b><p class="text-xs text-slate-500">NDA</p></button></td>
+      <td class="px-4">Kenji Tanaka</td><td class="px-4">—</td><td class="px-4">Dev Tester</td>
+      <td class="px-4"><span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">Draft</span></td><td class="px-6 text-right"><button onclick="showView('details')" class="text-brand-600 text-xs font-medium">View</button></td>
+     </tr>
+    </tbody>
+   </table>
+  </div>
+ </div>
+</section>
+
+<!-- CREATE CONTRACT -->
+<section id="create" class="view p-6 lg:p-8 max-w-5xl mx-auto">
+ <div class="mb-5"><button onclick="showView('contracts')" class="text-xs text-slate-500">← Back to Contracts</button></div>
+ <div class="flex justify-between items-start mb-6"><div><h2 class="text-2xl font-bold">Create New Contract</h2><p class="text-sm text-slate-500 mt-1">Create a contract record and submit it through the lifecycle.</p></div><button class="px-4 py-2 border rounded-lg text-sm">Save Draft</button></div>
+
+ <div class="flex items-center justify-between bg-white border rounded-xl p-5 mb-6">
+  <div class="flex items-center gap-3"><span class="w-8 h-8 rounded-full bg-brand-500 text-white flex items-center justify-center text-sm font-bold">1</span><span class="text-xs font-semibold">Information</span></div>
+  <div class="h-px bg-slate-200 flex-1 mx-4"></div><div class="text-xs text-slate-400">2 Parties</div><div class="h-px bg-slate-200 flex-1 mx-4"></div><div class="text-xs text-slate-400">3 Terms</div><div class="h-px bg-slate-200 flex-1 mx-4"></div><div class="text-xs text-slate-400">4 Documents</div><div class="h-px bg-slate-200 flex-1 mx-4"></div><div class="text-xs text-slate-400">5 Review</div>
+ </div>
+
+ <div class="space-y-5">
+  <div class="bg-white border rounded-xl p-6"><h3 class="font-semibold mb-4">Contract Information</h3><div class="grid md:grid-cols-2 gap-5">
+   <div><label class="text-xs font-medium">Contract Number</label><input readonly value="CON-2026-00020" class="w-full mt-1 px-3 py-2.5 bg-slate-50 border rounded-lg text-sm"></div>
+   <div><label class="text-xs font-medium">Contract Type *</label><select class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"><option>Service Agreement</option><option>Supply Agreement</option><option>Lease Agreement</option><option>NDA</option><option>Partnership Agreement</option><option>Employment Contract</option><option>Other</option></select></div>
+   <div class="md:col-span-2"><label class="text-xs font-medium">Contract Title *</label><input class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm" placeholder="e.g. Annual Equipment Maintenance Agreement"></div>
+   <div class="md:col-span-2"><label class="text-xs font-medium">Description / Purpose</label><textarea rows="3" class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm" placeholder="Briefly describe the purpose of this contract..."></textarea></div>
+  </div></div>
+
+  <div class="bg-white border rounded-xl p-6"><div class="flex justify-between items-center mb-4"><div><h3 class="font-semibold">Parties</h3><p class="text-xs text-slate-500">Select existing parties or create a new party record.</p></div><button onclick="openPartyPicker()" class="px-3 py-2 bg-brand-50 text-brand-600 rounded-lg text-xs font-medium">+ Add Party</button></div>
+   <div class="space-y-3">
+    <div class="p-4 bg-slate-50 rounded-lg flex justify-between items-center"><div><span class="text-[10px] uppercase text-slate-400">RAM YUM</span><p class="font-medium text-sm">RAM YUM Korean & Japanese Store</p><p class="text-xs text-slate-500">Contracting Party</p></div><span class="text-xs bg-slate-200 px-2 py-1 rounded">Primary Party</span></div>
+    <div id="selectedParty" class="hidden p-4 border border-brand-200 bg-brand-50 rounded-lg flex justify-between items-center"><div><span class="text-[10px] uppercase text-brand-600">Other Party</span><p class="font-medium text-sm" id="selectedPartyName">ABC Food Supply Corporation</p><p class="text-xs text-slate-500">Supplier</p></div><button onclick="document.getElementById('selectedParty').classList.add('hidden')" class="text-xs text-red-600">Remove</button></div>
+   </div>
+  </div>
+
+  <div class="bg-white border rounded-xl p-6"><h3 class="font-semibold mb-4">Responsibility & Schedule</h3><div class="grid md:grid-cols-2 gap-5">
+   <div><label class="text-xs font-medium">Responsible Officer *</label><input readonly value="Dev Tester" class="w-full mt-1 px-3 py-2.5 bg-slate-50 border rounded-lg text-sm"></div>
+   <div><label class="text-xs font-medium">Department</label><select class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"><option>Legal</option><option>Operations</option><option>Finance</option><option>HR</option></select></div>
+   <div><label class="text-xs font-medium">Start Date *</label><input type="date" class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"></div>
+   <div><label class="text-xs font-medium">End Date</label><input type="date" class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"></div>
+  </div></div>
+
+  <div class="bg-white border rounded-xl p-6"><h3 class="font-semibold mb-4">Financial Terms</h3><div class="grid md:grid-cols-2 gap-5">
+   <div><label class="text-xs font-medium">Currency</label><select class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"><option>PHP</option><option>USD</option><option>JPY</option><option>KRW</option><option>EUR</option></select></div>
+   <div><label class="text-xs font-medium">Contract Value</label><input type="number" class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm" placeholder="0.00"></div>
+   <div><label class="text-xs font-medium">Payment Frequency</label><select class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"><option>One-time</option><option>Monthly</option><option>Quarterly</option><option>Semi-annually</option><option>Annually</option><option>Per milestone</option><option>Other</option></select></div>
+   <div><label class="text-xs font-medium">Deposit / Advance</label><input type="number" class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm" placeholder="Optional"></div>
+   <div><label class="text-xs font-medium">Notice Period (days)</label><input type="number" min="0" class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm" placeholder="e.g. 30"></div>
+   <div><label class="text-xs font-medium">Payment Terms</label><input class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm" placeholder="e.g. Net 30"></div>
+  </div></div>
+
+  <div class="bg-white border rounded-xl p-6"><h3 class="font-semibold mb-4">Additional Notes</h3><textarea rows="5" class="w-full px-3 py-2.5 border rounded-lg text-sm" placeholder="Special conditions, notes, or internal remarks..."></textarea></div>
+  <div class="flex justify-end gap-3"><button onclick="showView('contracts')" class="px-5 py-2.5 border rounded-lg text-sm">Cancel</button><button onclick="showToast('Contract saved as draft')" class="px-5 py-2.5 border rounded-lg text-sm">Save Draft</button><button onclick="showToast('Contract submitted for review')" class="px-5 py-2.5 bg-brand-500 text-white rounded-lg text-sm">Submit for Review</button></div>
+ </div>
+</section>
+
+<!-- CONTRACT DETAILS -->
+<section id="details" class="view p-6 lg:p-8 max-w-7xl mx-auto">
+ <div class="flex items-center justify-between mb-5"><button onclick="showView('contracts')" class="text-xs text-slate-500">← Back to Contracts</button><div class="flex gap-2"><button class="px-3 py-2 border rounded-lg text-xs">Edit</button><button class="px-3 py-2 bg-brand-500 text-white rounded-lg text-xs">More Actions ▾</button></div></div>
+ <div class="bg-white border rounded-xl p-6 mb-5"><div class="flex flex-col lg:flex-row lg:items-start justify-between gap-4"><div><div class="flex items-center gap-2"><span class="text-xs font-medium text-slate-500">CON-2026-00001</span><span class="px-2 py-1 bg-green-50 text-green-700 rounded text-xs">Active</span></div><h2 class="text-2xl font-bold mt-2">Annual Supply Agreement</h2><p class="text-sm text-slate-500 mt-1">Supply of food ingredients and related materials.</p></div><div class="text-right"><p class="text-xs text-slate-500">Contract Value</p><p class="text-2xl font-bold">₱1,250,000.00</p><p class="text-xs text-slate-500">PHP · Annual</p></div></div>
+  <div class="grid md:grid-cols-4 gap-4 mt-6 pt-5 border-t"><div><p class="text-xs text-slate-500">Start Date</p><b class="text-sm">Jan 01, 2026</b></div><div><p class="text-xs text-slate-500">End Date</p><b class="text-sm">Dec 31, 2026</b></div><div><p class="text-xs text-slate-500">Responsible Officer</p><b class="text-sm">Dev Tester</b></div><div><p class="text-xs text-slate-500">Department</p><b class="text-sm">Operations</b></div></div>
+ </div>
+
+ <div class="bg-white border rounded-xl">
+  <div class="px-6 border-b flex gap-6 overflow-x-auto">
+   <button class="tab active py-4 text-sm font-medium" onclick="tab(this,'overviewTab')">Overview</button><button class="tab py-4 text-sm font-medium text-slate-500" onclick="tab(this,'partyTab')">Parties</button><button class="tab py-4 text-sm font-medium text-slate-500" onclick="tab(this,'docTab')">Documents</button><button class="tab py-4 text-sm font-medium text-slate-500" onclick="tab(this,'obligationTab')">Obligations</button><button class="tab py-4 text-sm font-medium text-slate-500" onclick="tab(this,'historyTab')">History</button>
+  </div>
+  <div id="overviewTab" class="tabContent p-6"><div class="grid lg:grid-cols-3 gap-6">
+   <div class="lg:col-span-2"><h3 class="font-semibold mb-3">Lifecycle</h3><div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center text-xs">✓</div><div class="h-1 bg-green-500 flex-1"></div><div class="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center text-xs">✓</div><div class="h-1 bg-green-500 flex-1"></div><div class="w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center text-xs">✓</div><div class="h-1 bg-green-500 flex-1"></div><div class="w-8 h-8 rounded-full bg-brand-500 text-white flex items-center justify-center text-xs">A</div></div><div class="flex justify-between text-[10px] text-slate-500 mt-2"><span>Draft</span><span>Review</span><span>Approval</span><span>Active</span></div>
+   <div class="mt-7 p-4 bg-amber-50 border border-amber-200 rounded-xl"><p class="text-xs font-semibold text-amber-800">Renewal Notice</p><p class="text-sm mt-1">This contract expires in 94 days. Notice period is 30 days.</p><button class="text-xs text-amber-800 font-medium mt-2">Start Renewal</button></div></div>
+   <div><h3 class="font-semibold mb-3">Quick Information</h3><div class="space-y-3 text-sm"><div class="flex justify-between"><span class="text-slate-500">Type</span><b>Supply Agreement</b></div><div class="flex justify-between"><span class="text-slate-500">Version</span><b>1.0</b></div><div class="flex justify-between"><span class="text-slate-500">Documents</span><b>4</b></div><div class="flex justify-between"><span class="text-slate-500">Obligations</span><b>3</b></div></div></div>
+  </div></div>
+
+  <div id="partyTab" class="tabContent hidden p-6"><div class="flex justify-between mb-4"><h3 class="font-semibold">Contract Parties</h3><button onclick="openPartyPicker()" class="text-xs text-brand-600 font-medium">+ Add Party</button></div><div class="grid md:grid-cols-2 gap-4"><div class="border rounded-xl p-4"><p class="text-[10px] uppercase text-slate-400">Primary Party</p><b>RAM YUM Korean & Japanese Store</b><p class="text-xs text-slate-500 mt-1">Client / Contracting Party</p></div><div class="border rounded-xl p-4"><p class="text-[10px] uppercase text-slate-400">Other Party</p><b>ABC Food Supply Corporation</b><p class="text-xs text-slate-500 mt-1">Supplier</p></div></div></div>
+
+  <div id="docTab" class="tabContent hidden p-6"><div class="flex justify-between mb-4"><h3 class="font-semibold">Contract Documents</h3><button class="text-xs text-brand-600">+ Link Document</button></div><div class="space-y-2"><div class="p-4 border rounded-lg flex justify-between"><span class="text-sm">Signed Contract — Version 1.0</span><span class="text-xs text-slate-500">PDF · 2.4 MB</span></div><div class="p-4 border rounded-lg flex justify-between"><span class="text-sm">Supplier Registration</span><span class="text-xs text-slate-500">PDF · 1.1 MB</span></div></div></div>
+
+  <div id="obligationTab" class="tabContent hidden p-6"><div class="flex justify-between mb-4"><h3 class="font-semibold">Obligations & Key Dates</h3><button class="text-xs text-brand-600">+ Add Obligation</button></div><div class="space-y-3"><div class="border rounded-xl p-4 flex justify-between"><div><b class="text-sm">Monthly Delivery</b><p class="text-xs text-slate-500">Supplier must deliver agreed quantities monthly.</p></div><span class="px-2 py-1 bg-green-50 text-green-700 rounded text-xs h-fit">On Track</span></div><div class="border rounded-xl p-4 flex justify-between"><div><b class="text-sm">Annual Renewal Decision</b><p class="text-xs text-slate-500">Decision required before notice deadline.</p></div><span class="px-2 py-1 bg-amber-50 text-amber-700 rounded text-xs h-fit">Upcoming</span></div></div></div>
+
+  <div id="historyTab" class="tabContent hidden p-6"><h3 class="font-semibold mb-4">Audit & Lifecycle History</h3><div class="space-y-5 border-l-2 border-slate-200 ml-3 pl-5"><div><b class="text-sm">Contract activated</b><p class="text-xs text-slate-500">Dev Tester · Sep 28, 2026 · 10:32 AM</p></div><div><b class="text-sm">Approved</b><p class="text-xs text-slate-500">Admin · Sep 25, 2026 · 3:18 PM</p></div><div><b class="text-sm">Submitted for approval</b><p class="text-xs text-slate-500">Dev Tester · Sep 24, 2026 · 11:06 AM</p></div><div><b class="text-sm">Contract created</b><p class="text-xs text-slate-500">Dev Tester · Sep 20, 2026 · 9:14 AM</p></div></div></div>
+ </div>
+</section>
+
+<!-- PARTIES -->
+<section id="parties" class="view p-6 lg:p-8 max-w-7xl mx-auto">
+ <div class="flex justify-between items-start mb-6"><div><h2 class="text-2xl font-bold">Party Registry</h2><p class="text-sm text-slate-500">Reusable organizations and individuals connected to contracts.</p></div><button onclick="openAddParty()" class="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm">+ Add Party</button></div>
+ <div class="grid md:grid-cols-3 gap-4 mb-5"><div class="bg-white border rounded-xl p-5"><p class="text-xs text-slate-500">Total Parties</p><b class="text-2xl">28</b></div><div class="bg-white border rounded-xl p-5"><p class="text-xs text-slate-500">Organizations</p><b class="text-2xl">19</b></div><div class="bg-white border rounded-xl p-5"><p class="text-xs text-slate-500">Individuals</p><b class="text-2xl">9</b></div></div>
+ <div class="bg-white border rounded-xl overflow-hidden"><div class="p-5 border-b"><input class="w-full md:w-1/2 px-3 py-2.5 border rounded-lg text-sm" placeholder="Search party..."></div><table class="w-full text-sm"><thead class="bg-slate-50 text-xs text-slate-500 uppercase"><tr><th class="text-left px-6 py-3">Party</th><th class="text-left px-4 py-3">Type</th><th class="text-left px-4 py-3">Contact</th><th class="text-left px-4 py-3">Contracts</th><th class="text-right px-6 py-3">Action</th></tr></thead><tbody class="divide-y"><tr><td class="px-6 py-4"><b>ABC Food Supply Corporation</b><p class="text-xs text-slate-500">REG-2026-0041</p></td><td class="px-4"><span class="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs">Organization</span></td><td class="px-4">Maria Santos</td><td class="px-4">3</td><td class="px-6 text-right"><button onclick="openPartyProfile()" class="text-brand-600 text-xs">View</button></td></tr><tr><td class="px-6 py-4"><b>Kenji Tanaka</b><p class="text-xs text-slate-500">Individual Party</p></td><td class="px-4"><span class="bg-purple-50 text-purple-700 px-2 py-1 rounded text-xs">Individual</span></td><td class="px-4">kenji@example.com</td><td class="px-4">1</td><td class="px-6 text-right"><button onclick="openPartyProfile()" class="text-brand-600 text-xs">View</button></td></tr></tbody></table></div>
+</section>
+
+<!-- PARTY PICKER -->
+<div id="partyPicker" class="modal fixed inset-0 bg-slate-900/50 items-center justify-center z-50 p-4">
+ <div class="bg-white rounded-2xl shadow-xl w-full max-w-xl">
+  <div class="p-5 border-b flex justify-between"><div><h3 class="font-bold">Select Contract Party</h3><p class="text-xs text-slate-500">Choose an existing party or create a new one.</p></div><button onclick="closePartyPicker()">×</button></div>
+  <div class="p-5"><input class="w-full px-3 py-2.5 border rounded-lg text-sm mb-4" placeholder="Search registered parties..."><div class="space-y-2"><button onclick="selectParty()" class="w-full text-left border rounded-lg p-4 hover:border-brand-300"><b class="text-sm">ABC Food Supply Corporation</b><p class="text-xs text-slate-500">Organization · Supplier · 3 contracts</p></button><button onclick="selectParty()" class="w-full text-left border rounded-lg p-4 hover:border-brand-300"><b class="text-sm">Nippon Equipment Trading Co.</b><p class="text-xs text-slate-500">Organization · Supplier · 2 contracts</p></button></div><button onclick="closePartyPicker();openAddParty()" class="w-full mt-4 py-2.5 border border-dashed rounded-lg text-sm text-brand-600">+ Create New Party</button></div>
+ </div>
+</div>
+
+<!-- ADD PARTY -->
+<div id="addParty" class="modal fixed inset-0 bg-slate-900/50 items-center justify-center z-50 p-4">
+ <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+  <div class="p-5 border-b flex justify-between"><div><h3 class="font-bold">Add New Party</h3><p class="text-xs text-slate-500">Create a reusable party record.</p></div><button onclick="closeAddParty()">×</button></div>
+  <div class="p-6 space-y-5"><div><label class="text-xs font-medium">Party Type *</label><div class="grid grid-cols-2 gap-3 mt-2"><button class="border-2 border-brand-500 bg-brand-50 p-4 rounded-lg text-left"><b>Organization</b><p class="text-xs text-slate-500 mt-1">Company, supplier, agency, partner.</p></button><button class="border p-4 rounded-lg text-left"><b>Individual</b><p class="text-xs text-slate-500 mt-1">Person acting as a party.</p></button></div></div><div class="grid md:grid-cols-2 gap-4"><div class="md:col-span-2"><label class="text-xs">Legal / Full Name *</label><input class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm" placeholder="Registered/legal name"></div><div><label class="text-xs">Trade / Business Name</label><input class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"></div><div><label class="text-xs">Registration Number</label><input class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"></div><div><label class="text-xs">TIN</label><input class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"></div><div><label class="text-xs">Primary Contact</label><input class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"></div><div><label class="text-xs">Email</label><input class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"></div><div><label class="text-xs">Phone</label><input class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm"></div><div class="md:col-span-2"><label class="text-xs">Address</label><textarea class="w-full mt-1 px-3 py-2.5 border rounded-lg text-sm" rows="2"></textarea></div></div><div class="border-t pt-5"><h4 class="text-sm font-semibold">Authorized Signatory</h4><div class="grid md:grid-cols-2 gap-4 mt-3"><input class="px-3 py-2.5 border rounded-lg text-sm" placeholder="Full name"><input class="px-3 py-2.5 border rounded-lg text-sm" placeholder="Position / title"></div></div></div>
+  <div class="p-5 border-t flex justify-end gap-2"><button onclick="closeAddParty()" class="px-4 py-2 border rounded-lg text-sm">Cancel</button><button onclick="closeAddParty();showToast('Party saved successfully')" class="px-5 py-2 bg-brand-500 text-white rounded-lg text-sm">Save Party</button></div>
+ </div>
+</div>
+
+<!-- PARTY PROFILE -->
+<div id="partyProfile" class="modal fixed inset-0 bg-slate-900/50 items-stretch justify-end z-50">
+ <div class="bg-white w-full max-w-2xl h-full overflow-y-auto">
+  <div class="p-6 border-b sticky top-0 bg-white flex justify-between"><div><p class="text-xs text-slate-500">Party Profile</p><h2 class="text-xl font-bold">ABC Food Supply Corporation</h2></div><button onclick="closePartyProfile()">×</button></div>
+  <div class="p-6 space-y-6"><div><span class="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs">Organization</span><span class="bg-green-50 text-green-700 px-2 py-1 rounded text-xs ml-2">Active</span></div><div><h3 class="font-semibold text-sm mb-3">Basic Information</h3><div class="bg-slate-50 rounded-xl p-4 grid grid-cols-2 gap-4 text-sm"><div><p class="text-xs text-slate-500">Registration No.</p><b>REG-2026-0041</b></div><div><p class="text-xs text-slate-500">TIN</p><b>000-123-456-000</b></div><div class="col-span-2"><p class="text-xs text-slate-500">Address</p><b>Quezon City, Metro Manila</b></div></div></div><div><h3 class="font-semibold text-sm mb-3">Primary Contact</h3><div class="border rounded-xl p-4"><b>Maria Santos</b><p class="text-xs text-slate-500">General Manager · maria@abcsupply.ph</p></div></div><div><h3 class="font-semibold text-sm mb-3">Linked Contracts</h3><div class="space-y-2"><div class="border rounded-lg p-4"><b class="text-sm">CON-2026-00001</b><p class="text-xs text-slate-500">Supply Agreement · Active</p></div><div class="border rounded-lg p-4"><b class="text-sm">CON-2026-00012</b><p class="text-xs text-slate-500">Equipment Supply · Active</p></div></div></div></div>
+ </div>
+</div>
+
+<div id="toast" class="toast fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-3 rounded-lg shadow-lg text-sm z-[70]"></div>
+
+<script>
+const titles={contracts:['Contract Management','Manage contracts throughout their lifecycle.'],create:['Create New Contract','Draft and submit a contract.'],details:['Contract Details','CON-2026-00001 · Annual Supply Agreement'],parties:['Party Registry','Manage organizations and individuals involved in contracts.']};
+function showView(id){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.getElementById(id).classList.add('active');document.getElementById('pageTitle').textContent=titles[id][0];document.getElementById('pageSub').textContent=titles[id][1];window.scrollTo(0,0)}
+function filterContracts(){let q=document.getElementById('contractSearch').value.toLowerCase(),s=document.getElementById('statusFilter').value;document.querySelectorAll('#contractRows tr').forEach(r=>r.style.display=((r.dataset.text.includes(q))&&(!s||r.dataset.status===s))?'':'none')}
+function tab(btn,id){document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.tabContent').forEach(x=>x.classList.add('hidden'));btn.classList.add('active');document.getElementById(id).classList.remove('hidden')}
+function openPartyPicker(){document.getElementById('partyPicker').classList.add('active')}
+function closePartyPicker(){document.getElementById('partyPicker').classList.remove('active')}
+function selectParty(){document.getElementById('selectedParty').classList.remove('hidden');closePartyPicker();showView('create')}
+function openAddParty(){document.getElementById('addParty').classList.add('active')}
+function closeAddParty(){document.getElementById('addParty').classList.remove('active')}
+function openPartyProfile(){document.getElementById('partyProfile').classList.add('active')}
+function closePartyProfile(){document.getElementById('partyProfile').classList.remove('active')}
+function showToast(msg){let t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closePartyPicker();closeAddParty();closePartyProfile()}})
+</script>
+</body>
+</html>

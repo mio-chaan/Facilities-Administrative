@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create New Contract - RAM YUM CMS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: { 50: '#fdf3f4', 100: '#fbe5e7', 500: '#9e1c28', 600: '#7a151f', 700: '#5c1017', 800: '#3f0a10' },
+                        surface: '#f8fafc',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .nav-item { transition: all 0.2s ease-in-out; }
+        
+        /* Styles for the mock Rich Text Editor */
+        .rte-toolbar { border: 1px solid #e2e8f0; border-bottom: none; border-radius: 0.5rem 0.5rem 0 0; padding: 0.25rem; display: flex; gap: 0.25rem; background-color: #f8fafc; }
+        .rte-btn { padding: 0.25rem 0.5rem; border-radius: 0.25rem; color: #475569; font-size: 0.875rem; }
+        .rte-btn:hover { background-color: #e2e8f0; }
+        .rte-content { border: 1px solid #e2e8f0; border-radius: 0 0 0.5rem 0.5rem; padding: 0.75rem; min-height: 100px; outline: none; }
+        .rte-content:focus { border-color: #9e1c28; box-shadow: 0 0 0 2px rgba(158, 28, 40, 0.2); }
+    </style>
+</head>
+<body class="bg-surface text-slate-800 font-sans h-screen flex overflow-hidden antialiased">
+
+    <!-- Sidebar (Consistent with previous designs) -->
+    <aside class="w-64 bg-brand-800 flex flex-col justify-between hidden md:flex shadow-xl z-20 relative">
+        <div>
+            <div class="h-16 flex items-center px-6 border-b border-white/10">
+                <div class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-brand-800 font-bold text-lg mr-3 shadow-inner">R</div>
+                <div>
+                    <h1 class="text-white font-bold tracking-tight leading-tight">RAM YUM</h1>
+                    <p class="text-[10px] text-brand-100/80 uppercase tracking-wider font-medium">Facilities & Admin</p>
+                </div>
+            </div>
+            <nav class="p-4 space-y-1 mt-2">
+                <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 text-brand-100 hover:bg-white/5 hover:text-white rounded-lg font-medium">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                    Dashboard
+                </a>
+                <div class="pt-4 pb-1 px-3"><p class="text-[10px] font-bold text-brand-100/50 uppercase tracking-wider">Document & Records</p></div>
+                <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 text-brand-100 hover:bg-white/5 hover:text-white rounded-lg font-medium">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    Document Management
+                </a>
+                <!-- Active State -->
+                <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 bg-white/10 text-white rounded-lg font-medium shadow-sm">
+                    <svg class="w-5 h-5 text-brand-100" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                    Contract Management
+                </a>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col h-screen overflow-hidden relative">
+        
+        <!-- Top Header -->
+        <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 lg:px-8 shrink-0 z-10 sticky top-0">
+            <div class="flex items-center gap-4">
+                <a href="#" class="text-slate-400 hover:text-slate-600 transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                </a>
+                <div>
+                    <h1 class="text-xl font-bold text-slate-900 tracking-tight">Create New Contract</h1>
+                    <p class="text-xs text-slate-500 font-medium">Draft a new agreement or partnership contract.</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-4">
+                <button class="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
+                    Save Draft
+                </button>
+            </div>
+        </header>
+
+        <!-- Scrollable Form Content -->
+        <div class="flex-1 overflow-y-auto p-6 lg:p-8">
+            <div class="max-w-4xl mx-auto space-y-8">
+                
+                <!-- Progress Wizard -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                    <div class="flex items-center justify-between relative">
+                        <div class="absolute left-0 top-1/2 -translate-y-1/2 w-full h-0.5 bg-slate-200 -z-10"></div>
+                        
+                        <!-- Step 1 -->
+                        <div class="flex flex-col items-center gap-2 bg-white px-2">
+                            <div class="w-8 h-8 rounded-full bg-brand-500 text-white flex items-center justify-center font-bold text-sm shadow-md shadow-brand-500/30">1</div>
+                            <span class="text-xs font-semibold text-slate-900">Basic Info</span>
+                        </div>
+                        <!-- Step 2 -->
+                        <div class="flex flex-col items-center gap-2 bg-white px-2">
+                            <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold text-sm border border-slate-200">2</div>
+                            <span class="text-xs font-medium text-slate-500">Financials</span>
+                        </div>
+                        <!-- Step 3 -->
+                        <div class="flex flex-col items-center gap-2 bg-white px-2">
+                            <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold text-sm border border-slate-200">3</div>
+                            <span class="text-xs font-medium text-slate-500">Legal Clauses</span>
+                        </div>
+                        <!-- Step 4 -->
+                        <div class="flex flex-col items-center gap-2 bg-white px-2">
+                            <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold text-sm border border-slate-200">4</div>
+                            <span class="text-xs font-medium text-slate-500">Review</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 1: Basic Information -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+                        <div class="w-8 h-8 rounded bg-brand-50 text-brand-600 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </div>
+                        <h2 class="text-base font-semibold text-slate-900">Basic Information</h2>
+                    </div>
+                    
+                    <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-1">
+                            <label class="block text-sm font-medium text-slate-700">Contract Number</label>
+                            <input type="text" value="CON-2026-00001" readonly class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-500 focus:outline-none cursor-not-allowed">
+                            <p class="text-[11px] text-slate-400">Auto-generated by the system.</p>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="block text-sm font-medium text-slate-700">Contract Type <span class="text-brand-500">*</span></label>
+                            <select class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                                <option>Partnership Agreement</option>
+                                <option>Service Level Agreement (SLA)</option>
+                                <option>Non-Disclosure Agreement (NDA)</option>
+                                <option>Employment Contract</option>
+                                <option>Lease Agreement</option>
+                            </select>
+                        </div>
+                        <div class="space-y-1 md:col-span-2">
+                            <label class="block text-sm font-medium text-slate-700">Contract Title <span class="text-brand-500">*</span></label>
+                            <input type="text" value="Partnership 2026" placeholder="e.g., Q3 Marketing Services Agreement" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                        </div>
+                        <div class="space-y-1 md:col-span-2">
+                            <label class="block text-sm font-medium text-slate-700">Description / Purpose</label>
+                            <textarea rows="3" placeholder="Provide a brief summary of the contract's purpose..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow resize-none">Partner</textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Parties Involved (The Missing Piece) -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded bg-brand-50 text-brand-600 flex items-center justify-center">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                            </div>
+                            <h2 class="text-base font-semibold text-slate-900">Parties Involved</h2>
+                        </div>
+                        <button class="text-xs font-medium text-brand-600 hover:text-brand-700 flex items-center gap-1 bg-brand-50 px-3 py-1.5 rounded-lg transition-colors">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                            Add Party
+                        </button>
+                    </div>
+                    
+                    <div class="p-6 space-y-4">
+                        <!-- First Party (Our Org) -->
+                        <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-start p-4 bg-slate-50 rounded-lg border border-slate-100">
+                            <div class="md:col-span-4 space-y-1">
+                                <label class="block text-xs font-medium text-slate-500">Role</label>
+                                <input type="text" value="First Party (Client)" readonly class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white text-slate-500 focus:outline-none cursor-not-allowed">
+                            </div>
+                            <div class="md:col-span-8 space-y-1">
+                                <label class="block text-xs font-medium text-slate-500">Entity / Individual Name</label>
+                                <input type="text" value="RAM YUM Corporation" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                            </div>
+                        </div>
+                        
+                        <!-- Second Party (Partner) -->
+                        <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-start p-4 bg-white rounded-lg border border-brand-200 shadow-sm relative group">
+                            <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button class="text-slate-400 hover:text-red-500 p-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                            </div>
+                            <div class="md:col-span-4 space-y-1">
+                                <label class="block text-xs font-medium text-slate-500">Role</label>
+                                <select class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                                    <option>Second Party (Partner)</option>
+                                    <option>Third Party (Witness)</option>
+                                    <option>Guarantor</option>
+                                </select>
+                            </div>
+                            <div class="md:col-span-8 space-y-1">
+                                <label class="block text-xs font-medium text-slate-500">Entity / Individual Name</label>
+                                <input type="text" placeholder="Enter partner name..." class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 3: Ownership & Schedule -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+                        <div class="w-8 h-8 rounded bg-brand-50 text-brand-600 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        </div>
+                        <h2 class="text-base font-semibold text-slate-900">Ownership & Schedule</h2>
+                    </div>
+                    
+                    <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-1">
+                            <label class="block text-sm font-medium text-slate-700">Responsible Officer <span class="text-brand-500">*</span></label>
+                            <input type="text" value="Dev Tester" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                            <p class="text-[11px] text-slate-400">Who is responsible for managing this contract.</p>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="block text-sm font-medium text-slate-700">Department</label>
+                            <select class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                                <option>Not assigned</option>
+                                <option>Legal</option>
+                                <option>Finance</option>
+                                <option>Operations</option>
+                                <option>HR</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Dates Grouped -->
+                        <div class="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-100">
+                            <div class="space-y-1">
+                                <label class="block text-sm font-medium text-slate-700">Start Date <span class="text-brand-500">*</span></label>
+                                <input type="date" value="2026-09-28" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="block text-sm font-medium text-slate-700">End Date</label>
+                                <input type="date" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                                <p class="text-[11px] text-slate-400">Leave blank for open-ended.</p>
+                            </div>
+                            <div class="space-y-1">
+                                <label class="block text-sm font-medium text-slate-700">Renewal Date</label>
+                                <input type="date" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 4: Financial Terms -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+                        <div class="w-8 h-8 rounded bg-brand-50 text-brand-600 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </div>
+                        <h2 class="text-base font-semibold text-slate-900">Financial Terms</h2>
+                    </div>
+                    
+                    <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="grid grid-cols-3 gap-4 md:col-span-2">
+                            <div class="col-span-1 space-y-1">
+                                <label class="block text-sm font-medium text-slate-700">Currency</label>
+                                <select class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                                    <option>PHP</option>
+                                    <option>USD</option>
+                                    <option>EUR</option>
+                                </select>
+                            </div>
+                            <div class="col-span-2 space-y-1">
+                                <label class="block text-sm font-medium text-slate-700">Contract Value</label>
+                                <input type="number" placeholder="0.00" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                            </div>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="block text-sm font-medium text-slate-700">Payment Frequency</label>
+                            <select class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                                <option>Select frequency</option>
+                                <option>One-time</option>
+                                <option>Monthly</option>
+                                <option>Quarterly</option>
+                                <option>Annually</option>
+                            </select>
+                        </div>
+                        <div class="space-y-1">
+                            <label class="block text-sm font-medium text-slate-700">Payment Terms</label>
+                            <input type="text" placeholder="e.g., Net 30" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="block text-sm font-medium text-slate-700">Deposit / Advance</label>
+                            <input type="number" placeholder="0.00" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="block text-sm font-medium text-slate-700">Notice Period (days)</label>
+                            <input type="number" placeholder="e.g., 30" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-shadow">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 5: Legal Clauses & Notes -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+                        <div class="w-8 h-8 rounded bg-brand-50 text-brand-600 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        </div>
+                        <h2 class="text-base font-semibold text-slate-900">Legal Clauses & Notes</h2>
+                    </div>
+                    
+                    <div class="p-6 space-y-6">
+                        <div class="space-y-1">
+                            <label class="block text-sm font-medium text-slate-700">Additional Notes / Special Conditions</label>
+                            <!-- Mock Rich Text Editor -->
+                            <div class="rte-toolbar">
+                                <button class="rte-btn font-bold">B</button>
+                                <button class="rte-btn italic">I</button>
+                                <button class="rte-btn underline">U</button>
+                                <div class="w-px h-5 bg-slate-300 mx-1"></div>
+                                <button class="rte-btn">List</button>
+                                <button class="rte-btn">Link</button>
+                            </div>
+                            <div class="rte-content text-sm text-slate-700" contenteditable="true">
+                                Enter any specific clauses, amendments, or special conditions here...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="flex items-center justify-between pt-4 pb-12">
+                    <button class="px-6 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
+                        Cancel
+                    </button>
+                    <div class="flex gap-3">
+                        <button class="px-6 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
+                            Save as Draft
+                        </button>
+                        <button class="flex items-center gap-2 px-6 py-2.5 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors shadow-sm shadow-brand-500/30">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                            Create Contract
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Floating Action Button (Chatbot) -->
+        <button class="absolute bottom-6 right-6 w-12 h-12 bg-brand-500 rounded-full flex items-center justify-center text-white shadow-lg shadow-brand-500/40 hover:bg-brand-600 hover:scale-105 transition-all focus:outline-none focus:ring-4 focus:ring-brand-500/30">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+        </button>
+
+    </main>
+</body>
+</html>

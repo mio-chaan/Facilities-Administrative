@@ -77,7 +77,7 @@ $recentDocuments = t8_hr_recent_documents($pdo, $isAdmin, $currentUserId, 8);
             </div>
             <div id="t8RecentDocsWrap">
                 <?php if ($recentDocuments === []): ?>
-                    <div class="t8-docs-empty"><i class="fa-regular fa-folder-open"></i><strong>No documents yet</strong><span>Upload your first document to get started.</span><a class="t8-btn t8-btn-accent t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'create'])) ?>"><i class="fa-solid fa-upload"></i> Upload Document</a></div>
+                    <div class="t8-empty-state"><i class="fa-regular fa-folder-open"></i><strong>No documents yet</strong><span>Upload your first document to get started.</span><a class="t8-btn t8-btn-accent t8-btn-sm" href="<?= e(page_url('documents', ['action' => 'create'])) ?>"><i class="fa-solid fa-upload"></i> Upload Document</a></div>
                 <?php else: ?>
                     <ul class="t8-docs-recent-list">
                         <?php foreach ($recentDocuments as $doc): ?>

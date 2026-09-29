@@ -71,16 +71,6 @@ function t8_document_can_edit_metadata(?array $document, int $userId, bool $isAd
     return $isAdmin || (empty($document['deleted_at']) && (string) ($document['status'] ?? '') !== 'archived');
 }
 
-function t8_document_is_legal_linked(PDO $pdo, int $documentId): bool
-{
-    $stmt = $pdo->prepare('SELECT 1 FROM team8_legal_documents WHERE document_id = :document_id LIMIT 1');
-    if ($stmt === false || !$stmt->execute(['document_id' => $documentId])) {
-        throw new RuntimeException('Could not check Legal document linkage.');
-    }
-
-    return $stmt->fetchColumn() !== false;
-}
-
 function t8_document_update_metadata(PDO $pdo, int $documentId, array $updates, int $actorId, bool $isAdmin, ?string $expectedVersion = null): bool
 {
     if ($documentId <= 0 || $updates === [] || $actorId <= 0) {
@@ -93,31 +83,6 @@ function t8_document_update_metadata(PDO $pdo, int $documentId, array $updates, 
     }
     if ($expectedVersion !== null && !t8_document_metadata_version_matches($expectedVersion, $document)) {
         return false;
-    }
-    try {
-        $isLegalLinked = t8_document_is_legal_linked($pdo, $documentId);
-    } catch (Throwable $e) {
-        return false;
-    }
-    if ($isLegalLinked) {
-        if (array_key_exists('category_id', $updates)) {
-            $requestedCategoryId = t8_document_metadata_positive_id($updates['category_id']);
-            $currentCategoryId = t8_document_metadata_positive_id($document['category_id'] ?? null);
-            if ($requestedCategoryId === false || $currentCategoryId === false || $requestedCategoryId !== $currentCategoryId) {
-                return false;
-            }
-        }
-        if (array_key_exists('department_id', $updates)) {
-            $requestedDepartmentId = $updates['department_id'] === '' || $updates['department_id'] === null
-                ? null
-                : t8_document_metadata_positive_id($updates['department_id']);
-            $currentDepartmentId = ($document['department_id'] ?? null) === '' || ($document['department_id'] ?? null) === null
-                ? null
-                : t8_document_metadata_positive_id($document['department_id']);
-            if ($requestedDepartmentId === false || $currentDepartmentId === false || $requestedDepartmentId !== $currentDepartmentId) {
-                return false;
-            }
-        }
     }
 
     $allowedFields = ['title', 'category_id', 'document_type', 'department_id', 'owner_id', 'expiration_date'];

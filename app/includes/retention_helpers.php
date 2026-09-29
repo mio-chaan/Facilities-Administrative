@@ -458,7 +458,7 @@ if (!function_exists('t8_retention_orphan_count')) {
                             WHERE c.deleted_at IS NULL
                               AND NOT EXISTS (SELECT 1 FROM team8_records r WHERE r.entity_type = 'contract' AND r.entity_id = c.id)",
             'legal_case' => "SELECT COUNT(*) FROM team8_legal_cases lc
-                            WHERE lc.status <> 'archived'
+                            WHERE lc.deleted_at IS NULL
                               AND NOT EXISTS (SELECT 1 FROM team8_records r WHERE r.entity_type = 'legal_case' AND r.entity_id = lc.id)",
             default => throw new InvalidArgumentException("Unknown retention entity type: {$entityType}"),
         };

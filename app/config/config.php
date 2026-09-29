@@ -25,7 +25,20 @@ if (file_exists($__local_cfg)) {
 if (!defined('GEMINI_API_KEY')) {
     define('GEMINI_API_KEY', getenv('GEMINI_API_KEY') ?: ($_ENV['GEMINI_API_KEY'] ?? ''));
 }
+if (!defined('GMAIL_SMTP_USER')) {
+    define('GMAIL_SMTP_USER', getenv('GMAIL_SMTP_USER') ?: ($_ENV['GMAIL_SMTP_USER'] ?? ($GMAIL_SMTP_USER_LOCAL ?? '')));
+}
+if (!defined('GMAIL_SMTP_APP_PASSWORD')) {
+    define('GMAIL_SMTP_APP_PASSWORD', getenv('GMAIL_SMTP_APP_PASSWORD') ?: ($_ENV['GMAIL_SMTP_APP_PASSWORD'] ?? ($GMAIL_SMTP_APP_PASSWORD_LOCAL ?? '')));
+}
 define('UPLOAD_MAX_SIZE_MB', 10);
+define('MANDATORY_COMPLIANCE_DOCUMENTS', [
+    'Sanitary Permit' => ['Sanitary Permit'],
+    "Mayor's Business Permit" => ["Mayor's Business Permit", "Mayor's Permit"],
+    'Fire Safety Inspection Certificate' => ['Fire Safety Inspection Certificate'],
+    'FDA Import Clearance' => ['FDA Import Clearance'],
+]);
+define('LEGAL_DEADLINE_ALERT_DAYS', max(1, (int) (getenv('LEGAL_DEADLINE_ALERT_DAYS') ?: 7)));
 // Files are served only through authorised application actions, never directly
 // by the web server.
 define('UPLOAD_DIR', dirname(__DIR__, 2) . '/storage/uploads');

@@ -76,7 +76,7 @@ try {
         ->fetchColumn();
 
     $stats['Open Legal Cases'] = (int) $pdo
-        ->query("SELECT COUNT(*) FROM team8_legal_cases WHERE status = 'open'")
+        ->query("SELECT COUNT(*) FROM team8_legal_cases WHERE deleted_at IS NULL AND status IN ('open', 'under_review')")
         ->fetchColumn();
 } catch (PDOException $e) {
     $dbError = 'Could not load live stats - has database/schema.sql been imported yet?';
@@ -315,8 +315,8 @@ try {
         $openLegalCasesNearDeadline = (int) $pdo->query(
             "SELECT COUNT(*) FROM team8_legal_cases
              WHERE deleted_at IS NULL
-               AND status = 'open'
-               AND deadline BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 14 DAY)"
+             AND status <> 'closed'
+             AND deadline BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)"
         )->fetchColumn();
     } catch (PDOException $e) {
         $openLegalCasesNearDeadline = 0;

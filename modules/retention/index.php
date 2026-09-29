@@ -73,13 +73,6 @@ $entityTypeLabels = [
     'legal_case' => 'Legal Case',
 ];
 
-function t8_retention_activity_label(string $action, string $entityType): string
-{
-    $entity = str_replace('_', ' ', $entityType);
-    $verb = str_replace('_', ' ', $action);
-    return ucfirst(trim($entity . ' ' . $verb));
-}
-
 switch ($action) {
     case 'register':
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -138,7 +131,7 @@ switch ($action) {
         )->fetchAll(PDO::FETCH_ASSOC);
         $candidateLegalCases = $pdo->query(
             "SELECT lc.id, lc.title FROM team8_legal_cases lc
-             WHERE lc.status = 'closed'
+             WHERE lc.deleted_at IS NULL AND lc.status = 'closed'
                AND NOT EXISTS (SELECT 1 FROM team8_records r WHERE r.entity_type = 'legal_case' AND r.entity_id = lc.id)
              ORDER BY lc.title"
         )->fetchAll(PDO::FETCH_ASSOC);
@@ -257,7 +250,7 @@ if ($showList) {
 
     $kpiTotalDocuments = (int) $pdo->query('SELECT COUNT(*) FROM team8_documents WHERE deleted_at IS NULL')->fetchColumn();
     $kpiTotalContracts = (int) $pdo->query('SELECT COUNT(*) FROM team8_contracts WHERE deleted_at IS NULL')->fetchColumn();
-    $kpiTotalLegalCases = (int) $pdo->query("SELECT COUNT(*) FROM team8_legal_cases WHERE status <> 'archived'")->fetchColumn();
+    $kpiTotalLegalCases = (int) $pdo->query('SELECT COUNT(*) FROM team8_legal_cases WHERE deleted_at IS NULL')->fetchColumn();
 
     $kpiDueSoon90 = (int) $pdo->query(
         "SELECT COUNT(*) FROM team8_records WHERE status IN ('active', 'due_review')
@@ -275,15 +268,6 @@ if ($showList) {
     $totalTrackable = $kpiTotalDocuments + $kpiTotalContracts + $kpiTotalLegalCases;
     $totalOrphans = $orphanDocuments + $orphanContracts + $orphanLegalCases;
     $compliancePercent = $totalTrackable > 0 ? (int) round((($totalTrackable - $totalOrphans) / $totalTrackable) * 100) : 100;
-
-    $unifiedActivity = $pdo->query(
-        "SELECT a.action, a.entity_type, a.created_at, u.full_name
-         FROM audit_logs a
-         JOIN users u ON u.id = a.user_id
-         WHERE a.entity_type IN ('document', 'contract', 'legal_case', 'retention_record')
-         ORDER BY a.created_at DESC, a.id DESC
-         LIMIT 10"
-    )->fetchAll(PDO::FETCH_ASSOC);
 
     $quickListByType = [];
     foreach (T8_RETENTION_ENTITY_TYPES as $type) {
@@ -570,22 +554,11 @@ if ($showList) {
     </div>
 
     <?php if ($isAdmin): ?>
-        <div class="t8-retention-summary-grid">
-            <div class="t8-card t8-retention-ending-card">
-                <div class="t8-card-header"><h2 class="t8-card-title"><i class="fa-solid fa-list-check"></i> Recent Activity</h2></div>
-                <?php if ($unifiedActivity === []): ?>
-                    <div class="t8-retention-empty"><i class="fa-regular fa-face-smile"></i><span>No document, contract, or legal case activity recorded yet.</span></div>
-                <?php else: ?>
-                    <?php foreach ($unifiedActivity as $activity): ?>
-                        <div class="t8-retention-deadline">
-                            <span class="t8-retention-severity"></span>
-                            <strong><?= e($activity['full_name']) ?> <?= e(t8_retention_activity_label((string) $activity['action'], (string) $activity['entity_type'])) ?></strong>
-                            <span><?= e(format_date((string) $activity['created_at'], 'M d, g:i A')) ?></span>
-                        </div>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </div>
+        <div class="t8-retention-summary-grid t8-compliance-report-section" style="grid-template-columns:minmax(0, 1fr);">
+            <?php $t8ComplianceEmbedded = true; require __DIR__ . '/../compliance_reports/index.php'; ?>
+        </div>
 
+        <div class="t8-retention-summary-grid" style="grid-template-columns:minmax(0, 1fr);">
             <div class="t8-card t8-compliance-card">
                 <div class="t8-card-header"><h2 class="t8-card-title"><i class="fa-solid fa-chart-pie"></i> Retention Compliance</h2><a class="t8-card-link" href="#retention-records">View Records <span aria-hidden="true">→</span></a></div>
                 <div class="t8-compliance-score"><strong><?= e((string) $compliancePercent) ?>%</strong><span>of records registered</span></div>

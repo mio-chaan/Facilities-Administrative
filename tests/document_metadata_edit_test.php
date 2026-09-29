@@ -16,7 +16,7 @@ class T8MetadataStatement extends PDOStatement
     {
         $result = $this->pdo->executeSql($this->sql, $params ?? []);
         $this->columnValue = $result;
-        return str_starts_with($this->sql, 'SELECT 1 FROM team8_legal_documents') || $result !== false;
+        return $result !== false;
     }
 
     public function fetchColumn(int $column = 0): mixed
@@ -47,7 +47,6 @@ class T8MetadataPdo extends PDO
     public bool $deleteBeforeUpdate = false;
     public bool $concurrentTitleChange = false;
     public bool $ownerDeletedBeforeUpdate = false;
-    public bool $legalLinked = false;
     private array $deletedUserIds = [];
     private int $affectedRows = 0;
     private int $auditAttempts = 0;
@@ -106,9 +105,6 @@ class T8MetadataPdo extends PDO
 
     public function executeSql(string $sql, array $params): mixed
     {
-        if (str_starts_with($sql, 'SELECT 1 FROM team8_legal_documents')) {
-            return $this->legalLinked ? 1 : false;
-        }
         if (str_starts_with($sql, 'SELECT id FROM users')) {
             $userId = (int) ($params['id'] ?? 0);
             return in_array($userId, [12, 13, 14], true) && !in_array($userId, $this->deletedUserIds, true)
@@ -306,14 +302,6 @@ $assert(!t8_document_update_metadata($unauthorizedPdo, 1, ['title' => 'Unauthori
 $assert(!t8_document_update_metadata($unauthorizedPdo, 1, ['owner_id' => 13], 12, false), 'Non-admin uploaders must not change owner assignment.');
 $assert(!t8_document_update_metadata($unauthorizedPdo, 1, ['department_id' => 4], 12, false), 'Non-admin uploaders must not change department assignment.');
 $assert($unauthorizedPdo->updates === [] && $unauthorizedPdo->auditRows === [], 'Unauthorized requests must not write metadata or audits.');
-
-$legalLinkedPdo = $makePdo();
-$legalLinkedPdo->legalLinked = true;
-$GLOBALS['pdo'] = $legalLinkedPdo;
-$assert(!t8_document_update_metadata($legalLinkedPdo, 1, ['category_id' => 11], 12, true), 'Legal-linked documents must not change category.');
-$assert(!t8_document_update_metadata($legalLinkedPdo, 1, ['department_id' => 5], 12, true), 'Legal-linked documents must not change department.');
-$assert(t8_document_update_metadata($legalLinkedPdo, 1, ['category_id' => 10, 'department_id' => 4], 12, true), 'Unchanged Legal classification values should remain acceptable.');
-$assert($legalLinkedPdo->updates === [] && $legalLinkedPdo->auditRows === [], 'Rejected or unchanged Legal classification must not create updates or audits.');
 
 $nonexistentPdo = $makePdo();
 $GLOBALS['pdo'] = $nonexistentPdo;
