@@ -38,6 +38,11 @@ define('MANDATORY_COMPLIANCE_DOCUMENTS', [
     'Fire Safety Inspection Certificate' => ['Fire Safety Inspection Certificate'],
     'FDA Import Clearance' => ['FDA Import Clearance'],
 ]);
+define('RETENTION_RENEWAL_DOCUMENTS', [
+    "Mayor's Business Permit" => "Mayor's Business Permit",
+    'Sanitary Inspection Permit' => 'Sanitary Permit',
+    'Fire Safety Inspection Certificate' => 'Fire Safety Inspection Certificate',
+]);
 define('LEGAL_DEADLINE_ALERT_DAYS', max(1, (int) (getenv('LEGAL_DEADLINE_ALERT_DAYS') ?: 7)));
 // Files are served only through authorised application actions, never directly
 // by the web server.

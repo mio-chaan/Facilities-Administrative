@@ -39,6 +39,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../../app/includes/compliance_document_validator.php';
+
 $retentionHelperPath = __DIR__ . '/../../app/includes/retention_helpers.php';
 if (is_file($retentionHelperPath)) {
     require_once $retentionHelperPath;
@@ -63,6 +65,65 @@ if (!function_exists('t8_retention_resolve_entity')) {
 
 if (!$isAdmin && in_array($action, ['register', 'archive', 'dispose', 'dispose_request', 'dispose_authorize'], true)) {
     t8_require_role(['admin']);
+}
+
+$renewalDocumentLabel = trim((string) ($_GET['document_type'] ?? $_POST['document_type'] ?? ''));
+$renewalRequiredName = RETENTION_RENEWAL_DOCUMENTS[$renewalDocumentLabel] ?? null;
+$renewalPrerequisites = [];
+$renewalPrerequisitesValid = false;
+if (in_array($action, ['renewal', 'renewal_submit'], true)) {
+    if ($renewalRequiredName === null) {
+        $errors[] = 'Select a configured document type for renewal.';
+        $action = 'list';
+    } else {
+        $renewalGroups = t8_compliance_check_mandatory_documents($pdo, $renewalRequiredName);
+        $renewalPrerequisites = $renewalGroups[0]['prerequisites'] ?? [];
+        $renewalPrerequisitesValid = $renewalPrerequisites !== []
+            && t8_compliance_checklist_is_valid($renewalGroups, false);
+
+        if ($action === 'renewal_submit') {
+            $notes = trim((string) ($_POST['notes'] ?? ''));
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+                $errors[] = 'Your session expired. Please try again.';
+            } elseif (strlen($notes) > 5000) {
+                $errors[] = 'Notes must be 5,000 characters or fewer.';
+            } elseif ($renewalPrerequisitesValid) {
+                try {
+                    $pdo->beginTransaction();
+                    $requestStmt = $pdo->prepare(
+                        "INSERT INTO renewal_requests (main_document_type, status, initiated_by, notes)
+                         VALUES (:main_document_type, 'in_progress', :initiated_by, :notes)"
+                    );
+                    $requestStmt->execute([
+                        'main_document_type' => $renewalRequiredName,
+                        'initiated_by' => $currentUserId,
+                        'notes' => $notes !== '' ? $notes : null,
+                    ]);
+                    $requestId = (int) $pdo->lastInsertId();
+                    t8_audit_log(
+                        $pdo,
+                        $currentUserId,
+                        'renewal_request',
+                        $requestId,
+                        'Renewal Initiated',
+                        null,
+                        $renewalDocumentLabel . ' | initiated by user #' . $currentUserId,
+                        true
+                    );
+                    $pdo->commit();
+                    t8_flash_set('success', 'Renewal request initiated.');
+                    redirect(page_url('retention'));
+                } catch (Throwable $e) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    error_log('Renewal request creation failed: ' . $e->getMessage());
+                    $errors[] = 'The renewal request could not be created. Please try again.';
+                }
+            }
+            $action = 'renewal';
+        }
+    }
 }
 
 t8_retention_refresh_due_review($pdo, (int) $currentUserId);
@@ -219,9 +280,10 @@ switch ($action) {
         break;
 }
 
+$showRenewal = $action === 'renewal';
 $showRegisterForm = $action === 'register';
 $showView = $action === 'view';
-$showList = !$showRegisterForm && !$showView;
+$showList = !$showRenewal && !$showRegisterForm && !$showView;
 
 if ($showList) {
     $entityTypeFilter = (string) ($_GET['entity_type'] ?? '');
@@ -412,6 +474,63 @@ if ($showList) {
         <?php endif; ?>
     </div>
 
+<?php elseif ($showRenewal): ?>
+    <div class="t8-card-header" style="margin-bottom: var(--t8-space-4);">
+        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('retention')) ?>"><i class="fa-solid fa-arrow-left"></i> Back to Retention</a>
+    </div>
+    <div class="t8-card">
+        <div class="t8-card-header"><h2 class="t8-card-title">Initiate Renewal: <?= e($renewalDocumentLabel) ?></h2></div>
+        <?php if ($renewalPrerequisitesValid): ?>
+            <p class="t8-help-text">All required prerequisites are approved and current. Submit this request to begin renewal.</p>
+            <form method="post" action="<?= e(page_url('retention', ['action' => 'renewal_submit'])) ?>" class="t8-legal-form-grid">
+                <?= t8_csrf_field() ?>
+                <input type="hidden" name="document_type" value="<?= e($renewalDocumentLabel) ?>">
+                <div class="t8-field t8-form-span-full">
+                    <label class="t8-label" for="renewal_notes">Notes (optional)</label>
+                    <textarea class="t8-input" id="renewal_notes" name="notes" rows="4" maxlength="5000"><?= e((string) ($_POST['notes'] ?? '')) ?></textarea>
+                </div>
+                <div class="t8-form-actions">
+                    <button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-rotate"></i> Submit Renewal Request</button>
+                    <a class="t8-btn t8-btn-outline" href="<?= e(page_url('retention')) ?>">Cancel</a>
+                </div>
+            </form>
+        <?php else: ?>
+            <p class="t8-help-text">Renewal is blocked until every required prerequisite is approved and current.</p>
+        <?php endif; ?>
+    </div>
+    <?php if (!$renewalPrerequisitesValid): ?>
+        <dialog class="t8-compliance-requirements-modal" id="t8RenewalRequirementsModal" aria-labelledby="t8RenewalRequirementsTitle">
+            <div class="t8-compliance-requirements-header">
+                <div><span class="t8-compliance-requirements-eyebrow">Renewal paused</span><h2 id="t8RenewalRequirementsTitle">Renewal Checklist</h2></div>
+                <button class="t8-btn t8-btn-outline t8-btn-sm" type="button" data-close-renewal-checklist>Close</button>
+            </div>
+            <p class="t8-help-text">Upload or renew the required documents for <?= e($renewalDocumentLabel) ?> before starting this renewal.</p>
+            <ul class="t8-compliance-requirements-list">
+                <?php foreach ($renewalPrerequisites as $requirement): ?>
+                    <?php $isValidRequirement = $requirement['status'] === 'ok'; ?>
+                    <li class="<?= $isValidRequirement ? 'is-valid' : 'is-invalid' ?>">
+                        <span class="t8-compliance-requirement-indicator" aria-hidden="true"><i class="fa-solid <?= $isValidRequirement ? 'fa-circle-check' : 'fa-circle-exclamation' ?>"></i></span>
+                        <span><strong><?= e($requirement['name']) ?></strong><small><?= e($isValidRequirement ? $requirement['detail'] : ($requirement['status'] === 'missing' ? 'Not uploaded' : ($requirement['expiration_date'] ? 'Expired on ' . format_date((string) $requirement['expiration_date'], 'M d, Y') : 'Expired - no expiration date'))) ?></small></span>
+                        <span class="t8-compliance-requirement-status"><?= $isValidRequirement ? 'Valid' : e(ucfirst((string) $requirement['status'])) ?></span>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+            <div class="t8-compliance-requirements-actions">
+                <a class="t8-btn t8-btn-accent" href="<?= e(page_url('documents', ['action' => 'create'])) ?>"><i class="fa-solid fa-folder-open"></i> Go to Document Management</a>
+            </div>
+        </dialog>
+        <script>
+        (function () {
+            var modal = document.getElementById('t8RenewalRequirementsModal');
+            if (!modal) return;
+            var closeButton = modal.querySelector('[data-close-renewal-checklist]');
+            if (closeButton) closeButton.addEventListener('click', function () { modal.close(); });
+            if (typeof modal.showModal === 'function') modal.showModal();
+            else modal.setAttribute('open', '');
+        })();
+        </script>
+    <?php endif; ?>
+
 <?php elseif ($showView): ?>
 
     <div class="t8-card-header" style="margin-bottom: var(--t8-space-4);">
@@ -553,6 +672,24 @@ if ($showList) {
         </div>
     </div>
 
+        <section class="t8-card t8-renewal-entry-section">
+            <div class="t8-card-header"><h2 class="t8-card-title"><i class="fa-solid fa-rotate"></i> Essential Permit Renewals</h2></div>
+            <div class="t8-table-wrap">
+                <table class="t8-table">
+                    <thead><tr><th>Document</th><th>Required prerequisites</th><th>Action</th></tr></thead>
+                    <tbody>
+                        <?php foreach (RETENTION_RENEWAL_DOCUMENTS as $renewalLabel => $requiredName): ?>
+                            <?php $renewalGroup = t8_compliance_check_mandatory_documents($pdo, $requiredName)[0] ?? ['prerequisites' => []]; ?>
+                            <tr>
+                                <td><?= e($renewalLabel) ?></td>
+                                <td><?= e(implode(', ', array_column($renewalGroup['prerequisites'], 'name'))) ?></td>
+                                <td><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('retention', ['action' => 'renewal', 'document_type' => $renewalLabel])) ?>"><i class="fa-solid fa-rotate"></i> Initiate Renewal</a></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
     <?php if ($isAdmin): ?>
         <div class="t8-retention-summary-grid t8-compliance-report-section" style="grid-template-columns:minmax(0, 1fr);">
             <?php $t8ComplianceEmbedded = true; require __DIR__ . '/../compliance_reports/index.php'; ?>

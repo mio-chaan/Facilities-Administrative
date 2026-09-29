@@ -396,6 +396,44 @@ CREATE TABLE `team8_documents` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Tables for retention renewal prerequisites and requests
+--
+
+CREATE TABLE IF NOT EXISTS `retention_renewal_rules` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `main_document_type` varchar(150) NOT NULL,
+  `prerequisite_document_type` varchar(150) NOT NULL,
+  `is_required` tinyint(1) NOT NULL DEFAULT 1,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_retention_renewal_rule` (`main_document_type`,`prerequisite_document_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `retention_renewal_rules` (`main_document_type`, `prerequisite_document_type`, `is_required`) VALUES
+  ('Mayor''s Business Permit', 'Barangay Business Clearance', 1),
+  ('Mayor''s Business Permit', 'Community Tax Certificate (Cedula)', 1),
+  ('Mayor''s Business Permit', 'Real Property Tax Clearance', 1),
+  ('Sanitary Permit', 'Staff Health Certificates', 1),
+  ('Sanitary Permit', 'Water Potability Test Result', 1),
+  ('Fire Safety Inspection Certificate', 'Fire Extinguisher Inspection Log', 1),
+  ('Fire Safety Inspection Certificate', 'Building Safety Clearance', 1)
+ON DUPLICATE KEY UPDATE `is_required` = VALUES(`is_required`);
+
+CREATE TABLE IF NOT EXISTS `renewal_requests` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `main_document_type` varchar(150) NOT NULL,
+  `status` enum('in_progress','completed') NOT NULL DEFAULT 'in_progress',
+  `initiated_by` int(11) NOT NULL,
+  `notes` text DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_renewal_requests_initiated_by` (`initiated_by`),
+  CONSTRAINT `fk_renewal_requests_user` FOREIGN KEY (`initiated_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
 -- Table structure for table `team8_compliance_reports`
 --
 

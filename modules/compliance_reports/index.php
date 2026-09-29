@@ -40,7 +40,7 @@ function t8_compliance_report_date_valid(string $value): bool
         && ($dateErrors === false || ($dateErrors['warning_count'] === 0 && $dateErrors['error_count'] === 0));
 }
 
-function t8_compliance_check_mandatory_documents(PDO $pdo, ?string $onlyRequiredName = null, bool $expireOnToday = true): array
+function t8_compliance_report_check_mandatory_documents(PDO $pdo, ?string $onlyRequiredName = null, bool $expireOnToday = true): array
 {
     $requirements = MANDATORY_COMPLIANCE_DOCUMENTS;
     if ($onlyRequiredName !== null) {
@@ -671,7 +671,7 @@ if ($complianceAction === 'check_single_document') {
         t8_compliance_json_response(['success' => false, 'canSend' => false, 'message' => 'This draft report is not available.'], 404);
     }
 
-    $singleCheck = t8_compliance_check_mandatory_documents($pdo, $requiredDocType, false)[0] ?? null;
+    $singleCheck = t8_compliance_report_check_mandatory_documents($pdo, $requiredDocType, false)[0] ?? null;
     if ($singleCheck === null) {
         t8_compliance_json_response(['success' => false, 'canSend' => false, 'message' => 'The selected requirement could not be checked.'], 400);
     }
@@ -766,7 +766,7 @@ if ($complianceAction === 'approve_send') {
     $requirementsValid = true;
     $showRequirementsChecklist = false;
     if ($errors === []) {
-        $requirementsChecklist = t8_compliance_check_mandatory_documents($pdo);
+        $requirementsChecklist = t8_compliance_report_check_mandatory_documents($pdo);
         foreach ($requirementsChecklist as $requirement) {
             if ($requirement['status'] !== 'ok') {
                 $requirementsValid = false;

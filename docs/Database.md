@@ -14,7 +14,7 @@
 | Facilities Reservation | `team8_facilities`, `team8_facility_maintenance_history`, `team8_equipment`, `team8_reservations`, `team8_reservation_equipment`, `team8_reservation_cancellation_requests`, `team8_reservation_approvals` |
 | Visitor Management | `team8_visitors` |
 | Document Management | `team8_document_categories`, `team8_documents`, `team8_document_versions` |
-| Records Retention and Compliance | `team8_retention_schedules`, `team8_records`, `team8_compliance_checks`, `team8_compliance_reports` |
+| Records Retention and Compliance | `team8_retention_schedules`, `team8_records`, `team8_compliance_checks`, `team8_compliance_reports`, `retention_renewal_rules`, `renewal_requests` |
 | Legal Management | `team8_legal_cases`, `team8_legal_documents` |
 | Contract Management | `team8_contracts`, `team8_parties`, `team8_contract_parties`, `team8_contract_documents`, `team8_contract_history`, `team8_contract_obligations` |
 | HR Document Automation | `team8_incident_reports`, `team8_notice_to_explain`, `team8_explanations`, `team8_memorandums`, `team8_memorandum_recipients`, `team8_certificates`, `team8_certificate_recipients`, `team8_hr_document_versions` |
@@ -23,6 +23,7 @@
 
 - `team8_legal_cases.contract_id` references `team8_contracts` through a deferred foreign key because legal cases are defined first.
 - `team8_documents.file_path` is the current file, while `team8_document_versions.file_path` preserves each historical file.
+- Renewal prerequisites are configured in `retention_renewal_rules`; initiated requests are stored in `renewal_requests`.
 - Visitor status values are `scheduled`, `late`, `checked_in`, `checked_out`, `cancelled`, and `expired`. Scheduled visits become late after their expected arrival time and expire at the 10:00 PM cutoff if they have not checked in.
 - A reservation's free-text reason is stored in `team8_reservations.description`; approver notes are stored in `team8_reservation_approvals.remarks`.
 - `schema.sql` is the complete final schema for new installations. Import this file only; do not import the dated migration files afterward.
