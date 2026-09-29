@@ -50,7 +50,7 @@ $page      = $page ?? current_page();
     <?php if (in_array($page, ['retention', 'compliance_reports_all'], true)): ?>
         <link rel="stylesheet" href="<?= e(asset('css/retention.css')) ?>">
     <?php endif; ?>
-    <?php if ($page === 'legal' || $page === 'contracts'): ?>
+    <?php if (in_array($page, ['legal', 'contracts', 'party_registry'], true)): ?>
         <link rel="stylesheet" href="<?= e(asset('css/contract-lifecycle.css')) ?>">
     <?php endif; ?>
     <?php if (in_array($page, ['contracts', 'visitor', 'legal'], true)): ?>

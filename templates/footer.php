@@ -18,7 +18,7 @@ $page = $page ?? current_page();
 <?php if ($page === 'reservation'): ?>
     <script src="<?= e(asset('js/reservation.js')) ?>"></script>
 <?php endif; ?>
-<?php if ($page === 'contracts'): ?>
+<?php if (in_array($page, ['contracts', 'party_registry'], true)): ?>
     <script src="<?= e(asset('js/contracts.js')) ?>"></script>
 <?php endif; ?>
 <?php if ($page === 'facilities'): ?>

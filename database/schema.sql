@@ -231,28 +231,6 @@ CREATE TABLE `team8_contract_history` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
--- Table structure for table `team8_contract_obligations`
---
-
-DROP TABLE IF EXISTS `team8_contract_obligations`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `team8_contract_obligations` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `contract_id` int(11) NOT NULL,
-  `description` varchar(500) NOT NULL,
-  `due_date` date DEFAULT NULL,
-  `status` varchar(30) NOT NULL DEFAULT 'pending',
-  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `fk_team8_contractobl_contract` (`contract_id`),
-  KEY `idx_team8_contractobl_duedate` (`due_date`),
-  CONSTRAINT `fk_team8_contractobl_contract` FOREIGN KEY (`contract_id`) REFERENCES `team8_contracts` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
 -- Table structure for table `team8_contract_parties`
 --
 
@@ -301,7 +279,11 @@ CREATE TABLE `team8_contracts` (
   `notice_period_days` int(11) DEFAULT NULL,
   `termination_date` date DEFAULT NULL,
   `termination_reason` varchar(500) DEFAULT NULL,
-  `status` varchar(30) NOT NULL DEFAULT 'draft',
+  `rejection_reason` varchar(500) DEFAULT NULL,
+  `attachment_path` varchar(500) DEFAULT NULL,
+  `attachment_type` varchar(20) DEFAULT NULL,
+  `attachment_name` varchar(255) DEFAULT NULL,
+  `status` enum('draft','approval','signing','active','renewal','expiration','termination','archived') NOT NULL DEFAULT 'draft',
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `deleted_at` datetime DEFAULT NULL,
@@ -314,6 +296,7 @@ CREATE TABLE `team8_contracts` (
   KEY `idx_team8_contracts_enddate` (`end_date`),
   KEY `idx_team8_contracts_number` (`contract_number`),
   KEY `idx_team8_contracts_department` (`department_id`,`status`),
+  KEY `idx_team8_contracts_type_status` (`contract_type`,`status`),
   CONSTRAINT `fk_team8_contracts_department` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`),
   CONSTRAINT `fk_team8_contracts_owner` FOREIGN KEY (`owner_id`) REFERENCES `users` (`id`),
   CONSTRAINT `fk_team8_contracts_renewed` FOREIGN KEY (`renewed_from_id`) REFERENCES `team8_contracts` (`id`)
@@ -832,12 +815,20 @@ DROP TABLE IF EXISTS `team8_parties`;
 CREATE TABLE `team8_parties` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(200) NOT NULL,
-  `type` varchar(50) NOT NULL,
+  `trade_name` varchar(200) DEFAULT NULL,
+  `registration_number` varchar(100) DEFAULT NULL,
+  `tin` varchar(50) DEFAULT NULL,
+  `type` enum('organization','individual') NOT NULL,
   `contact_email` varchar(150) DEFAULT NULL,
   `contact_phone` varchar(50) DEFAULT NULL,
+  `primary_contact` varchar(150) DEFAULT NULL,
+  `address` text DEFAULT NULL,
+  `authorized_signatory_name` varchar(150) DEFAULT NULL,
+  `authorized_signatory_position` varchar(150) DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_team8_parties_type_name` (`type`,`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
