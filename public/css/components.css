@@ -252,6 +252,7 @@
 .t8-alert-success { background: #eaf6ee; border-color: var(--t8-success); color: #1f5c38; }
 .t8-alert-danger  { background: #fdeceb; border-color: var(--t8-danger); color: #8a2e1e; }
 .t8-alert-warning { background: #fff8e6; border-color: var(--t8-warning); color: #8a5c10; }
+.t8-alert-warning a { text-decoration: underline; }
 .t8-alert-info    { background: #f3e9e9; border-color: var(--t8-primary); color: var(--t8-primary-dark); }
 
 /* ---- Auth layout styles ---- */
