@@ -25,6 +25,7 @@ $statMeta = [
 
 $statLinks = [
     'Total Facilities'      => page_url('facilities'),
+    'Pending Reservations'  => page_url('reservation', ['tab' => 'pending']),
     'Visitors Today'        => page_url('visitor'),
     'Active Contracts'      => page_url('contracts'),
     'Documents'             => page_url('documents'),
