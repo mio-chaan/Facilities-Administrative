@@ -4,7 +4,7 @@
  */
 declare(strict_types=1);
 
-const T8_DOCUMENT_BROWSE_PAGE_SIZE = 25;
+const T8_DOCUMENT_BROWSE_PAGE_SIZE = 5;
 const T8_DOCUMENT_BROWSE_MAX_PAGE = 100;
 
 /** Normalize a user-supplied browse page without allowing huge offsets. */
