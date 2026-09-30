@@ -521,4 +521,109 @@ INSERT INTO team8_reservations
         'Human Resources', 'HR Hannah', 15, NULL, 'Meeting',
         'Q4 HR Planning Session', NULL, 'Need projector.', '2026-10-05 09:00:00',
         'Projector, whiteboard markers'),
-    (2, 3, 10, '2026-10-20 13:00:00', '2026
+    (2, 3, 10, '2026-10-20 13:00:00', '2026-10-20 17:00:00', 'pending', 6,
+        'Operations', 'Operations Omar', 120, NULL, 'Company Event',
+        'Annual Town Hall', NULL, 'Need PA system.', '2026-10-20 13:00:00',
+        'PA system, microphones, stage'),
+    (3, 2, 7, '2026-10-12 08:00:00', '2026-10-12 12:00:00', 'approved', 2,
+        'Finance', 'Finance Felix', 30, NULL, 'Training',
+        'Financial Reporting Workshop', NULL, NULL, '2026-10-12 08:00:00',
+        'Projector, 30 chairs'),
+    (4, 4, 12, '2026-11-05 15:00:00', '2026-11-05 18:00:00', 'cancelled', 9,
+        'Security', 'Security Sam', 20, NULL, 'Sports',
+        'Inter-department Basketball', NULL, 'Cancelled due to weather.',
+        '2026-11-05 15:00:00', 'Scoreboard, volleyball net');
+
+INSERT INTO team8_reservation_equipment (id, reservation_id, equipment_id, quantity) VALUES
+    (1, 1, 1, 1),
+    (2, 1, 3, 1),
+    (3, 2, 6, 2),
+    (4, 2, 7, 2),
+    (5, 3, 4, 1),
+    (6, 4, 8, 1),
+    (7, 4, 9, 1);
+
+INSERT INTO team8_reservation_approvals
+    (id, reservation_id, approver_id, step_order, status, remarks, decided_at) VALUES
+    (1, 1, 2, 1, 'approved', 'Facility available.', '2026-09-28 10:00:00'),
+    (2, 2, 2, 1, 'pending', NULL, NULL),
+    (3, 3, 2, 1, 'approved', 'Approved.', '2026-09-30 14:00:00'),
+    (4, 4, 2, 1, 'rejected', 'Cancelled by requester.', '2026-10-30 09:00:00');
+
+INSERT INTO team8_reservation_cancellation_requests
+    (id, reservation_id, requested_by, reason, status, requested_at,
+     reviewed_by, reviewed_at, admin_remark) VALUES
+    (1, 4, 12, 'Weather forecast predicts heavy rain.', 'approved',
+        '2026-10-29 16:00:00', 2, '2026-10-30 09:00:00', 'Approved cancellation.');
+
+-- =====================================================================
+-- 30. VISITORS
+-- =====================================================================
+INSERT INTO team8_visitors
+    (id, full_name, visitor_type, contact, company, person_to_visit,
+     purpose, scheduled_date, status, check_in_time, check_out_time, logged_by) VALUES
+    (1, 'Juan Dela Cruz', 'Supplier', '+63-917-111-2222', 'Bright Office Supplies',
+        'Procurement Pete', 'Deliver office supplies', '2026-10-01 09:00:00',
+        'checked_out', '2026-10-01 09:05:00', '2026-10-01 10:30:00', 3),
+    (2, 'Maria Clara', 'Client', '+63-917-333-4444', 'MPSI',
+        'Legal Lena', 'Contract signing meeting', '2026-10-02 14:00:00',
+        'checked_in', '2026-10-02 13:55:00', NULL, 3),
+    (3, 'Pedro Penduko', 'Applicant', '+63-917-555-6666', NULL,
+        'HR Hannah', 'Job interview', '2026-10-03 10:00:00',
+        'scheduled', NULL, NULL, 3),
+    (4, 'Ana Reyes', 'Government', '+63-917-777-8888', 'BIR',
+        'Finance Felix', 'Tax audit', '2026-10-04 08:30:00',
+        'scheduled', NULL, NULL, 3);
+
+-- =====================================================================
+-- 31. RENEWAL REQUESTS (retention renewal prerequisites)
+-- =====================================================================
+INSERT INTO renewal_requests
+    (id, main_document_type, status, initiated_by, notes) VALUES
+    (1, 'Mayor''s Business Permit', 'in_progress', 6,
+        'Renewal for 2027. Gathering prerequisite documents.'),
+    (2, 'Sanitary Permit', 'in_progress', 6,
+        'Awaiting water potability test result.'),
+    (3, 'Fire Safety Inspection Certificate', 'completed', 6,
+        'All prerequisites submitted and verified.');
+
+-- =====================================================================
+-- 32. NOTIFICATIONS
+-- =====================================================================
+INSERT INTO notifications (id, user_id, message, target_url, status) VALUES
+    (1, 1, 'Contract CON-2026-0002 is pending your approval.',
+        '/contracts/2', 'unread'),
+    (2, 4, 'New legal case assigned: MPSI vs. Company.',
+        '/legal-cases/1', 'unread'),
+    (3, 2, 'Reservation #2 for Multi-Purpose Hall is pending approval.',
+        '/reservations/2', 'read'),
+    (4, 6, 'Compliance report for Q3 2026 has been approved.',
+        '/compliance-reports/1', 'read'),
+    (5, 5, 'Your explanation for NTE-2026-0001 has been accepted.',
+        '/explanations/1', 'read'),
+    (6, 11, 'Incident Report IR-2026-0002 is pending review.',
+        '/incident-reports/2', 'unread');
+
+-- =====================================================================
+-- 33. AUDIT LOGS
+-- =====================================================================
+INSERT INTO audit_logs
+    (id, user_id, entity_type, entity_id, action, old_value, new_value) VALUES
+    (1, 1, 'contract', 1, 'status_change', '{"status":"approval"}', '{"status":"active"}'),
+    (2, 4, 'legal_case', 1, 'create', NULL, '{"title":"MPSI vs. Company"}'),
+    (3, 2, 'reservation', 1, 'approve', '{"status":"pending"}', '{"status":"approved"}'),
+    (4, 11, 'explanation', 1, 'review', '{"status":"pending"}', '{"status":"accepted"}'),
+    (5, 1, 'document', 3, 'approve', '{"status":"pending"}', '{"status":"approved"}'),
+    (6, 6, 'compliance_report', 1, 'approve', '{"status":"draft"}', '{"status":"approved"}');
+
+-- =====================================================================
+-- 34. LOGIN THROTTLE (demo of locked account)
+-- =====================================================================
+INSERT INTO team8_login_throttle (identifier, attempts, locked_until) VALUES
+    ('attacker@example.local', 5, '2026-10-10 12:00:00');
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- =====================================================================
+-- END OF SEED
+-- =====================================================================
