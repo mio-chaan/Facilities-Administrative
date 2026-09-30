@@ -47,8 +47,11 @@ $page      = $page ?? current_page();
         <link rel="stylesheet" href="<?= e(asset('css/documents.css')) ?>">
         <link rel="stylesheet" href="<?= e(asset('css/row-menu.css')) ?>">
     <?php endif; ?>
-    <?php if ($page === 'retention'): ?>
+    <?php if (in_array($page, ['retention', 'compliance_reports_all'], true)): ?>
         <link rel="stylesheet" href="<?= e(asset('css/retention.css')) ?>">
+    <?php endif; ?>
+    <?php if (in_array($page, ['legal', 'contracts', 'party_registry'], true)): ?>
+        <link rel="stylesheet" href="<?= e(asset('css/contract-lifecycle.css')) ?>">
     <?php endif; ?>
     <?php if (in_array($page, ['contracts', 'visitor', 'legal'], true)): ?>
         <!-- Row meatball-menu + View Details modal system, shared by
@@ -59,6 +62,7 @@ $page      = $page ?? current_page();
              "All Reservations" table). -->
         <link rel="stylesheet" href="<?= e(asset('css/row-menu.css')) ?>">
     <?php endif; ?>
+    <link rel="stylesheet" href="<?= e(asset('css/content-theme.css')) ?>">
 </head>
 <body>
 <?php $flashes = t8_flash_get(); ?>

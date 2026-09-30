@@ -755,21 +755,14 @@ switch ($action) {
         if (!$target || !in_array($target['status'], ['pending', 'approved', 'cancellation_pending'], true)) {
             t8_flash_set('danger', "That reservation can't be cancelled.");
         } elseif ($isAdmin) {
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare("UPDATE team8_reservations
-                               SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'admin_cancelled', cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
-                               WHERE id = :id")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->prepare("UPDATE team8_reservation_cancellation_requests
-                               SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW(), admin_remark = 'Cancelled by administrator'
-                               WHERE reservation_id = :id AND status = 'pending'")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) { $pdo->rollBack(); }
-                throw $e;
-            }
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'admin_cancelled', cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW(), admin_remark = 'Cancelled by administrator'
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'admin_cancel');
             t8_flash_set('success', 'Reservation cancelled and moved to Archive.');
         } elseif ((int) $target['user_id'] === $currentUserId && $target['status'] === 'pending') {
@@ -798,23 +791,16 @@ switch ($action) {
                 if ($reason === '') {
                     t8_flash_set('danger', 'A reason for cancellation is required.');
                 } else {
-                    $pdo->beginTransaction();
-                    try {
-                        $pdo->prepare("UPDATE team8_reservations
-                                       SET status = 'cancellation_pending', cancellation_reason = :reason,
-                                           cancellation_requested_by = :user_id, cancellation_requested_at = NOW(), cancellation_decision = 'pending'
-                                       WHERE id = :id")
-                            ->execute(['reason' => $reason, 'user_id' => $currentUserId, 'id' => $id]);
-                        $requestStmt = $pdo->prepare(
-                            "INSERT INTO team8_reservation_cancellation_requests (reservation_id, requested_by, reason, status)
-                             VALUES (:reservation_id, :requested_by, :reason, 'pending')"
-                        );
-                        $requestStmt->execute(['reservation_id' => $id, 'requested_by' => $currentUserId, 'reason' => $reason]);
-                        $pdo->commit();
-                    } catch (Throwable $e) {
-                        if ($pdo->inTransaction()) { $pdo->rollBack(); }
-                        throw $e;
-                    }
+                    $pdo->prepare("UPDATE team8_reservations
+                                   SET status = 'cancellation_pending', cancellation_reason = :reason,
+                                       cancellation_requested_by = :user_id, cancellation_requested_at = NOW(), cancellation_decision = 'pending'
+                                   WHERE id = :id")
+                        ->execute(['reason' => $reason, 'user_id' => $currentUserId, 'id' => $id]);
+                    $requestStmt = $pdo->prepare(
+                        "INSERT INTO team8_reservation_cancellation_requests (reservation_id, requested_by, reason, status)
+                         VALUES (:reservation_id, :requested_by, :reason, 'pending')"
+                    );
+                    $requestStmt->execute(['reservation_id' => $id, 'requested_by' => $currentUserId, 'reason' => $reason]);
                     t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_request', 'approved', $reason);
                     t8_flash_set('success', 'Cancellation request sent to an administrator for review.');
                 }
@@ -837,41 +823,27 @@ switch ($action) {
         if (!$target || $target['status'] !== 'cancellation_pending' || !in_array($decision, ['approved', 'rejected'], true)) {
             t8_flash_set('danger', 'That cancellation request is no longer available for review.');
         } elseif ($decision === 'approved') {
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare("UPDATE team8_reservations
-                               SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'approved',
-                                   cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
-                               WHERE id = :id")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->prepare("UPDATE team8_reservation_cancellation_requests
-                               SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW()
-                               WHERE reservation_id = :id AND status = 'pending'")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) { $pdo->rollBack(); }
-                throw $e;
-            }
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'cancelled', archived_at = NOW(), cancellation_decision = 'approved',
+                               cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'approved', reviewed_by = :admin_id, reviewed_at = NOW()
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_approved', 'cancellation_pending', (string) ($target['cancellation_reason'] ?? ''));
             t8_flash_set('success', 'Cancellation approved. Reservation moved to Archive.');
         } else {
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare("UPDATE team8_reservations
-                               SET status = 'approved', cancellation_decision = 'rejected',
-                                   cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
-                               WHERE id = :id")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->prepare("UPDATE team8_reservation_cancellation_requests
-                               SET status = 'rejected', reviewed_by = :admin_id, reviewed_at = NOW()
-                               WHERE reservation_id = :id AND status = 'pending'")
-                    ->execute(['admin_id' => $currentUserId, 'id' => $id]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) { $pdo->rollBack(); }
-                throw $e;
-            }
+            $pdo->prepare("UPDATE team8_reservations
+                           SET status = 'approved', cancellation_decision = 'rejected',
+                               cancellation_reviewed_by = :admin_id, cancellation_reviewed_at = NOW()
+                           WHERE id = :id")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
+            $pdo->prepare("UPDATE team8_reservation_cancellation_requests
+                           SET status = 'rejected', reviewed_by = :admin_id, reviewed_at = NOW()
+                           WHERE reservation_id = :id AND status = 'pending'")
+                ->execute(['admin_id' => $currentUserId, 'id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, 'cancellation_rejected', 'cancellation_pending', (string) ($target['cancellation_reason'] ?? ''));
             t8_flash_set('success', 'Cancellation request rejected. Reservation remains active.');
         }
@@ -934,29 +906,17 @@ switch ($action) {
         $id = (int) ($_POST['id'] ?? 0);
         $target = t8_reservation_fetch($pdo, $id);
         if ($target && $target['status'] === 'pending' && t8_reservation_is_future($target)) {
-            $pdo->beginTransaction();
-            try {
-                $pdo->prepare('SELECT id FROM team8_facilities WHERE id = :id FOR UPDATE')
-                    ->execute(['id' => $target['facility_id']]);
-                if ($target['start_time'] && $target['end_time'] && t8_reservation_has_conflict($pdo, (int) $target['facility_id'], (string) $target['start_time'], (string) $target['end_time'], $id)) {
-                    $pdo->rollBack();
-                    t8_flash_set('danger', 'This facility already has an overlapping reservation. Please reschedule before approval.');
-                    redirect(page_url('reservation'));
-                }
-                $newStatus = $action === 'approve' ? 'approved' : 'rejected';
-                $pdo->prepare('UPDATE team8_reservations SET status = :status WHERE id = :id')
-                    ->execute(['status' => $newStatus, 'id' => $id]);
-                $pdo->prepare(
-                    'INSERT INTO team8_reservation_approvals (reservation_id, approver_id, step_order, status, decided_at)
-                     VALUES (:reservation_id, :approver_id, 1, :status, NOW())'
-                )->execute(['reservation_id' => $id, 'approver_id' => $currentUserId, 'status' => $newStatus]);
-                $pdo->commit();
-            } catch (Throwable $e) {
-                if ($pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                throw $e;
+            if ($target['start_time'] && $target['end_time'] && t8_reservation_has_conflict($pdo, (int) $target['facility_id'], (string) $target['start_time'], (string) $target['end_time'], $id)) {
+                t8_flash_set('danger', 'This facility already has an overlapping reservation. Please reschedule before approval.');
+                redirect(page_url('reservation'));
             }
+            $newStatus = $action === 'approve' ? 'approved' : 'rejected';
+            $pdo->prepare('UPDATE team8_reservations SET status = :status WHERE id = :id')
+                ->execute(['status' => $newStatus, 'id' => $id]);
+            $pdo->prepare(
+                'INSERT INTO team8_reservation_approvals (reservation_id, approver_id, step_order, status, decided_at)
+                 VALUES (:reservation_id, :approver_id, 1, :status, NOW())'
+            )->execute(['reservation_id' => $id, 'approver_id' => $currentUserId, 'status' => $newStatus]);
             t8_audit_log($pdo, $currentUserId, 'reservation', $id, $action);
             // Moving out of Pending Approvals and into All Reservations is
             // automatic - both tables below simply query by status, so a
@@ -1002,6 +962,7 @@ if (!$showForm) {
         'month' => $reservationMonthFilter > 0 ? $reservationMonthFilter : '',
         'year' => $reservationYearFilter > 0 ? $reservationYearFilter : '',
         'department' => $reservationDepartmentFilter > 0 ? $reservationDepartmentFilter : '',
+        'tab' => (string) ($_GET['tab'] ?? ''),
     ];
 
     /** Reusable SQL fragment for the "Schedule" quick filter (today / this week / this month). */
@@ -1349,6 +1310,16 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
     </div>
     <?php
 }
+
+$reservationTabKeys = $isAdmin
+    ? ['pending', 'cancellations', 'all']
+    : ['mine', 'all'];
+$defaultReservationTab = $isAdmin ? 'pending' : 'mine';
+$requestedReservationTab = (string) ($_GET['tab'] ?? $defaultReservationTab);
+$activeReservationTab = in_array($requestedReservationTab, $reservationTabKeys, true)
+    ? $requestedReservationTab
+    : $defaultReservationTab;
+$reservationFilters['tab'] = $activeReservationTab;
 ?>
 <h1>Facilities Reservation</h1>
 <p class="t8-help-text">
@@ -1541,11 +1512,10 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
 
     <?php if (!$hasActiveFacilities): ?>
         <div class="t8-empty">
-            No active facilities are available yet.
-            <?php if ($isAdmin): ?>
-                <br><br>
-                <a class="t8-btn t8-btn-accent" href="<?= e(page_url('facilities', ['action' => 'create'])) ?>">
-                    <i class="fa-solid fa-plus"></i> Add Facility
+              <?php if ($isAdmin): ?>
+                 <a  href="<?= e(page_url('facilities', ['action' => 'create'])) ?>">
+            No active facilities are available yet. Click Here To add a new facility.
+         
                 </a>
             <?php endif; ?>
         </div>
@@ -1627,6 +1597,19 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
 
     <?php elseif ($isAdmin): ?>
 
+        <div class="t8-tabs t8-reservation-tabs" id="t8ReservationTabs" role="tablist" aria-label="Reservation records" data-active-tab="<?= e($activeReservationTab) ?>">
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'pending' ? 'is-active' : '' ?>" id="reservation-tab-pending" data-tab="pending" role="tab" aria-controls="reservation-panel-pending" aria-selected="<?= $activeReservationTab === 'pending' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'pending' ? '0' : '-1' ?>">
+                Pending Approvals <span class="t8-reservation-tab-count"><?= e((string) count($pendingReservations)) ?></span>
+            </button>
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'cancellations' ? 'is-active' : '' ?>" id="reservation-tab-cancellations" data-tab="cancellations" role="tab" aria-controls="reservation-panel-cancellations" aria-selected="<?= $activeReservationTab === 'cancellations' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'cancellations' ? '0' : '-1' ?>">
+                Cancellation Requests <span class="t8-reservation-tab-count"><?= e((string) count($cancellationRequests)) ?></span>
+            </button>
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'all' ? 'is-active' : '' ?>" id="reservation-tab-all" data-tab="all" role="tab" aria-controls="reservation-panel-all" aria-selected="<?= $activeReservationTab === 'all' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'all' ? '0' : '-1' ?>">
+                All Reservations <span class="t8-reservation-tab-count"><?= e((string) $allTotal) ?></span>
+            </button>
+        </div>
+
+        <section class="t8-tab-panel" id="reservation-panel-pending" data-panel="pending" role="tabpanel" aria-labelledby="reservation-tab-pending" tabindex="0" <?= $activeReservationTab !== 'pending' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">Pending Approvals</h2>
@@ -1663,27 +1646,34 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-pending">Pending</span></td>
-                                    <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
+                                    <td class="t8-row-actions">
                                         <?php if ($p['has_conflict']): ?>
                                             <span class="t8-conflict-indicator" title="Time Conflict">
                                                 <i class="fa-solid fa-triangle-exclamation"></i>
                                             </span>
                                         <?php endif; ?>
-                                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'approve'])) ?>">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $p['id']) ?>">
-                                            <button class="t8-btn t8-btn-success t8-btn-sm" type="submit">
-                                                <i class="fa-solid fa-check"></i> Approve
+                                        <div class="t8-res-menu">
+                                            <button type="button" class="t8-res-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions">
+                                                <i class="fa-solid fa-ellipsis-vertical"></i>
                                             </button>
-                                        </form>
-                                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'reject'])) ?>"
-                                              onsubmit="return confirm('Reject this reservation request?');">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $p['id']) ?>">
-                                            <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                <i class="fa-solid fa-xmark"></i> Reject
-                                            </button>
-                                        </form>
+                                            <div class="t8-res-menu-panel" role="menu">
+                                                <form method="post" action="<?= e(page_url('reservation', ['action' => 'approve'])) ?>">
+                                                    <?= t8_csrf_field() ?>
+                                                    <input type="hidden" name="id" value="<?= e((string) $p['id']) ?>">
+                                                    <button class="t8-res-menu-item t8-success" type="submit" role="menuitem">
+                                                        <i class="fa-solid fa-check"></i> Approve Request
+                                                    </button>
+                                                </form>
+                                                <form method="post" action="<?= e(page_url('reservation', ['action' => 'reject'])) ?>"
+                                                      onsubmit="return confirm('Reject this reservation request?');">
+                                                    <?= t8_csrf_field() ?>
+                                                    <input type="hidden" name="id" value="<?= e((string) $p['id']) ?>">
+                                                    <button class="t8-res-menu-item t8-danger" type="submit" role="menuitem">
+                                                        <i class="fa-solid fa-xmark"></i> Reject Request
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -1692,7 +1682,9 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                 </table>
             </div>
         </div>
+        </section>
 
+        <section class="t8-tab-panel" id="reservation-panel-cancellations" data-panel="cancellations" role="tabpanel" aria-labelledby="reservation-tab-cancellations" tabindex="0" <?= $activeReservationTab !== 'cancellations' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">Cancellation Requests</h2>
@@ -1702,14 +1694,23 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                 <?php if ($cancellationRequests === []): ?>
                     <tr><td colspan="5" class="t8-table-empty-row">No cancellation requests are waiting for review.</td></tr>
                 <?php else: foreach ($cancellationRequests as $request): ?>
-                    <tr><td><?= e($request['facility_name']) ?></td><td><?= e($request['requester_name']) ?></td><td><?= e((string) $request['cancellation_reason']) ?></td><td><?= e(format_date((string) $request['cancellation_requested_at'], 'M d, Y g:i A')) ?></td><td style="display:flex;gap:8px;">
-                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="approved"><button class="t8-btn t8-btn-success t8-btn-sm" type="submit">Approve Cancellation</button></form>
-                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="rejected"><button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">Reject Request</button></form>
+                    <tr><td><?= e($request['facility_name']) ?></td><td><?= e($request['requester_name']) ?></td><td><?= e((string) $request['cancellation_reason']) ?></td><td><?= e(format_date((string) $request['cancellation_requested_at'], 'M d, Y g:i A')) ?></td><td class="t8-row-actions">
+                        <div class="t8-res-menu">
+                            <button type="button" class="t8-res-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions">
+                                <i class="fa-solid fa-ellipsis-vertical"></i>
+                            </button>
+                            <div class="t8-res-menu-panel" role="menu">
+                                <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="approved"><button class="t8-res-menu-item t8-success" type="submit" role="menuitem"><i class="fa-solid fa-check"></i> Approve Cancellation</button></form>
+                                <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="rejected"><button class="t8-res-menu-item t8-danger" type="submit" role="menuitem"><i class="fa-solid fa-xmark"></i> Reject Request</button></form>
+                            </div>
+                        </div>
                     </td></tr>
                 <?php endforeach; endif; ?>
             </tbody></table></div>
         </div>
+        </section>
 
+        <section class="t8-tab-panel" id="reservation-panel-all" data-panel="all" role="tabpanel" aria-labelledby="reservation-tab-all" tabindex="0" <?= $activeReservationTab !== 'all' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
@@ -1801,9 +1802,20 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
             </div>
             <?php t8_reservation_pagination($allPage, $allTotalPages, $reservationFilters); ?>
         </div>
+        </section>
 
     <?php else: ?>
 
+        <div class="t8-tabs t8-reservation-tabs" id="t8ReservationTabs" role="tablist" aria-label="Reservation records" data-active-tab="<?= e($activeReservationTab) ?>">
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'mine' ? 'is-active' : '' ?>" id="reservation-tab-mine" data-tab="mine" role="tab" aria-controls="reservation-panel-mine" aria-selected="<?= $activeReservationTab === 'mine' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'mine' ? '0' : '-1' ?>">
+                My Reservations <span class="t8-reservation-tab-count"><?= e((string) $myTotal) ?></span>
+            </button>
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'all' ? 'is-active' : '' ?>" id="reservation-tab-all" data-tab="all" role="tab" aria-controls="reservation-panel-all" aria-selected="<?= $activeReservationTab === 'all' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'all' ? '0' : '-1' ?>">
+                All Reservations <span class="t8-reservation-tab-count"><?= e((string) $allTotal) ?></span>
+            </button>
+        </div>
+
+        <section class="t8-tab-panel" id="reservation-panel-mine" data-panel="mine" role="tabpanel" aria-labelledby="reservation-tab-mine" tabindex="0" <?= $activeReservationTab !== 'mine' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">My Reservations</h2>
@@ -1902,7 +1914,9 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
             </div>
             <?php t8_reservation_pagination($myPage, $myTotalPages, $reservationFilters, 'my_page'); ?>
         </div>
+        </section>
 
+        <section class="t8-tab-panel" id="reservation-panel-all" data-panel="all" role="tabpanel" aria-labelledby="reservation-tab-all" tabindex="0" <?= $activeReservationTab !== 'all' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
@@ -1982,6 +1996,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
             </div>
             <?php t8_reservation_pagination($allPage, $allTotalPages, $reservationFilters); ?>
         </div>
+        </section>
 
     <?php endif; ?>
 

@@ -104,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare(
                 'SELECT id, full_name, password_hash, department_id
                  FROM users
-                 WHERE email = :email AND deleted_at IS NULL
+                 WHERE email = :email
                  LIMIT 1'
             );
             $stmt->execute(['email' => $emailValue]);
@@ -165,9 +165,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <title>Sign In · <?= e(APP_NAME) ?></title>
     <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>">
     <link rel="stylesheet" href="<?= e(asset('css/components.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset('css/login-ambience.css')) ?>?v=11">
 </head>
 <body>
 <div class="t8-auth-wrapper">
+    <div class="t8-auth-ambience" aria-hidden="true">
+        <div class="t8-auth-cloud t8-auth-cloud-one"></div>
+        <div class="t8-auth-cloud t8-auth-cloud-two"></div>
+        <div class="t8-auth-cloud t8-auth-cloud-three"></div>
+
+        <div class="t8-auth-branch t8-auth-branch-left">
+            <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <div class="t8-auth-branch t8-auth-branch-right">
+            <i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+
+        <?php
+        $bodyPath = __DIR__ . '/assets/ram-yum/ramen/body.png';
+        if (is_file($bodyPath)):
+        ?>
+            <div class="t8-auth-mascot">
+                <div class="t8-auth-mascot-art">
+                    <img class="t8-auth-mascot-body" src="<?= e(asset('assets/ram-yum/ramen/body.png')) ?>" alt="">
+                    <img class="t8-auth-mascot-eye t8-auth-mascot-eye-left" src="<?= e(asset('assets/ram-yum/ramen/eye-left.png')) ?>" alt="">
+                    <img class="t8-auth-mascot-eye t8-auth-mascot-eye-right" src="<?= e(asset('assets/ram-yum/ramen/eye-right.png')) ?>" alt="">
+                    <img class="t8-auth-mascot-mouth" src="<?= e(asset('assets/ram-yum/ramen/mouth.png')) ?>" alt="">
+                    <div class="t8-auth-steam">
+                        <i></i><i></i><i></i><i></i><i></i>
+                    </div>
+                </div>
+            </div>
+        <?php endif; ?>
+        <div class="t8-auth-petals"></div>
+    </div>
+
     <div class="t8-card t8-auth-card">
         <img class="t8-auth-logo" src="<?= e(asset('img/ramyumlogo.jpg')) ?>" alt="RAM-YUM Korean and Japanese Store">
         <h1 class="t8-auth-title"><?= e(APP_NAME) ?></h1>
@@ -204,5 +236,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </p>
     </div>
 </div>
+<script src="<?= e(asset('js/login-ambience.js')) ?>?v=6" defer></script>
 </body>
 </html>

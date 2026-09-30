@@ -480,7 +480,7 @@ if ($showEquipmentForm) {
 
     <?php if ($facilityLocationsUnavailable): ?>
         <div class="t8-alert t8-alert-warning">
-            No locations have been added yet. Use "+ Add Location" in the dropdown below to create the first one.
+            No locations have been added yet. <a href="#" id="t8LocationAddFromWarning">Click here to add your first location.</a>
         </div>
     <?php endif; ?>
 

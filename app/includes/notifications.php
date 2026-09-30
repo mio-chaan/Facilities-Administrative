@@ -34,31 +34,67 @@ if (!function_exists('t8_admin_notification_once_today')) {
         try {
             $admins = $pdo->query("SELECT ur.user_id FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.role_name = 'admin'")->fetchAll(PDO::FETCH_COLUMN);
             foreach ($admins as $adminId) {
-                $lockName = 'team8_notification_' . sha1((string) $adminId . '|' . $message . '|' . date('Y-m-d'));
-                $lockStmt = $pdo->prepare('SELECT GET_LOCK(:lock_name, 5)');
-                $lockStmt->execute(['lock_name' => $lockName]);
-                if ((int) $lockStmt->fetchColumn() !== 1) {
-                    continue;
-                }
-                try {
-                    $check = $pdo->prepare('SELECT id FROM notifications WHERE user_id = :user_id AND message = :message AND DATE(created_at) = CURDATE() LIMIT 1');
-                    $check->execute(['user_id' => $adminId, 'message' => $message]);
-                    if (!$check->fetchColumn()) { t8_notify_user($pdo, (int) $adminId, $message, $targetUrl); }
-                } finally {
-                    $releaseStmt = $pdo->prepare('SELECT RELEASE_LOCK(:lock_name)');
-                    $releaseStmt->execute(['lock_name' => $lockName]);
-                }
+                $check = $pdo->prepare('SELECT id FROM notifications WHERE user_id = :user_id AND message = :message AND DATE(created_at) = CURDATE() LIMIT 1');
+                $check->execute(['user_id' => $adminId, 'message' => $message]);
+                if (!$check->fetchColumn()) { t8_notify_user($pdo, (int) $adminId, $message, $targetUrl); }
             }
         } catch (PDOException $e) { /* optional alert generation */ }
     }
 }
 
 if (!function_exists('t8_refresh_operational_notifications')) {
+    function t8_refresh_legal_deadline_notifications(PDO $pdo): void
+    {
+        $daysAhead = defined('LEGAL_DEADLINE_ALERT_DAYS') ? max(1, (int) LEGAL_DEADLINE_ALERT_DAYS) : 7;
+        $targetUrl = 'index.php?page=legal';
+
+        try {
+            $stmt = $pdo->query(
+                "SELECT lc.id, lc.title, lc.deadline, lc.assigned_to, lc.created_by
+                 FROM team8_legal_cases lc
+                 WHERE lc.deleted_at IS NULL
+                   AND lc.status <> 'closed'
+                   AND lc.deadline BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL {$daysAhead} DAY)
+                 ORDER BY lc.deadline ASC, lc.id ASC"
+            );
+            $cases = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $hasTargetUrl = t8_notification_targets_supported($pdo);
+            $dedupe = $pdo->prepare(
+                'SELECT id FROM notifications WHERE user_id = :user_id AND message = :message'
+                . ($hasTargetUrl ? ' AND target_url = :target_url' : '')
+                . ' LIMIT 1'
+            );
+
+            foreach ($cases as $case) {
+                $caseRef = 'CASE-' . str_pad((string) $case['id'], 6, '0', STR_PAD_LEFT);
+                $message = $caseRef . ' is approaching its deadline: ' . (string) $case['title']
+                    . ' (due ' . date('M j, Y', strtotime((string) $case['deadline'])) . ').';
+                $recipients = array_unique([(int) $case['assigned_to'], (int) $case['created_by']]);
+
+                foreach ($recipients as $userId) {
+                    if ($userId <= 0) {
+                        continue;
+                    }
+                    $params = ['user_id' => $userId, 'message' => $message];
+                    if ($hasTargetUrl) {
+                        $params['target_url'] = $targetUrl;
+                    }
+                    $dedupe->execute($params);
+                    if (!$dedupe->fetchColumn()) {
+                        t8_notify_user($pdo, $userId, $message, $targetUrl);
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            // Notification support is optional during partial schema upgrades.
+        }
+    }
+
     function t8_refresh_operational_notifications(PDO $pdo): void
     {
         $alerts = [
             ["SELECT COUNT(*) FROM team8_reservations WHERE status = 'pending'", 'Reservation approvals require review.', 'index.php?page=reservation'],
-            ["SELECT COUNT(*) FROM team8_documents WHERE status = 'pending'", 'Document submissions require review.', 'index.php?page=documents&action=browse&review_status=pending'],
+            ["SELECT COUNT(*) FROM team8_documents WHERE status = 'pending'", 'Document submissions require review.', 'index.php?page=documents&action=browse&status=pending'],
             ["SELECT COUNT(*) FROM team8_contracts WHERE status IN ('expiring_soon', 'pending_renewal')", 'Contract renewal attention is required.', 'index.php?page=contracts'],
             ["SELECT COUNT(*) FROM team8_records WHERE disposition_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) AND status = 'active'", 'Retention records are approaching disposition.', 'index.php?page=retention'],
             ["SELECT COUNT(*) FROM team8_visitors WHERE status = 'scheduled' AND DATE(scheduled_date) = CURDATE()", 'Visitor activity is scheduled today.', 'index.php?page=visitor'],
@@ -67,6 +103,8 @@ if (!function_exists('t8_refresh_operational_notifications')) {
             try { if ((int) $pdo->query($sql)->fetchColumn() > 0) { t8_admin_notification_once_today($pdo, $message, $targetUrl); } }
             catch (PDOException $e) { /* migration/table may not yet exist */ }
         }
+
+        t8_refresh_legal_deadline_notifications($pdo);
     }
 }
 

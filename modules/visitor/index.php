@@ -19,7 +19,7 @@
  *     at display time - nothing extra to store or keep in sync).
  *   - "Currently On-Site" now monitors status='checked_in' rows, and
  *     a new "Scheduled / Upcoming Visits" section lists status=
- *     'scheduled' rows awaiting arrival, with Check In / Cancel.
+ *     'scheduled' and 'late' rows awaiting arrival, with Check In / Cancel.
  *
  * REVISION (equal staff/admin access):
  *   - Previously, visibility/management ($canViewAllVisitors /
@@ -37,8 +37,10 @@
  *     reschedule, and the full visitor log/stats. There is
  *     intentionally no staff-vs-admin distinction left in this file.
  *
- * Status lifecycle: scheduled -> checked_in -> checked_out
- *                              \-> cancelled
+ * Status lifecycle: scheduled -> late -> checked_in -> checked_out
+ *                    |          \-> expired (10:00 PM cutoff)
+ *                    \-> checked_in -> checked_out
+ *                    \-> cancelled
  *
  * Backing table: team8_visitors (see database/visitor_scheduling_fields.sql).
  *
@@ -61,15 +63,11 @@ $isAdmin = t8_has_role('admin');
 // Equal access: every authenticated user reaching this module (the
 // 'visitor' route carries no role restriction) sees and manages every
 // visitor the same way — no admin-only vs staff-only branch.
-$canViewAllVisitors = t8_has_role(['admin', 'front_desk', 'facilities_staff']);
-$canManageVisits = $canViewAllVisitors;
+$canViewAllVisitors = true;
+$canManageVisits = true;
 
 $action = $_GET['action'] ?? 'list';
 $errors = [];
-
-if (!$canManageVisits && in_array($action, ['checkin', 'checkout', 'reschedule', 'cancel'], true)) {
-    t8_require_role(['admin', 'front_desk', 'facilities_staff']);
-}
 
 // Dropdown options for Visitor Type. Add more here as needed - no
 // other code changes required.
@@ -117,12 +115,13 @@ function t8_visitor_pagination(int $page, int $totalPages, string $pageKey): voi
         return;
     }
     echo '<nav class="t8-pagination" aria-label="Visitor pages">';
+    $tab = $pageKey === 'onsite_page' ? 'onsite' : ($pageKey === 'log_page' ? 'logs' : 'scheduled');
     if ($page > 1) {
-        echo '<a class="t8-btn t8-btn-outline t8-btn-sm" href="' . e(page_url('visitor', [$pageKey => $page - 1])) . '">Previous</a>';
+        echo '<a class="t8-btn t8-btn-outline t8-btn-sm" href="' . e(page_url('visitor', [$pageKey => $page - 1, 'tab' => $tab])) . '">Previous</a>';
     }
     echo '<span class="t8-help-text">Page ' . e((string) $page) . ' of ' . e((string) $totalPages) . '</span>';
     if ($page < $totalPages) {
-        echo '<a class="t8-btn t8-btn-outline t8-btn-sm" href="' . e(page_url('visitor', [$pageKey => $page + 1])) . '">Next</a>';
+        echo '<a class="t8-btn t8-btn-outline t8-btn-sm" href="' . e(page_url('visitor', [$pageKey => $page + 1, 'tab' => $tab])) . '">Next</a>';
     }
     echo '</nav>';
 }
@@ -167,6 +166,7 @@ function t8_visitor_status_badge(string $status): string
 {
     $map = [
         'scheduled'   => 't8-badge-pending',
+        'late'        => 't8-badge-rejected',
         'checked_in'  => 't8-badge-approved',
         'checked_out' => 't8-badge-archived',
         'cancelled'   => 't8-badge-rejected',
@@ -252,24 +252,46 @@ $formValues = [
     'arriving_now'    => '0',
 ];
 
-/** Expire unclaimed visits once their scheduled check-in time has passed. */
-function t8_expire_visitor_bookings(PDO $pdo, int $actorId): void
+/** Mark overdue visits late, then expire unarrived visits at 10:00 PM. */
+function t8_update_visitor_cutoff_statuses(PDO $pdo, int $actorId): void
 {
-    $ids = $pdo->query("SELECT id FROM team8_visitors WHERE status = 'scheduled' AND scheduled_date < DATE_SUB(NOW(), INTERVAL 2 HOUR)")
+    $lateIds = $pdo->query(
+        "SELECT id FROM team8_visitors
+         WHERE status = 'scheduled' AND scheduled_date <= NOW()
+           AND DATE(scheduled_date) = CURDATE() AND CURRENT_TIME() < '22:00:00'"
+    )
         ->fetchAll(PDO::FETCH_COLUMN);
-    if ($ids === []) {
-        return;
+    if ($lateIds !== []) {
+        $pdo->query(
+            "UPDATE team8_visitors SET status = 'late'
+             WHERE status = 'scheduled' AND scheduled_date <= NOW()
+               AND DATE(scheduled_date) = CURDATE() AND CURRENT_TIME() < '22:00:00'"
+        );
+        foreach ($lateIds as $id) {
+            t8_audit_log($pdo, $actorId, 'visitor', (int) $id, 'late', 'scheduled', 'scheduled arrival time passed');
+        }
     }
 
-    $pdo->query("UPDATE team8_visitors SET status = 'expired' WHERE status = 'scheduled' AND scheduled_date < DATE_SUB(NOW(), INTERVAL 2 HOUR)");
-    foreach ($ids as $id) {
-        t8_audit_log($pdo, $actorId, 'visitor', (int) $id, 'expired', 'scheduled', 'scheduled date passed');
+    $expiredRows = $pdo->query(
+        "SELECT id, status FROM team8_visitors
+         WHERE status IN ('scheduled', 'late') AND scheduled_date < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+           AND (DATE(scheduled_date) < CURDATE() OR CURRENT_TIME() >= '22:00:00')"
+    )->fetchAll(PDO::FETCH_ASSOC);
+    if ($expiredRows !== []) {
+        $pdo->query(
+            "UPDATE team8_visitors SET status = 'expired'
+             WHERE status IN ('scheduled', 'late') AND scheduled_date < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+               AND (DATE(scheduled_date) < CURDATE() OR CURRENT_TIME() >= '22:00:00')"
+        );
+        foreach ($expiredRows as $row) {
+            t8_audit_log($pdo, $actorId, 'visitor', (int) $row['id'], 'expired', (string) $row['status'], '10:00 PM cutoff passed without check-in');
+        }
     }
 }
 
 // Run before every action and list query so an expired visit can never be
 // accepted by a direct POST or remain presented as available for check-in.
-t8_expire_visitor_bookings($pdo, (int) $currentUserId);
+t8_update_visitor_cutoff_statuses($pdo, (int) $currentUserId);
 
 switch ($action) {
     case 'create':
@@ -316,12 +338,12 @@ switch ($action) {
                 } elseif (!$arrivingNow && strtotime($formValues['scheduled_date']) <= time()) {
                     $errors[] = 'Scheduled visit date and time must be in the future.';
                 }
-                if ($formValues['contact_suffix'] !== '' && !preg_match('/^\d{10}$/', $formValues['contact_suffix'])) {
+                if ($formValues['contact_suffix'] !== '' && !t8_validate_ph_contact_suffix($formValues['contact_suffix'])) {
                     $errors[] = 'Contact number must be 10 digits after +63.';
                 }
 
                 if (!$errors) {
-                    $contact = $formValues['contact_suffix'] !== '' ? '+63' . $formValues['contact_suffix'] : '';
+                    $contact = $formValues['contact_suffix'] !== '' ? t8_format_ph_contact($formValues['contact_suffix']) : '';
                     $status = $arrivingNow ? 'checked_in' : 'scheduled';
                     $checkInTime = $arrivingNow ? date('Y-m-d H:i:s') : $formValues['scheduled_date'];                    $scheduledDate = $arrivingNow ? date('Y-m-d H:i:s') : $formValues['scheduled_date'];
                     $stmt = $pdo->prepare(
@@ -364,8 +386,7 @@ switch ($action) {
         }
         $id = (int) ($_POST['id'] ?? 0);
         $target = t8_visitor_fetch($pdo, $id);
-        if ($target && $target['status'] === 'scheduled' && strtotime((string) $target['scheduled_date']) <= time()
-            && strtotime((string) $target['scheduled_date']) >= strtotime('-2 hours')) {
+        if ($target && in_array($target['status'], ['scheduled', 'late'], true) && date('H:i:s') < '22:00:00') {
             $pdo->prepare("UPDATE team8_visitors SET status = 'checked_in', check_in_time = NOW() WHERE id = :id")
                 ->execute(['id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'visitor', $id, 'check_in');
@@ -378,10 +399,10 @@ switch ($action) {
                 ]);
             t8_flash_set('success', 'Visitor checked in.');
         } else {
-            if ($target && $target['status'] === 'scheduled') {
-                $pdo->prepare("UPDATE team8_visitors SET status = 'expired' WHERE id = :id AND status = 'scheduled'")->execute(['id' => $id]);
-                t8_audit_log($pdo, $currentUserId, 'visitor', $id, 'expired', 'scheduled', 'scheduled date passed');
-                t8_flash_set('danger', 'This visitor booking is no longer valid because the scheduled date has already passed.');
+            if ($target && in_array($target['status'], ['scheduled', 'late'], true)) {
+                $pdo->prepare("UPDATE team8_visitors SET status = 'expired' WHERE id = :id AND status IN ('scheduled', 'late')")->execute(['id' => $id]);
+                t8_audit_log($pdo, $currentUserId, 'visitor', $id, 'expired', (string) $target['status'], '10:00 PM cutoff passed without check-in');
+                t8_flash_set('danger', 'This visitor booking has expired because the 10:00 PM cutoff passed without check-in.');
             } else {
                 t8_flash_set('danger', 'That visit is not awaiting check-in.');
             }
@@ -403,8 +424,8 @@ switch ($action) {
         $id = (int) ($_POST['id'] ?? 0);
         $scheduledDate = t8_normalize_datetime((string) ($_POST['scheduled_date'] ?? ''));
         $target = t8_visitor_fetch($pdo, $id);
-        if (!$target || $target['status'] !== 'scheduled') {
-            t8_flash_set('danger', 'Only a scheduled visitor booking can be rescheduled.');
+        if (!$target || !in_array($target['status'], ['scheduled', 'late'], true)) {
+            t8_flash_set('danger', 'Only a scheduled or late visitor booking can be rescheduled.');
         } elseif ($scheduledDate === '' || strtotime($scheduledDate) === false || strtotime($scheduledDate) <= time()) {
             t8_flash_set('danger', 'Scheduled visit date and time must be in the future.');
         } else {
@@ -454,66 +475,69 @@ switch ($action) {
         // Equal access: any authenticated user may cancel any scheduled
         // visit, not just the one they personally logged.
         $target = t8_visitor_fetch($pdo, $id);
-        if ($target && $target['status'] === 'scheduled') {
+        if ($target && in_array($target['status'], ['scheduled', 'late'], true)) {
             $pdo->prepare("UPDATE team8_visitors SET status = 'cancelled' WHERE id = :id")->execute(['id' => $id]);
             t8_audit_log($pdo, $currentUserId, 'visitor', $id, 'cancel');
-            t8_flash_set('success', 'Scheduled visit cancelled.');
+            t8_flash_set('success', 'Visitor visit cancelled.');
         } else {
-            t8_flash_set('danger', "Only a scheduled visit can be cancelled.");
+            t8_flash_set('danger', "Only a scheduled or late visit can be cancelled.");
         }
         redirect(page_url('visitor'));
         break;
 }
 
 $showForm = $action === 'create';
+$activeVisitorTab = in_array($_GET['tab'] ?? '', ['scheduled', 'onsite', 'logs'], true)
+    ? (string) $_GET['tab']
+    : 'scheduled';
 
 if (!$showForm) {
-    $visitorScopeSql = $canViewAllVisitors ? '' : ' AND v.logged_by = :scope_user_id';
-    $visitorScopeParams = $canViewAllVisitors ? [] : ['scope_user_id' => $currentUserId];
+    // Equal access: no owner-scoping — everyone sees every visitor
+    // record in every list/table below, regardless of who logged it.
     $visitorPageSize = 5;
-    $scheduledTotalStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_visitors v WHERE v.status = 'scheduled'{$visitorScopeSql}");
-    $scheduledTotalStmt->execute($visitorScopeParams);
-    $scheduledTotalPages = max(1, (int) ceil((int) $scheduledTotalStmt->fetchColumn() / $visitorPageSize));
+    $scheduledTotalStmt = $pdo->query("SELECT COUNT(*) FROM team8_visitors v WHERE v.status IN ('scheduled', 'late')");
+    $scheduledTotalCount = (int) $scheduledTotalStmt->fetchColumn();
+    $scheduledTotalPages = max(1, (int) ceil($scheduledTotalCount / $visitorPageSize));
     $scheduledPage = min(max(1, (int) ($_GET['scheduled_page'] ?? 1)), $scheduledTotalPages);
     $scheduledStmt = $pdo->prepare(
         "SELECT v.*, u.full_name AS logged_by_name
          FROM team8_visitors v
          JOIN users u ON u.id = v.logged_by
-         WHERE v.status = 'scheduled'{$visitorScopeSql}
+         WHERE v.status IN ('scheduled', 'late')
          ORDER BY v.scheduled_date ASC, v.id ASC
          LIMIT {$visitorPageSize} OFFSET " . (($scheduledPage - 1) * $visitorPageSize)
     );
-    $scheduledStmt->execute($visitorScopeParams);
+    $scheduledStmt->execute();
     $scheduledVisits = $scheduledStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $currentlyInTotalStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_visitors v WHERE v.status = 'checked_in'{$visitorScopeSql}");
-    $currentlyInTotalStmt->execute($visitorScopeParams);
-    $currentlyInTotalPages = max(1, (int) ceil((int) $currentlyInTotalStmt->fetchColumn() / $visitorPageSize));
+    $currentlyInTotalStmt = $pdo->query("SELECT COUNT(*) FROM team8_visitors v WHERE v.status = 'checked_in'");
+    $currentlyInTotalCount = (int) $currentlyInTotalStmt->fetchColumn();
+    $currentlyInTotalPages = max(1, (int) ceil($currentlyInTotalCount / $visitorPageSize));
     $currentlyInPage = min(max(1, (int) ($_GET['onsite_page'] ?? 1)), $currentlyInTotalPages);
     $currentlyInStmt = $pdo->prepare(
         "SELECT v.*, u.full_name AS logged_by_name
          FROM team8_visitors v
          JOIN users u ON u.id = v.logged_by
-         WHERE v.status = 'checked_in'{$visitorScopeSql}
+         WHERE v.status = 'checked_in'
          ORDER BY v.check_in_time ASC, v.id ASC
          LIMIT {$visitorPageSize} OFFSET " . (($currentlyInPage - 1) * $visitorPageSize)
     );
-    $currentlyInStmt->execute($visitorScopeParams);
+    $currentlyInStmt->execute();
     $currentlyIn = $currentlyInStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $allVisitorsTotalStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_visitors v WHERE 1=1{$visitorScopeSql}");
-    $allVisitorsTotalStmt->execute($visitorScopeParams);
-    $allVisitorsTotalPages = max(1, (int) ceil((int) $allVisitorsTotalStmt->fetchColumn() / $visitorPageSize));
+    $allVisitorsTotalStmt = $pdo->query('SELECT COUNT(*) FROM team8_visitors v WHERE 1=1');
+    $allVisitorsTotalCount = (int) $allVisitorsTotalStmt->fetchColumn();
+    $allVisitorsTotalPages = max(1, (int) ceil($allVisitorsTotalCount / $visitorPageSize));
     $allVisitorsPage = min(max(1, (int) ($_GET['log_page'] ?? 1)), $allVisitorsTotalPages);
     $allVisitorsStmt = $pdo->prepare(
-           "SELECT v.*, u.full_name AS logged_by_name
+        'SELECT v.*, u.full_name AS logged_by_name
          FROM team8_visitors v
          JOIN users u ON u.id = v.logged_by
-         WHERE 1=1{$visitorScopeSql}
+         WHERE 1=1
          ORDER BY v.created_at DESC, v.id DESC
-            LIMIT {$visitorPageSize} OFFSET " . (($allVisitorsPage - 1) * $visitorPageSize)
+         LIMIT ' . $visitorPageSize . ' OFFSET ' . (($allVisitorsPage - 1) * $visitorPageSize)
     );
-    $allVisitorsStmt->execute($visitorScopeParams);
+    $allVisitorsStmt->execute();
     $allVisitors = $allVisitorsStmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Equal access: the summary stats / KPI cards are computed and
@@ -526,19 +550,13 @@ if (!$showForm) {
         'Checked-Out' => ['icon' => 'fa-door-open', 'variant' => 't8-visitor-icon-info'],
         'Overdue Visitors' => ['icon' => 'fa-clock', 'variant' => 't8-visitor-icon-purple'],
     ];
-    $visitorStats = [];
-    $statQueries = [
-        'Visitors Today' => 'DATE(scheduled_date) = CURDATE()',
-        'Scheduled Visitors' => "status = 'scheduled'",
-        'Currently On-Site' => "status = 'checked_in'",
-        'Checked-Out' => "status = 'checked_out' AND DATE(check_out_time) = CURDATE()",
-        'Overdue Visitors' => "status IN ('scheduled', 'checked_in') AND scheduled_date < NOW() - INTERVAL 1 DAY",
+    $visitorStats = [
+        'Visitors Today' => (int) $pdo->query('SELECT COUNT(*) FROM team8_visitors WHERE DATE(scheduled_date) = CURDATE()')->fetchColumn(),
+        'Scheduled Visitors' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status IN ('scheduled', 'late')")->fetchColumn(),
+        'Currently On-Site' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status = 'checked_in'")->fetchColumn(),
+        'Checked-Out' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status = 'checked_out' AND DATE(check_out_time) = CURDATE()")->fetchColumn(),
+        'Overdue Visitors' => (int) $pdo->query("SELECT COUNT(*) FROM team8_visitors WHERE status = 'late'")->fetchColumn(),
     ];
-    foreach ($statQueries as $label => $condition) {
-        $statStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_visitors v WHERE {$condition}" . ($canViewAllVisitors ? '' : ' AND v.logged_by = :scope_user_id'));
-        $statStmt->execute($visitorScopeParams);
-        $visitorStats[$label] = (int) $statStmt->fetchColumn();
-    }
 
 }
 ?>
@@ -667,6 +685,19 @@ if (!$showForm) {
 
 <?php else: ?>
 
+    <div class="t8-tabs t8-visitor-tabs" id="t8VisitorTabs" role="tablist" aria-label="Visitor records" data-active-tab="<?= e($activeVisitorTab) ?>">
+        <button type="button" class="t8-tab <?= $activeVisitorTab === 'scheduled' ? 'is-active' : '' ?>" id="visitor-tab-scheduled" data-tab="scheduled" role="tab" aria-controls="visitor-panel-scheduled" aria-selected="<?= $activeVisitorTab === 'scheduled' ? 'true' : 'false' ?>" tabindex="<?= $activeVisitorTab === 'scheduled' ? '0' : '-1' ?>">
+            Scheduled / Upcoming Visits <span class="t8-visitor-tab-count"><?= e((string) $scheduledTotalCount) ?></span>
+        </button>
+        <button type="button" class="t8-tab <?= $activeVisitorTab === 'onsite' ? 'is-active' : '' ?>" id="visitor-tab-onsite" data-tab="onsite" role="tab" aria-controls="visitor-panel-onsite" aria-selected="<?= $activeVisitorTab === 'onsite' ? 'true' : 'false' ?>" tabindex="<?= $activeVisitorTab === 'onsite' ? '0' : '-1' ?>">
+            Currently On-Site <span class="t8-visitor-tab-count"><?= e((string) $currentlyInTotalCount) ?></span>
+        </button>
+        <button type="button" class="t8-tab <?= $activeVisitorTab === 'logs' ? 'is-active' : '' ?>" id="visitor-tab-logs" data-tab="logs" role="tab" aria-controls="visitor-panel-logs" aria-selected="<?= $activeVisitorTab === 'logs' ? 'true' : 'false' ?>" tabindex="<?= $activeVisitorTab === 'logs' ? '0' : '-1' ?>">
+            Visitor Logs <span class="t8-visitor-tab-count"><?= e((string) $allVisitorsTotalCount) ?></span>
+        </button>
+    </div>
+
+    <section class="t8-tab-panel" id="visitor-panel-scheduled" data-panel="scheduled" role="tabpanel" aria-labelledby="visitor-tab-scheduled" tabindex="0" <?= $activeVisitorTab !== 'scheduled' ? 'hidden' : '' ?>>
     <div class="t8-card" id="scheduled-visits">
         <div class="t8-card-header">
             <h2 class="t8-card-title">Scheduled / Upcoming Visits</h2>
@@ -682,13 +713,14 @@ if (!$showForm) {
                         <th>Type</th>
                         <th>Purpose</th>
                         <th>Scheduled For</th>
+                        <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if ($scheduledVisits === []): ?>
                         <tr class="t8-table-empty-row">
-                            <td colspan="5">No visits are currently scheduled.</td>
+                            <td colspan="6">No visits are currently scheduled.</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($scheduledVisits as $v): ?>
@@ -697,6 +729,7 @@ if (!$showForm) {
                                 <td><?= e((string) ($v['visitor_type'] ?? '—')) ?></td>
                                 <td><?= e($v['purpose']) ?></td>
                                 <td><?= e(format_date($v['scheduled_date'], 'M d, Y g:i A')) ?></td>
+                                <td><span class="t8-badge <?= e(t8_visitor_status_badge((string) $v['status'])) ?>"><?= e(ucfirst((string) $v['status'])) ?></span></td>
                                 <td>
                                     <div class="t8-row-actions">
                                         <form method="post" action="<?= e(page_url('visitor', ['action' => 'checkin'])) ?>">
@@ -717,7 +750,9 @@ if (!$showForm) {
         </div>
             <?php t8_visitor_pagination($scheduledPage, $scheduledTotalPages, 'scheduled_page'); ?>
     </div>
+    </section>
 
+    <section class="t8-tab-panel" id="visitor-panel-onsite" data-panel="onsite" role="tabpanel" aria-labelledby="visitor-tab-onsite" tabindex="0" <?= $activeVisitorTab !== 'onsite' ? 'hidden' : '' ?>>
     <div class="t8-card">
         <div class="t8-card-header">
             <h2 class="t8-card-title">Currently On-Site</h2>
@@ -771,7 +806,9 @@ if (!$showForm) {
         </div>
             <?php t8_visitor_pagination($currentlyInPage, $currentlyInTotalPages, 'onsite_page'); ?>
     </div>
+    </section>
 
+    <section class="t8-tab-panel" id="visitor-panel-logs" data-panel="logs" role="tabpanel" aria-labelledby="visitor-tab-logs" tabindex="0" <?= $activeVisitorTab !== 'logs' ? 'hidden' : '' ?>>
     <div class="t8-card" id="visitor-log">
         <div class="t8-card-header">
             <h2 class="t8-card-title">Visitor Logs</h2>
@@ -822,6 +859,7 @@ if (!$showForm) {
         </div>
             <?php t8_visitor_pagination($allVisitorsPage, $allVisitorsTotalPages, 'log_page'); ?>
     </div>
+            </section>
 
     <!--
         Shared View Details modal for all three tables above (see

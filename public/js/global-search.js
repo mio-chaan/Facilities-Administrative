@@ -51,7 +51,9 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
         if (request) request.abort();
-        request = fetch(search.getAttribute('data-search-url') + '?q=' + encodeURIComponent(value), {
+        request = new AbortController();
+        fetch(search.getAttribute('data-search-url') + '?q=' + encodeURIComponent(value), {
+            signal: request.signal,
             headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
         })
             .then(function (response) { return response.ok ? response.json() : { results: {} }; })

@@ -34,8 +34,12 @@ switch ($type) {
         $statusValue = $row['status'];
         $bodyHtml = '
             <table class="print-table">
-                <tr><th>Employee</th><td>' . e($row['employee_name']) . '</td></tr>
+                <tr><th>IR Document Number</th><td>' . e($row['document_number']) . '</td></tr>
+                <tr><th>Reported By</th><td>' . e($row['prepared_by_name']) . '</td></tr>
+                <tr><th>Employee ID</th><td>#' . e((string) $row['employee_id']) . '</td></tr>
                 <tr><th>Department</th><td>' . e((string) ($row['department_name'] ?? '—')) . '</td></tr>
+                <tr><th>Position</th><td>' . e($row['position_role'] !== null ? ucwords(str_replace('_', ' ', (string) $row['position_role'])) : '—') . '</td></tr>
+                <tr><th>Date / Time Filed</th><td>' . e(format_date((string) $row['created_at'], 'M d, Y g:i A')) . '</td></tr>
                 <tr><th>Incident Date</th><td>' . e(format_date((string) $row['incident_date'], 'M d, Y')) . '</td></tr>
                 <tr><th>Incident Time</th><td>' . e((string) $row['incident_time']) . '</td></tr>
                 <tr><th>Location</th><td>' . e((string) $row['incident_location']) . '</td></tr>
@@ -69,10 +73,6 @@ switch ($type) {
         break;
 
     case 'memorandum':
-        if (!$isAdmin) {
-            http_response_code(404);
-            exit('Document not found.');
-        }
         $row = t8_hr_memorandum_fetch($pdo, $id);
         if (!$row) {
             http_response_code(404);
@@ -85,7 +85,7 @@ switch ($type) {
         $bodyHtml = '
             <table class="print-table">
                 <tr><th>Title</th><td>' . e($row['title']) . '</td></tr>
-                <tr><th>Recipients</th><td>' . e($row['recipients']) . '</td></tr>
+                <tr><th>Recipients</th><td>' . e(implode(', ', $row['recipient_labels'] ?? [])) . '</td></tr>
             </table>
             <h3>Content</h3>
             <p>' . nl2br(e((string) $row['content'])) . '</p>'
@@ -93,14 +93,25 @@ switch ($type) {
         break;
 
     case 'certificate':
-        if (!$isAdmin) {
-            http_response_code(404);
-            exit('Document not found.');
-        }
         $row = t8_hr_certificate_fetch($pdo, $id);
         if (!$row) {
             http_response_code(404);
             exit('Document not found.');
+        }
+        $employeeId = (int) ($_GET['employee_id'] ?? 0);
+        if ($employeeId < 1) {
+            $employeeId = (int) ($row['employee_id'] ?? 0);
+        }
+        $recipient = t8_hr_certificate_recipient_fetch($pdo, $id, $employeeId);
+        if (!$recipient) {
+            http_response_code(404);
+            exit('Certificate recipient not found.');
+        }
+        $isRecipient = $currentUserId > 0 && (int) $recipient['employee_id'] === $currentUserId;
+        $isAdmin = $isAdmin ?? false;
+        if (!$isAdmin && !$isRecipient) {
+            http_response_code(403);
+            exit('You are not authorized to print this certificate.');
         }
         $docNumber = $row['document_number'];
         $title = T8_CERTIFICATE_TYPES[$row['certificate_type']] ?? 'Certificate';
@@ -109,8 +120,8 @@ switch ($type) {
         $bodyHtml = '
             <div class="print-certificate">
                 <p>This is to certify that</p>
-                <h2>' . e($row['employee_name']) . '</h2>
-                <p>of the ' . e((string) ($row['department_name'] ?? '—')) . ' department</p>
+                <h2>' . e($recipient['employee_name']) . '</h2>
+                <p>of the ' . e((string) ($recipient['department_name'] ?? '—')) . ' department</p>
                 <p>' . nl2br(e((string) ($row['details'] ?? 'is issued this certificate in good standing.'))) . '</p>
             </div>';
         break;
@@ -168,12 +179,12 @@ while (ob_get_level() > 0) {
     <?= $bodyHtml ?>
 
     <div class="print-meta">
-        <span>Prepared By: <?= e($preparedByName) ?></span>
+        <span><?= $type === 'incident_report' ? 'Reported By' : 'Prepared By' ?>: <?= e($preparedByName) ?></span>
         <span>Generated: <?= e(date('M d, Y g:i A')) ?></span>
     </div>
 
     <div class="print-signatures">
-        <div class="print-signature"><div class="line"><?= e($preparedByName) ?><br>Prepared By</div></div>
+        <div class="print-signature"><div class="line"><?= e($preparedByName) ?><br><?= $type === 'incident_report' ? 'Reported By' : 'Prepared By' ?></div></div>
         <div class="print-signature"><div class="line">Signature Over Printed Name<br>Approved By</div></div>
     </div>
 </body>

@@ -361,6 +361,34 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
     exit;
 }
 
+if (isset($_GET['ajax_filter']) && $_GET['page'] === 'contracts') {
+    define('T8_CONTRACTS_AJAX_FILTER', true);
+    require dirname(__DIR__) . '/modules/contracts/index.php';
+    exit;
+}
+
+if (isset($_GET['ajax_search']) && $_GET['page'] === 'party_registry') {
+    header('Content-Type: application/json; charset=utf-8');
+    t8_require_role(['admin', 'legal_officer', 'facilities_staff', 'employee']);
+    $query = trim((string) ($_GET['q'] ?? ''));
+    if ($query === '') {
+        $partySearch = $pdo->query('SELECT id, name, type FROM team8_parties ORDER BY name LIMIT 20');
+    } else {
+        if (strlen($query) < 2) {
+            echo '[]';
+            exit;
+        }
+        $partySearch = $pdo->prepare(
+            'SELECT id, name, type FROM team8_parties
+             WHERE name LIKE :name OR trade_name LIKE :trade_name ORDER BY name LIMIT 20'
+        );
+        $like = '%' . $query . '%';
+        $partySearch->execute(['name' => $like, 'trade_name' => $like]);
+    }
+    echo json_encode($partySearch->fetchAll(PDO::FETCH_ASSOC));
+    exit;
+}
+
 // Handle AJAX filter requests for audit logs
 if (isset($_GET['ajax_filter']) && $_GET['page'] === 'audit') {
     header('Content-Type: application/json');
@@ -479,9 +507,19 @@ if ($moduleFile === null || !is_file($moduleFile)) {
     exit;
 }
 
+if ($page === 'party_registry' && isset($_GET['ajax_create_party']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    require $moduleFile;
+    exit;
+}
+
 // $pageTitle can be overridden inside the module file before it echoes
 // content — templates/header.php reads it.
 $pageTitle = ucfirst($page);
+if ($page === 'compliance_reports') {
+    $pageTitle = 'Compliance Reports';
+} elseif ($page === 'compliance_reports_all') {
+    $pageTitle = 'All Compliance Reports';
+}
 
 require dirname(__DIR__) . '/templates/header.php';
 require dirname(__DIR__) . '/templates/navbar.php';

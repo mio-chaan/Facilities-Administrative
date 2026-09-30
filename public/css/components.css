@@ -67,6 +67,15 @@
 
 /* ---- Forms ---- */
 .t8-field { margin-bottom: var(--t8-space-4); }
+.t8-contract-filters {
+    display: flex;
+    align-items: end;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: var(--t8-space-4);
+}
+.t8-contract-filters .t8-field { flex: 1 1 220px; min-width: 0; margin-bottom: 0; }
+.t8-contract-filters .t8-label { margin-bottom: 6px; }
 .t8-form-span-2 { grid-column: 1 / -1; }
 .t8-form-actions {
     grid-column: 1 / -1;
@@ -86,6 +95,28 @@
 .t8-legal-form-grid > .t8-form-actions,
 .t8-contract-form-grid > .t8-form-actions {
     margin-bottom: 0;
+}
+.t8-contract-form-grid .t8-inline-form-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 24px;
+    width: 100%;
+    max-width: 100%;
+}
+.t8-contract-form-grid .t8-inline-form-row.t8-inline-amount {
+    grid-template-columns: 110px minmax(0, 1fr);
+}
+.t8-contract-form-grid .t8-inline-form-row > .t8-field {
+    margin-bottom: 0;
+    min-width: 0;
+}
+.t8-contract-form-grid .t8-inline-form-row.t8-inline-amount .t8-field:first-child {
+    width: 110px;
+}
+.t8-contract-form-grid .t8-inline-form-row .t8-input,
+.t8-contract-form-grid .t8-inline-form-row .t8-select {
+    width: 100%;
+    min-width: 0;
 }
 .t8-legal-form-actions,
 .t8-contract-form-actions {
@@ -221,6 +252,7 @@
 .t8-alert-success { background: #eaf6ee; border-color: var(--t8-success); color: #1f5c38; }
 .t8-alert-danger  { background: #fdeceb; border-color: var(--t8-danger); color: #8a2e1e; }
 .t8-alert-warning { background: #fff8e6; border-color: var(--t8-warning); color: #8a5c10; }
+.t8-alert-warning a { text-decoration: underline; }
 .t8-alert-info    { background: #f3e9e9; border-color: var(--t8-primary); color: var(--t8-primary-dark); }
 
 /* ---- Auth layout styles ---- */
@@ -269,6 +301,18 @@
     border-radius: var(--t8-radius);
     background: var(--t8-secondary);
 }
+.t8-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 24px 12px;
+    text-align: center;
+    color: var(--t8-text-muted);
+}
+.t8-empty-state i { margin-bottom: 4px; color: var(--t8-primary-light); font-size: 2rem; }
+.t8-empty-state strong { color: var(--t8-ink); font-size: .95rem; }
+.t8-empty-state .t8-btn { margin-top: 8px; }
 
 a.t8-btn,
 a.t8-btn:link,

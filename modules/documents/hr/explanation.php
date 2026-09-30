@@ -26,9 +26,16 @@ if ($action === 'explanation_new') {
         echo '<div class="t8-alert t8-alert-danger">403 — This notice was not issued to you.</div>';
         return;
     }
-    if (t8_hr_explanation_for_nte($pdo, $nteId)) {
-        t8_flash_set('danger', 'You have already submitted an explanation for this notice.');
-        redirect(page_url('documents', ['action' => 'nte_view', 'id' => $nteId]));
+    $latestExplanation = t8_hr_explanation_for_nte($pdo, $nteId);
+    if (!$latestExplanation || !t8_hr_nte_allows_explanation((string) $nte['status'], $latestExplanation)) {
+        if ($latestExplanation && $latestExplanation['status'] !== 'rejected' && $latestExplanation['status'] !== 'archived') {
+            t8_flash_set('danger', 'An explanation is already pending or active for this notice.');
+            redirect(page_url('documents', ['action' => 'nte_view', 'id' => $nteId]));
+        }
+        if (strtolower(trim((string) $nte['status'])) !== 'approved') {
+            t8_flash_set('danger', 'An explanation cannot be submitted before the Notice To Explain is issued and approved.');
+            redirect(page_url('documents', ['action' => 'nte_view', 'id' => $nteId]));
+        }
     }
 
     $formValues = ['explanation_text' => ''];
@@ -146,7 +153,7 @@ if ($action === 'explanation_view') {
 
         <?php if (!empty($explanation['attachment_path'])): ?>
             <div class="t8-field">
-                <a href="<?= e(page_url('documents', ['action' => 'hr_attachment_download', 'type' => 'explanation', 'id' => $id])) ?>" target="_blank"><i class="fa-solid fa-paperclip"></i> View attachment</a>
+                <a href="<?= e(page_url('documents', ['action' => 'hr_attachment_download', 'type' => 'explanation', 'id' => (int) $explanation['id']])) ?>" target="_blank"><i class="fa-solid fa-paperclip"></i> View attachment</a>
             </div>
         <?php endif; ?>
 
@@ -163,7 +170,7 @@ if ($action === 'explanation_view') {
                 <?= t8_csrf_field() ?>
                 <input type="hidden" name="id" value="<?= e((string) $id) ?>">
                 <div class="t8-field">
-                    <label class="t8-label" for="admin_remarks">Remarks <span class="t8-help-text">(optional)</span></label>
+                    <label class="t8-label" for="admin_remarks">Remarks <span class="t8-help-text">(required when rejecting)</span></label>
                     <textarea class="t8-textarea" id="admin_remarks" name="admin_remarks" rows="3"></textarea>
                 </div>
                 <button class="t8-btn t8-btn-success t8-btn-sm" type="submit" name="status" value="approved"><i class="fa-solid fa-check"></i> Approve</button>
@@ -200,9 +207,18 @@ if ($action === 'explanation_review') {
         t8_flash_set('danger', 'Invalid status.');
         redirect(page_url('documents', ['action' => 'explanation_view', 'id' => $id]));
     }
+    if ($newStatus === 'rejected' && $remarks === '') {
+        t8_flash_set('danger', 'A rejection reason is required.');
+        redirect(page_url('documents', ['action' => 'explanation_view', 'id' => $id]));
+    }
 
     $explanation = t8_hr_explanation_fetch($pdo, $id);
     if ($explanation) {
+        if (!t8_hr_status_transition_allowed((string) $explanation['status'], $newStatus)) {
+            t8_flash_set('danger', 'That explanation status change is not allowed.');
+            redirect(page_url('documents', ['action' => 'explanation_view', 'id' => $id]));
+        }
+
         $pdo->prepare(
             'UPDATE team8_explanations SET status = :status, admin_remarks = :remarks, reviewed_by = :reviewer, reviewed_at = NOW() WHERE id = :id'
         )->execute([
@@ -212,7 +228,16 @@ if ($action === 'explanation_review') {
             'id'       => $id,
         ]);
         t8_audit_log($pdo, $currentUserId, 'explanation', $id, $newStatus);
-        t8_hr_notify($pdo, (int) $explanation['employee_id'], 'Your explanation for ' . $explanation['nte_number'] . ' was marked ' . $newStatus . '.');
+        $notificationMessage = 'Your explanation for ' . $explanation['nte_number'] . ' was marked ' . $newStatus . '.';
+        if ($newStatus === 'rejected') {
+            $notificationMessage .= ' Reason: ' . $remarks;
+        }
+        t8_hr_notify(
+            $pdo,
+            (int) $explanation['employee_id'],
+            $notificationMessage,
+            page_url('documents', ['action' => 'explanation_view', 'id' => $id])
+        );
         t8_flash_set('success', 'Explanation ' . $newStatus . '.');
     } else {
         t8_flash_set('danger', 'Explanation letter not found.');

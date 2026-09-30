@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const options = document.getElementById('t8LocationOptions');
 
     const addButton = document.getElementById('t8LocationAdd');
+    const addFromWarning = document.getElementById('t8LocationAddFromWarning');
     const modal = document.getElementById('t8LocationAddModal');
     const modalCloseBtn = document.getElementById('t8LocationAddModalClose');
     const modalCancelBtn = document.getElementById('t8LocationAddCancel');
@@ -132,6 +133,13 @@ document.addEventListener('DOMContentLoaded', () => {
         addButton.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
+            openModal();
+        });
+    }
+
+    if (addFromWarning) {
+        addFromWarning.addEventListener('click', event => {
+            event.preventDefault();
             openModal();
         });
     }

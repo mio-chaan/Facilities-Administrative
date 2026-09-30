@@ -17,7 +17,8 @@ if (!function_exists('t8_audit_log')) {
         int $entityId,
         string $action,
         ?string $oldValue = null,
-        ?string $newValue = null
+        ?string $newValue = null,
+        bool $throwOnFailure = false
     ): void {
         // audit_logs.user_id is NOT NULL in the shared schema - an
         // action with no known actor (e.g. a failed login) isn't
@@ -31,7 +32,7 @@ if (!function_exists('t8_audit_log')) {
                 'INSERT INTO audit_logs (user_id, entity_type, entity_id, action, old_value, new_value)
                  VALUES (:user_id, :entity_type, :entity_id, :action, :old_value, :new_value)'
             );
-            $stmt->execute([
+            $executed = $stmt->execute([
                 'user_id'     => $userId,
                 'entity_type' => $entityType,
                 'entity_id'   => $entityId,
@@ -39,7 +40,16 @@ if (!function_exists('t8_audit_log')) {
                 'old_value'   => $oldValue,
                 'new_value'   => $newValue,
             ]);
+            if (!$executed) {
+                if ($throwOnFailure) {
+                    throw new RuntimeException('Audit log insert failed.');
+                }
+                error_log('Audit log write failed: statement execution returned false.');
+            }
         } catch (PDOException $e) {
+            if ($throwOnFailure) {
+                throw $e;
+            }
             // Audit logging must never break the request it's logging.
             error_log('Audit log write failed: ' . $e->getMessage());
         }

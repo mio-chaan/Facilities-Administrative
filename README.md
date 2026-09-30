@@ -20,12 +20,21 @@ framework — routing is a small hand-rolled front controller
 ## Setup
 
 1. Clone the repo and `cd` into it.
-2. Open `app/config/database.php` and edit `DB_HOST`/`DB_NAME`/`DB_USER`/
+2. Install PHP dependencies from the project root:
+  ```bash
+  composer install
+  ```
+  This installs PHPMailer and Dompdf; Composer dependencies are kept in
+  the ignored `vendor/` directory.
+3. Open `app/config/database.php` and edit `DB_HOST`/`DB_NAME`/`DB_USER`/
    `DB_PASS` for your local MySQL setup (defaults match a stock XAMPP
    install — `root` with no password). App-level settings like
    `APP_URL` live in `app/config/config.php`, edited the same way;
-   this project uses plain PHP constants instead of a `.env` file.
-3. Create the database and import the schema (Team 8's tables only —
+  this project uses plain PHP constants instead of a `.env` file. For
+  Gmail delivery, add `GMAIL_SMTP_USER` and the 16-character
+  `GMAIL_SMTP_APP_PASSWORD` in the ignored `app/config/config.local.php`
+  or set those environment variables. Never commit real credentials.
+4. Create the database and import the schema (Team 8's tables only —
    see `docs/Database.md` for why the shared-table section exists):
    ```bash
    mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS capstone_shared_db"
@@ -33,11 +42,11 @@ framework — routing is a small hand-rolled front controller
   mysql -u root -p capstone_shared_db < database/seed_account.sql       # optional
   mysql -u root -p capstone_shared_db < database/seed_dummy_data.sql     # optional
    ```
-4. Start PHP's built-in dev server from the project root:
+5. Start PHP's built-in dev server from the project root:
    ```bash
    php -S localhost:8000
    ```
-5. Visit `http://localhost:8000/index.php?page=dashboard` (or just
+6. Visit `http://localhost:8000/index.php?page=dashboard` (or just
    `http://localhost:8000/dashboard.php`, which redirects there).
 
    SIMPLIFIED SETUP

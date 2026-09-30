@@ -21,6 +21,7 @@ $t8NavSubtitles = [
     'retention'   => 'Track retention policies, disposition schedules, and compliance for records',
     'legal'       => 'Legal cases and related filings',
     'contracts'   => 'Contracts, parties, and obligations',
+    'compliance_reports' => 'Generate and distribute compliance summaries',
 ];
 $t8NavSubtitle = $t8NavSubtitles[current_page()] ?? '';
 

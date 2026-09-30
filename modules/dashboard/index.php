@@ -25,6 +25,7 @@ $statMeta = [
 
 $statLinks = [
     'Total Facilities'      => page_url('facilities'),
+    'Pending Reservations'  => page_url('reservation', ['tab' => 'pending']),
     'Visitors Today'        => page_url('visitor'),
     'Active Contracts'      => page_url('contracts'),
     'Documents'             => page_url('documents'),
@@ -76,7 +77,7 @@ try {
         ->fetchColumn();
 
     $stats['Open Legal Cases'] = (int) $pdo
-        ->query("SELECT COUNT(*) FROM team8_legal_cases WHERE status = 'open'")
+        ->query("SELECT COUNT(*) FROM team8_legal_cases WHERE deleted_at IS NULL AND status IN ('open', 'under_review')")
         ->fetchColumn();
 } catch (PDOException $e) {
     $dbError = 'Could not load live stats - has database/schema.sql been imported yet?';
@@ -120,8 +121,6 @@ try {
 } catch (PDOException $e) {
     $dbError ??= 'Could not load all dashboard information - has database/schema.sql been imported yet?';
 }
-
-$t8UnreadNotifications = t8_unread_notification_count($pdo, t8_current_user_id());
 
 $activityIcons = [
     'login'      => 'fa-right-to-bracket',
@@ -317,8 +316,8 @@ try {
         $openLegalCasesNearDeadline = (int) $pdo->query(
             "SELECT COUNT(*) FROM team8_legal_cases
              WHERE deleted_at IS NULL
-               AND status = 'open'
-               AND deadline BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 14 DAY)"
+             AND status <> 'closed'
+             AND deadline BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)"
         )->fetchColumn();
     } catch (PDOException $e) {
         $openLegalCasesNearDeadline = 0;
@@ -509,14 +508,6 @@ $trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
                 <li class="t8-insight-item">
                     <span>Top facility: <strong><?= e($facilityUsage[0]['label'] ?? '—') ?></strong></span>
                     <span class="t8-tag t8-tag-info">Info</span>
-                </li>
-                <li class="t8-insight-item">
-                    <span>Unread notifications: <strong><?= e((string) $t8UnreadNotifications) ?></strong></span>
-                    <?php if ($t8UnreadNotifications > 0): ?>
-                        <span class="t8-tag t8-tag-review">Review</span>
-                    <?php else: ?>
-                        <span class="t8-tag t8-tag-info">Info</span>
-                    <?php endif; ?>
                 </li>
             </ul>
             <p id="t8ReservationInsight" class="t8-help-text" role="status" aria-live="polite" hidden></p>
