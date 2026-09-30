@@ -40,6 +40,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../app/includes/compliance_document_validator.php';
+require_once __DIR__ . '/../../app/includes/renewal_automation.php';
 
 $retentionHelperPath = __DIR__ . '/../../app/includes/retention_helpers.php';
 if (is_file($retentionHelperPath)) {
@@ -65,6 +66,42 @@ if (!function_exists('t8_retention_resolve_entity')) {
 
 if (!$isAdmin && in_array($action, ['register', 'archive', 'dispose', 'dispose_request', 'dispose_authorize'], true)) {
     t8_require_role(['admin']);
+}
+
+if ($action === 'run_daily_check') {
+    t8_require_role(['admin']);
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+        t8_flash_set('danger', 'Your session expired. Please try again.');
+        redirect(page_url('retention'));
+    }
+
+    $recipientOverride = null;
+    $testRecipient = trim((string) ($_POST['test_recipient'] ?? ''));
+    if ($testRecipient !== '') {
+        if (APP_ENV !== 'local' || !filter_var($testRecipient, FILTER_VALIDATE_EMAIL)) {
+            t8_flash_set('danger', 'A test recipient is allowed only in local development and must be a valid email address.');
+            redirect(page_url('retention'));
+        }
+        $recipientOverride = [$testRecipient];
+    }
+
+    try {
+        $checkResult = t8_run_daily_renewal_check($pdo, (int) $currentUserId, true, $recipientOverride);
+        $message = sprintf(
+            'Daily check completed: %d T-14 warning(s), %d successful T-7 renewal(s), %d blocked T-7 renewal(s).',
+            $checkResult['t14'],
+            $checkResult['t7_success'],
+            $checkResult['t7_blocked']
+        );
+        if ($checkResult['errors'] !== []) {
+            $message .= ' ' . count($checkResult['errors']) . ' delivery or processing error(s) were logged.';
+        }
+        t8_flash_set($checkResult['errors'] === [] ? 'success' : 'warning', $message);
+    } catch (Throwable $e) {
+        error_log('Manual renewal check failed: ' . $e->getMessage());
+        t8_flash_set('danger', 'The daily check could not be completed. Confirm the renewal migration is installed and review the application log.');
+    }
+    redirect(page_url('retention'));
 }
 
 $renewalDocumentLabel = trim((string) ($_GET['document_type'] ?? $_POST['document_type'] ?? ''));
@@ -295,12 +332,35 @@ if ($showList) {
         $params['entity_type'] = $entityTypeFilter;
     }
 
+    $retentionPageSize = 5;
+    $recordCountStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM team8_records r
+         JOIN users u ON u.id = r.custodian_id
+         WHERE $whereClause"
+    );
+    $recordCountStmt->execute($params);
+    $totalPages = max(1, (int) ceil((int) $recordCountStmt->fetchColumn() / $retentionPageSize));
+    $requestedPage = filter_var($_GET['retention_page'] ?? 1, FILTER_VALIDATE_INT);
+    $currentPage = min(max(1, $requestedPage === false ? 1 : $requestedPage), $totalPages);
+    $offset = ($currentPage - 1) * $retentionPageSize;
+    $retentionPageUrl = static function (int $page) use ($entityTypeFilter, $statusFilter): string {
+        $query = ['retention_page' => $page];
+        if ($entityTypeFilter !== '') {
+            $query['entity_type'] = $entityTypeFilter;
+        }
+        if ($statusFilter === 'archived') {
+            $query['status'] = 'archived';
+        }
+        return page_url('retention', $query);
+    };
+
     $recordsStmt = $pdo->prepare(
         "SELECT r.*, u.full_name AS custodian_name
          FROM team8_records r
          JOIN users u ON u.id = r.custodian_id
          WHERE $whereClause
-         ORDER BY r.disposition_date ASC"
+         ORDER BY r.disposition_date ASC, r.id ASC
+         LIMIT $retentionPageSize OFFSET $offset"
     );
     $recordsStmt->execute($params);
     $records = $recordsStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -672,6 +732,19 @@ if ($showList) {
         </div>
     </div>
 
+    <?php if ($isAdmin): ?>
+        <form method="post" action="<?= e(page_url('retention', ['action' => 'run_daily_check'])) ?>" style="display:flex; align-items:end; gap:var(--t8-space-3); flex-wrap:wrap; margin-bottom:var(--t8-space-4);">
+            <?= t8_csrf_field() ?>
+            <?php if (APP_ENV === 'local'): ?>
+                <div class="t8-field" style="margin:0;">
+                    <label class="t8-label" for="renewalTestRecipient">Test recipient (local only)</label>
+                    <input class="t8-input" type="email" id="renewalTestRecipient" name="test_recipient" autocomplete="email" placeholder="Optional email override">
+                </div>
+            <?php endif; ?>
+            <button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-arrows-rotate"></i> Run Daily Check Now</button>
+        </form>
+    <?php endif; ?>
+
         <section class="t8-card t8-renewal-entry-section">
             <div class="t8-card-header"><h2 class="t8-card-title"><i class="fa-solid fa-rotate"></i> Essential Permit Renewals</h2></div>
             <div class="t8-table-wrap">
@@ -808,6 +881,17 @@ if ($showList) {
                         </tbody>
                     </table>
                 </div>
+                <?php if ($totalPages > 1): ?>
+                    <nav class="t8-pagination" aria-label="Retention record pages">
+                        <?php if ($currentPage > 1): ?>
+                            <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e($retentionPageUrl($currentPage - 1)) ?>">Previous</a>
+                        <?php endif; ?>
+                        <span class="t8-help-text">Page <?= e((string) $currentPage) ?> of <?= e((string) $totalPages) ?></span>
+                        <?php if ($currentPage < $totalPages): ?>
+                            <a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e($retentionPageUrl($currentPage + 1)) ?>">Next</a>
+                        <?php endif; ?>
+                    </nav>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
     </div>

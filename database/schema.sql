@@ -27,7 +27,7 @@ CREATE TABLE `audit_logs` (
   `user_id` int(11) NOT NULL,
   `entity_type` varchar(100) NOT NULL,
   `entity_id` int(11) NOT NULL,
-  `action` varchar(50) NOT NULL,
+  `action` varchar(100) NOT NULL,
   `old_value` text DEFAULT NULL,
   `new_value` text DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
@@ -376,6 +376,8 @@ CREATE TABLE `team8_documents` (
   `status` varchar(30) NOT NULL DEFAULT 'pending',
   `review_reason` text DEFAULT NULL,
   `expiration_date` date DEFAULT NULL,
+  `tracking_status` enum('Valid','Expiring Soon','Expired') NOT NULL DEFAULT 'Valid',
+  `last_checked_at` datetime DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `deleted_at` datetime DEFAULT NULL,
@@ -431,6 +433,29 @@ CREATE TABLE IF NOT EXISTS `renewal_requests` (
   PRIMARY KEY (`id`),
   KEY `idx_renewal_requests_initiated_by` (`initiated_by`),
   CONSTRAINT `fk_renewal_requests_user` FOREIGN KEY (`initiated_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `daily_check_log` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `check_date` date NOT NULL,
+  `t14_run_at` datetime DEFAULT NULL,
+  `t7_run_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_daily_check_log_date` (`check_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `renewal_notifications` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `document_id` int(11) NOT NULL,
+  `milestone` enum('t14','t7') NOT NULL,
+  `status` enum('processing','processed') NOT NULL DEFAULT 'processing',
+  `started_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `sent_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_renewal_notification_document_milestone` (`document_id`,`milestone`),
+  KEY `idx_renewal_notifications_sent_at` (`sent_at`),
+  CONSTRAINT `fk_renewal_notifications_document` FOREIGN KEY (`document_id`) REFERENCES `team8_documents` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --

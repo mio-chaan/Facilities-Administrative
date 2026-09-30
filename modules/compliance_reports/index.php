@@ -122,59 +122,6 @@ function t8_compliance_report_check_mandatory_documents(PDO $pdo, ?string $onlyR
     return $results;
 }
 
-function t8_compliance_single_check_content(array $report, array $requirement, string $preparedBy, string $recipientEmails, bool $dispatchSent): array
-{
-    $generatedAt = date('M d, Y g:i A');
-    $period = format_date((string) $report['date_from'], 'M d, Y') . ' - ' . format_date((string) $report['date_to'], 'M d, Y');
-    $department = trim((string) ($report['department_name'] ?? '')) ?: 'All Departments';
-    $documentType = (string) $requirement['name'];
-    $documentTitle = trim((string) ($requirement['document_title'] ?? ''));
-    $documentLabel = $documentTitle !== '' ? $documentType . ' (' . $documentTitle . ')' : $documentType;
-    $status = (string) $requirement['status'];
-    $expirationDate = (string) ($requirement['expiration_date'] ?? '');
-
-    if ($status === 'missing') {
-        $validationText = 'Missing - Not uploaded in Document Management.';
-    } elseif ($status === 'expired') {
-        $validationText = $expirationDate !== ''
-            ? 'Expired on ' . format_date($expirationDate, 'M d, Y') . '.'
-            : 'Expired - no expiration date is recorded.';
-    } else {
-        $validationText = $expirationDate !== ''
-            ? 'Valid through ' . format_date($expirationDate, 'M d, Y') . '.'
-            : 'Valid; no expiration date applies.';
-    }
-
-    $dispatchText = $dispatchSent
-        ? 'Gmail dispatch was sent to ' . $recipientEmails . '.'
-        : 'Gmail dispatch is paused until this requirement is valid.';
-    $summary = sprintf(
-        'Report #%d (%s) covers %s for %s. Generated %s and prepared by %s. The single requirement checked was %s: %s Recipient: %s. %s',
-        (int) $report['id'],
-        (string) $report['report_type'],
-        $period,
-        $department,
-        $generatedAt,
-        $preparedBy,
-        $documentLabel,
-        $validationText,
-        $recipientEmails,
-        $dispatchText
-    );
-
-    $findings = ['Expiration/Validity Audit: ' . $documentLabel . ' - ' . $validationText];
-    if ($status === 'ok') {
-        $findings[] = 'Verification: The selected document requirement was verified on ' . $generatedAt . '; the report was sent via Gmail to ' . $recipientEmails . '.';
-    } else {
-        $action = $status === 'missing'
-            ? 'Upload a current ' . $documentType . ' in Document Management.'
-            : 'Renew or replace the ' . $documentType . ' in Document Management.';
-        $findings[] = 'Action Item: ' . $action . ' Checked on ' . $generatedAt . '. Gmail dispatch is paused.';
-    }
-
-    return ['executive_summary' => $summary, 'key_findings' => $findings, 'generated_at' => $generatedAt];
-}
-
 function t8_compliance_report_findings(array $rows): array
 {
     $findings = [];
@@ -195,33 +142,6 @@ function t8_compliance_report_findings(array $rows): array
         return ['All recorded compliance checks passed or were marked compliant.'];
     }
     return $findings;
-}
-
-function t8_compliance_report_pdf_html(array $report, array $findings, array $checks): string
-{
-    $department = (string) ($report['department_name'] ?? 'All Departments');
-    $range = format_date((string) $report['date_from'], 'M d, Y') . ' - ' . format_date((string) $report['date_to'], 'M d, Y');
-    $findingHtml = '';
-    foreach ($findings as $finding) {
-        $findingHtml .= '<li>' . nl2br(e((string) $finding)) . '</li>';
-    }
-    $checkRows = '';
-    foreach ($checks as $check) {
-        $checkRows .= '<tr><td>' . e(format_date((string) $check['check_date'], 'M d, Y')) . '</td><td>'
-            . e((string) $check['record_title']) . '</td><td>' . e((string) ($check['department_name'] ?? 'Unassigned'))
-            . '</td><td>' . e(ucwords(str_replace('_', ' ', (string) $check['result']))) . '</td><td>'
-            . e((string) ($check['notes'] ?? '')) . '</td></tr>';
-    }
-    return '<!doctype html><html><head><meta charset="utf-8"><style>
-        body{font-family:DejaVu Sans,sans-serif;color:#292321;font-size:10px}h1{color:#781d32;font-size:22px;margin:0 0 8px}h2{font-size:14px;color:#781d32;margin:22px 0 8px}
-        .meta{color:#655b58;margin:0 0 18px}.summary{background:#f7f2f1;padding:14px;border-left:4px solid #a12b45;line-height:1.6}
-        li{margin:0 0 6px;line-height:1.5}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ded8d6;padding:6px;text-align:left;vertical-align:top}th{background:#f4eded;color:#4d202b}
-        </style></head><body><h1>' . e((string) $report['report_type']) . '</h1><p class="meta">' . e($department) . ' | ' . e($range) . '</p>
-        <h2>Executive Summary</h2><div class="summary">' . nl2br(e((string) $report['executive_summary'])) . '</div>
-        <h2>Key Findings</h2><ul>' . $findingHtml . '</ul><h2>Compliance Check Details</h2>
-        <table><thead><tr><th>Date</th><th>Record</th><th>Department</th><th>Result</th><th>Notes</th></tr></thead><tbody>'
-        . ($checkRows !== '' ? $checkRows : '<tr><td colspan="5">No checks were recorded.</td></tr>')
-        . '</tbody></table></body></html>';
 }
 
 function t8_compliance_send_report(array $report, array $recipients, string $pdfPath, array $findings, array $attachments = []): void
