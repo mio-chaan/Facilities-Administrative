@@ -153,15 +153,19 @@ if (t8_has_role(['admin', 'legal_officer', 'facilities_staff', 'employee'])) {
     $addResults($results, 'Contracts', $contractRows);
 }
 
-$retentionWhere = '(d.title LIKE :q OR s.record_type LIKE :q OR r.status LIKE :q OR r.disposition_date LIKE :q OR CAST(r.id AS CHAR) LIKE :q)';
+$retentionWhere = '(COALESCE(d.title, c.title, lc.title) LIKE :q OR r.entity_type LIKE :q OR r.retention_basis LIKE :q OR r.status LIKE :q OR r.disposition_date LIKE :q OR CAST(r.id AS CHAR) LIKE :q)';
 $retentionParams = ['q' => $like];
 if (!t8_has_role('admin')) {
     $retentionWhere .= ' AND r.custodian_id = :user_id';
     $retentionParams['user_id'] = t8_current_user_id();
 }
 $retentionRows = $search(
-    "SELECT r.id, d.title, CONCAT('Record #', r.id, ' | ', s.record_type, ' | ', r.status) AS details
-     FROM team8_records r JOIN team8_documents d ON d.id = r.document_id JOIN team8_retention_schedules s ON s.id = r.schedule_id
+    "SELECT r.id, COALESCE(d.title, c.title, lc.title, CONCAT('Record #', r.id)) AS title,
+            CONCAT('Record #', r.id, ' | ', r.entity_type, ' | ', r.status, ' | ', r.retention_basis) AS details
+     FROM team8_records r
+     LEFT JOIN team8_documents d ON r.entity_type = 'document' AND d.id = r.entity_id
+     LEFT JOIN team8_contracts c ON r.entity_type = 'contract' AND c.id = r.entity_id
+     LEFT JOIN team8_legal_cases lc ON r.entity_type = 'legal_case' AND lc.id = r.entity_id
      WHERE {$retentionWhere} ORDER BY r.created_at DESC LIMIT 8",
     $retentionParams
 );

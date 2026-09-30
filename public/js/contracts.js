@@ -38,13 +38,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var table = document.getElementById(form.getAttribute('data-contract-filter-table'));
     var results = table ? table.querySelector('[data-contract-results]') : null;
+    var pagination = document.getElementById('t8ContractsPaginationContainer');
     var search = form.querySelector('[data-contract-search]');
     var status = form.querySelector('[data-contract-status]');
     var type = form.querySelector('[data-contract-type]');
     var timer = null;
     var requestId = 0;
 
-    function buildUrl() {
+    function buildUrl(page) {
         var url = new URL(window.location.href);
         var formData = new FormData(form);
         url.searchParams.set('page', 'contracts');
@@ -59,12 +60,15 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         var archived = form.querySelector('input[name="archived"]');
         if (archived) url.searchParams.set('archived', archived.value);
+        var rejected = form.querySelector('input[name="rejected"]');
+        if (rejected) url.searchParams.set('rejected', rejected.value);
+        url.searchParams.set('contract_page', String(page || 1));
         return url;
     }
 
-    function applyFilters() {
+    function applyFilters(page) {
         if (!results) return;
-        var url = buildUrl();
+        var url = buildUrl(page);
         var currentRequest = ++requestId;
         results.setAttribute('aria-busy', 'true');
         fetch(url.toString(), {
@@ -77,6 +81,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (data) {
                 if (currentRequest !== requestId || typeof data.html === 'undefined') return;
                 results.innerHTML = data.html;
+                if (pagination && typeof data.pagination !== 'undefined') pagination.innerHTML = data.pagination;
                 results.removeAttribute('aria-busy');
                 initMeatballMenus(results);
                 if (window.T8RowMenu) window.T8RowMenu.init(results);
@@ -89,6 +94,15 @@ document.addEventListener('DOMContentLoaded', function () {
                     console.error('Contract filter error:', error);
                 }
             });
+    }
+
+    if (pagination) {
+        pagination.addEventListener('click', function (event) {
+            var link = event.target.closest('[data-contract-page]');
+            if (!link) return;
+            event.preventDefault();
+            applyFilters(Number(link.getAttribute('data-contract-page')));
+        });
     }
 
     if (search) {

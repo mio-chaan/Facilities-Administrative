@@ -23,6 +23,7 @@ const T8_CONTRACT_CURRENCIES = ['PHP', 'USD', 'JPY', 'KRW', 'EUR'];
 const T8_CONTRACT_PAYMENT_FREQUENCIES = ['One-time', 'Monthly', 'Quarterly', 'Semi-annually', 'Annually', 'Per milestone', 'Other'];
 const T8_CONTRACT_MONITORING_DAYS = 90;
 const T8_CONTRACT_MAX_UPLOAD_MB = 10;
+const T8_CONTRACT_PAGE_SIZE = 10;
 
 function t8_contract_next_number(PDO $pdo): string
 {
@@ -127,6 +128,20 @@ function t8_contract_status_label(string $status): string
     return ucwords(str_replace('_', ' ', $status));
 }
 
+function t8_contract_render_pagination(int $currentPage, int $totalPages, array $filters): void
+{
+    if ($totalPages <= 1) {
+        return;
+    }
+    ?>
+    <nav id="t8ContractsPagination" class="t8-pagination" aria-label="Contract pages">
+        <?php if ($currentPage > 1): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('contracts', array_merge($filters, ['contract_page' => $currentPage - 1]))) ?>" data-contract-page="<?= $currentPage - 1 ?>">Previous</a><?php endif; ?>
+        <span class="t8-help-text">Page <?= $currentPage ?> of <?= $totalPages ?></span>
+        <?php if ($currentPage < $totalPages): ?><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('contracts', array_merge($filters, ['contract_page' => $currentPage + 1]))) ?>" data-contract-page="<?= $currentPage + 1 ?>">Next</a><?php endif; ?>
+    </nav>
+    <?php
+}
+
 function t8_contract_render_rows(array $contracts, bool $isAdmin, bool $isLegal, bool $archived): void
 {
     if ($contracts === []) {
@@ -215,11 +230,27 @@ if (isset($_GET['ajax_filter'])) {
         $conditions .= ' AND c.owner_id = :owner';
         $params['owner'] = $currentUserId;
     }
-    $stmt = $pdo->prepare("SELECT c.*, u.full_name AS owner_name, d.name AS department_name FROM team8_contracts c JOIN users u ON u.id = c.owner_id LEFT JOIN departments d ON d.id = c.department_id WHERE {$conditions} ORDER BY c.created_at DESC");
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_contracts c JOIN users u ON u.id = c.owner_id LEFT JOIN departments d ON d.id = c.department_id WHERE {$conditions}");
+    $countStmt->execute($params);
+    $totalPages = max(1, (int) ceil((int) $countStmt->fetchColumn() / T8_CONTRACT_PAGE_SIZE));
+    $requestedPage = filter_var($_GET['contract_page'] ?? 1, FILTER_VALIDATE_INT);
+    $currentPage = min(max(1, $requestedPage === false ? 1 : $requestedPage), $totalPages);
+    $offset = ($currentPage - 1) * T8_CONTRACT_PAGE_SIZE;
+    $stmt = $pdo->prepare("SELECT c.*, u.full_name AS owner_name, d.name AS department_name FROM team8_contracts c JOIN users u ON u.id = c.owner_id LEFT JOIN departments d ON d.id = c.department_id WHERE {$conditions} ORDER BY c.created_at DESC LIMIT " . T8_CONTRACT_PAGE_SIZE . " OFFSET {$offset}");
     $stmt->execute($params);
     ob_start();
     t8_contract_render_rows($stmt->fetchAll(PDO::FETCH_ASSOC), $isAdmin, $isLegal, $archived);
-    echo json_encode(['html' => (string) ob_get_clean()]);
+    $rowsHtml = (string) ob_get_clean();
+    $paginationFilters = ['archived' => $archived ? 1 : 0, 'rejected' => $rejected ? 1 : 0];
+    foreach (['search' => $search, 'status' => $statusFilter, 'contract_type' => $typeFilter] as $key => $value) {
+        if ($value !== '') {
+            $paginationFilters[$key] = $value;
+        }
+    }
+    ob_start();
+    t8_contract_render_pagination($currentPage, $totalPages, $paginationFilters);
+    $paginationHtml = (string) ob_get_clean();
+    echo json_encode(['html' => $rowsHtml, 'pagination' => $paginationHtml]);
     exit;
 }
 
@@ -689,7 +720,13 @@ if ($search !== '') { $where .= ' AND (c.contract_number LIKE :s1 OR c.title LIK
 if (in_array($statusFilter, T8_CONTRACT_STATUSES, true)) { $where .= ' AND c.status = :status'; $params['status'] = $statusFilter; }
 if ($typeFilter !== '') { $where .= ' AND c.contract_type = :type'; $params['type'] = $typeFilter; }
 if (!$isAdmin && !$isLegal) { $where .= ' AND c.owner_id = :owner'; $params['owner'] = $currentUserId; }
-$listStmt = $pdo->prepare("SELECT c.*, u.full_name AS owner_name, d.name AS department_name FROM team8_contracts c JOIN users u ON u.id = c.owner_id LEFT JOIN departments d ON d.id = c.department_id WHERE {$where} ORDER BY c.created_at DESC");
+$countStmt = $pdo->prepare("SELECT COUNT(*) FROM team8_contracts c JOIN users u ON u.id = c.owner_id LEFT JOIN departments d ON d.id = c.department_id WHERE {$where}");
+$countStmt->execute($params);
+$totalPages = max(1, (int) ceil((int) $countStmt->fetchColumn() / T8_CONTRACT_PAGE_SIZE));
+$requestedPage = filter_var($_GET['contract_page'] ?? 1, FILTER_VALIDATE_INT);
+$currentPage = min(max(1, $requestedPage === false ? 1 : $requestedPage), $totalPages);
+$offset = ($currentPage - 1) * T8_CONTRACT_PAGE_SIZE;
+$listStmt = $pdo->prepare("SELECT c.*, u.full_name AS owner_name, d.name AS department_name FROM team8_contracts c JOIN users u ON u.id = c.owner_id LEFT JOIN departments d ON d.id = c.department_id WHERE {$where} ORDER BY c.created_at DESC LIMIT " . T8_CONTRACT_PAGE_SIZE . " OFFSET {$offset}");
 $listStmt->execute($params);
 $contracts = $listStmt->fetchAll(PDO::FETCH_ASSOC);
 $counts = array_fill_keys(['total', 'draft', 'approval', 'signing', 'active', 'expiring'], 0);
@@ -703,3 +740,12 @@ $counts['expiring'] = count(array_filter($monitoringRows, 't8_contract_is_monito
 <div class="t8-tabs"><a class="t8-tab <?= !$archivedFilter && !$rejectedFilter ? 'is-active' : '' ?>" href="<?= e(page_url('contracts')) ?>">Active</a><a class="t8-tab <?= $archivedFilter ? 'is-active' : '' ?>" href="<?= e(page_url('contracts', ['archived' => 1])) ?>">Archived</a><a class="t8-tab <?= $rejectedFilter ? 'is-active' : '' ?>" href="<?= e(page_url('contracts', ['rejected' => 1])) ?>">Rejected</a></div>
 <form id="t8ContractsFilterForm" class="t8-filter-row" data-contract-filter-table="t8ContractsTable"><input type="hidden" name="archived" value="<?= $archivedFilter ? '1' : '0' ?>"><input type="hidden" name="rejected" value="<?= $rejectedFilter ? '1' : '0' ?>"><input type="search" class="t8-input" name="search" data-contract-search value="<?= e($search) ?>" placeholder="Search number, title, or party"><select class="t8-select" name="status" data-contract-status><option value="">All Status</option><?php foreach (T8_CONTRACT_STATUSES as $status): ?><option value="<?= e($status) ?>" <?= $statusFilter === $status ? 'selected' : '' ?>><?= e(t8_contract_status_label($status)) ?></option><?php endforeach; ?></select><select class="t8-select" name="contract_type" data-contract-type><option value="">All Types</option><?php foreach (T8_CONTRACT_TYPES as $type): ?><option value="<?= e($type) ?>" <?= $typeFilter === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></form>
 <div class="t8-table-wrap"><table class="t8-table" id="t8ContractsTable"><thead><tr><th>Contract</th><th>Party / Title</th><th>Period</th><th>Officer</th><th>Status</th><th></th></tr></thead><tbody data-contract-results><?php t8_contract_render_rows($contracts, $isAdmin, $isLegal, $archivedFilter); ?></tbody></table></div>
+<div id="t8ContractsPaginationContainer"><?php
+$paginationFilters = ['archived' => $archivedFilter ? 1 : 0, 'rejected' => $rejectedFilter ? 1 : 0];
+foreach (['search' => $search, 'status' => $statusFilter, 'contract_type' => $typeFilter] as $key => $value) {
+    if ($value !== '') {
+        $paginationFilters[$key] = $value;
+    }
+}
+t8_contract_render_pagination($currentPage, $totalPages, $paginationFilters);
+?></div>

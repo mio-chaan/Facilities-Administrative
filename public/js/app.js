@@ -16,6 +16,19 @@
 document.addEventListener("DOMContentLoaded", function () {
     var toggleBtn = document.getElementById("t8SidebarToggle");
     var sidebar = document.getElementById("t8Sidebar");
+    var navbar = document.querySelector(".t8-navbar");
+
+    if (navbar) {
+        var syncNavbarHeight = function () {
+            document.documentElement.style.setProperty("--t8-navbar-height", navbar.offsetHeight + "px");
+        };
+        syncNavbarHeight();
+        if ("ResizeObserver" in window) {
+            new ResizeObserver(syncNavbarHeight).observe(navbar);
+        } else {
+            window.addEventListener("resize", syncNavbarHeight);
+        }
+    }
 
     if (toggleBtn && sidebar) {
         toggleBtn.addEventListener("click", function () {

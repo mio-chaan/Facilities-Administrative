@@ -749,12 +749,23 @@ if ($showList) {
             <div class="t8-card-header"><h2 class="t8-card-title"><i class="fa-solid fa-rotate"></i> Essential Permit Renewals</h2></div>
             <div class="t8-table-wrap">
                 <table class="t8-table">
-                    <thead><tr><th>Document</th><th>Required prerequisites</th><th>Action</th></tr></thead>
+                    <thead><tr><th>Document</th><th>Expiration Tracking</th><th>Required prerequisites</th><th>Action</th></tr></thead>
                     <tbody>
                         <?php foreach (RETENTION_RENEWAL_DOCUMENTS as $renewalLabel => $requiredName): ?>
-                            <?php $renewalGroup = t8_compliance_check_mandatory_documents($pdo, $requiredName)[0] ?? ['prerequisites' => []]; ?>
+                            <?php $renewalGroup = t8_compliance_check_mandatory_documents($pdo, $requiredName)[0] ?? ['status' => 'missing', 'tracking_status' => null, 'expiration_date' => null, 'days_remaining' => null, 'alert_level' => null, 'prerequisites' => []]; ?>
                             <tr>
                                 <td><?= e($renewalLabel) ?></td>
+                                <td>
+                                    <?php if (($renewalGroup['status'] ?? '') === 'missing'): ?>
+                                        <span class="t8-help-text">No uploaded document</span>
+                                    <?php elseif (empty($renewalGroup['expiration_date'])): ?>
+                                        <span class="t8-badge t8-badge-pending">No expiration date</span>
+                                    <?php else: ?>
+                                        <?php $trackingBadgeClass = match ((string) ($renewalGroup['alert_level'] ?? 'Normal')) { 'Danger' => 't8-badge-rejected', 'Warning', 'Critical' => 't8-badge-pending', default => 't8-badge-approved' }; ?>
+                                        <span class="t8-badge <?= e($trackingBadgeClass) ?>"><?= e((string) $renewalGroup['tracking_status']) ?></span>
+                                        <div class="t8-table-subtext">Expires <?= e(format_date((string) $renewalGroup['expiration_date'], 'M d, Y')) ?></div>
+                                    <?php endif; ?>
+                                </td>
                                 <td><?= e(implode(', ', array_column($renewalGroup['prerequisites'], 'name'))) ?></td>
                                 <td><a class="t8-btn t8-btn-outline t8-btn-sm" href="<?= e(page_url('retention', ['action' => 'renewal', 'document_type' => $renewalLabel])) ?>"><i class="fa-solid fa-rotate"></i> Initiate Renewal</a></td>
                             </tr>
