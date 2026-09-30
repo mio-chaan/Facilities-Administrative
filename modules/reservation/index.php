@@ -962,6 +962,7 @@ if (!$showForm) {
         'month' => $reservationMonthFilter > 0 ? $reservationMonthFilter : '',
         'year' => $reservationYearFilter > 0 ? $reservationYearFilter : '',
         'department' => $reservationDepartmentFilter > 0 ? $reservationDepartmentFilter : '',
+        'tab' => (string) ($_GET['tab'] ?? ''),
     ];
 
     /** Reusable SQL fragment for the "Schedule" quick filter (today / this week / this month). */
@@ -1309,6 +1310,16 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
     </div>
     <?php
 }
+
+$reservationTabKeys = $isAdmin
+    ? ['pending', 'cancellations', 'all']
+    : ['mine', 'all'];
+$defaultReservationTab = $isAdmin ? 'pending' : 'mine';
+$requestedReservationTab = (string) ($_GET['tab'] ?? $defaultReservationTab);
+$activeReservationTab = in_array($requestedReservationTab, $reservationTabKeys, true)
+    ? $requestedReservationTab
+    : $defaultReservationTab;
+$reservationFilters['tab'] = $activeReservationTab;
 ?>
 <h1>Facilities Reservation</h1>
 <p class="t8-help-text">
@@ -1501,11 +1512,10 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
 
     <?php if (!$hasActiveFacilities): ?>
         <div class="t8-empty">
-            No active facilities are available yet.
-            <?php if ($isAdmin): ?>
-                <br><br>
-                <a class="t8-btn t8-btn-accent" href="<?= e(page_url('facilities', ['action' => 'create'])) ?>">
-                    <i class="fa-solid fa-plus"></i> Add Facility
+              <?php if ($isAdmin): ?>
+                 <a  href="<?= e(page_url('facilities', ['action' => 'create'])) ?>">
+            No active facilities are available yet. Click Here To add a new facility.
+         
                 </a>
             <?php endif; ?>
         </div>
@@ -1587,6 +1597,19 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
 
     <?php elseif ($isAdmin): ?>
 
+        <div class="t8-tabs t8-reservation-tabs" id="t8ReservationTabs" role="tablist" aria-label="Reservation records" data-active-tab="<?= e($activeReservationTab) ?>">
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'pending' ? 'is-active' : '' ?>" id="reservation-tab-pending" data-tab="pending" role="tab" aria-controls="reservation-panel-pending" aria-selected="<?= $activeReservationTab === 'pending' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'pending' ? '0' : '-1' ?>">
+                Pending Approvals <span class="t8-reservation-tab-count"><?= e((string) count($pendingReservations)) ?></span>
+            </button>
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'cancellations' ? 'is-active' : '' ?>" id="reservation-tab-cancellations" data-tab="cancellations" role="tab" aria-controls="reservation-panel-cancellations" aria-selected="<?= $activeReservationTab === 'cancellations' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'cancellations' ? '0' : '-1' ?>">
+                Cancellation Requests <span class="t8-reservation-tab-count"><?= e((string) count($cancellationRequests)) ?></span>
+            </button>
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'all' ? 'is-active' : '' ?>" id="reservation-tab-all" data-tab="all" role="tab" aria-controls="reservation-panel-all" aria-selected="<?= $activeReservationTab === 'all' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'all' ? '0' : '-1' ?>">
+                All Reservations <span class="t8-reservation-tab-count"><?= e((string) $allTotal) ?></span>
+            </button>
+        </div>
+
+        <section class="t8-tab-panel" id="reservation-panel-pending" data-panel="pending" role="tabpanel" aria-labelledby="reservation-tab-pending" tabindex="0" <?= $activeReservationTab !== 'pending' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">Pending Approvals</h2>
@@ -1652,7 +1675,9 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                 </table>
             </div>
         </div>
+        </section>
 
+        <section class="t8-tab-panel" id="reservation-panel-cancellations" data-panel="cancellations" role="tabpanel" aria-labelledby="reservation-tab-cancellations" tabindex="0" <?= $activeReservationTab !== 'cancellations' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">Cancellation Requests</h2>
@@ -1669,7 +1694,9 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
                 <?php endforeach; endif; ?>
             </tbody></table></div>
         </div>
+        </section>
 
+        <section class="t8-tab-panel" id="reservation-panel-all" data-panel="all" role="tabpanel" aria-labelledby="reservation-tab-all" tabindex="0" <?= $activeReservationTab !== 'all' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
@@ -1761,9 +1788,20 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
             </div>
             <?php t8_reservation_pagination($allPage, $allTotalPages, $reservationFilters); ?>
         </div>
+        </section>
 
     <?php else: ?>
 
+        <div class="t8-tabs t8-reservation-tabs" id="t8ReservationTabs" role="tablist" aria-label="Reservation records" data-active-tab="<?= e($activeReservationTab) ?>">
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'mine' ? 'is-active' : '' ?>" id="reservation-tab-mine" data-tab="mine" role="tab" aria-controls="reservation-panel-mine" aria-selected="<?= $activeReservationTab === 'mine' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'mine' ? '0' : '-1' ?>">
+                My Reservations <span class="t8-reservation-tab-count"><?= e((string) $myTotal) ?></span>
+            </button>
+            <button type="button" class="t8-tab <?= $activeReservationTab === 'all' ? 'is-active' : '' ?>" id="reservation-tab-all" data-tab="all" role="tab" aria-controls="reservation-panel-all" aria-selected="<?= $activeReservationTab === 'all' ? 'true' : 'false' ?>" tabindex="<?= $activeReservationTab === 'all' ? '0' : '-1' ?>">
+                All Reservations <span class="t8-reservation-tab-count"><?= e((string) $allTotal) ?></span>
+            </button>
+        </div>
+
+        <section class="t8-tab-panel" id="reservation-panel-mine" data-panel="mine" role="tabpanel" aria-labelledby="reservation-tab-mine" tabindex="0" <?= $activeReservationTab !== 'mine' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">My Reservations</h2>
@@ -1862,7 +1900,9 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
             </div>
             <?php t8_reservation_pagination($myPage, $myTotalPages, $reservationFilters, 'my_page'); ?>
         </div>
+        </section>
 
+        <section class="t8-tab-panel" id="reservation-panel-all" data-panel="all" role="tabpanel" aria-labelledby="reservation-tab-all" tabindex="0" <?= $activeReservationTab !== 'all' ? 'hidden' : '' ?>>
         <div class="t8-card">
             <div class="t8-card-header">
                 <h2 class="t8-card-title">All Reservations</h2>
@@ -1942,6 +1982,7 @@ function t8_reservation_render_menu(array $r, bool $isAdmin, ?int $currentUserId
             </div>
             <?php t8_reservation_pagination($allPage, $allTotalPages, $reservationFilters); ?>
         </div>
+        </section>
 
     <?php endif; ?>
 

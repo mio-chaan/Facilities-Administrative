@@ -1,4 +1,38 @@
 document.addEventListener('DOMContentLoaded', function () {
+    var visitorTabs = document.getElementById('t8VisitorTabs');
+    if (visitorTabs) {
+        var tabButtons = Array.prototype.slice.call(visitorTabs.querySelectorAll('[role="tab"]'));
+        var tabPanels = Array.prototype.slice.call(document.querySelectorAll('#t8VisitorTabs ~ .t8-tab-panel'));
+
+        function activateVisitorTab(tab, focusTab) {
+            var activeKey = tab.getAttribute('data-tab');
+            tabButtons.forEach(function (button) {
+                var selected = button === tab;
+                button.classList.toggle('is-active', selected);
+                button.setAttribute('aria-selected', selected ? 'true' : 'false');
+                button.setAttribute('tabindex', selected ? '0' : '-1');
+            });
+            tabPanels.forEach(function (panel) {
+                panel.hidden = panel.getAttribute('data-panel') !== activeKey;
+            });
+            if (focusTab) tab.focus();
+        }
+
+        tabButtons.forEach(function (tab, index) {
+            tab.addEventListener('click', function () { activateVisitorTab(tab, false); });
+            tab.addEventListener('keydown', function (event) {
+                var nextIndex = index;
+                if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabButtons.length;
+                else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabButtons.length) % tabButtons.length;
+                else if (event.key === 'Home') nextIndex = 0;
+                else if (event.key === 'End') nextIndex = tabButtons.length - 1;
+                else return;
+                event.preventDefault();
+                activateVisitorTab(tabButtons[nextIndex], true);
+            });
+        });
+    }
+
     var type = document.getElementById('visitor_type');
     var otherType = document.getElementById('visitor_type_other');
     var purpose = document.getElementById('purpose');

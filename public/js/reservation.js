@@ -1,5 +1,42 @@
 /** Facility-type-driven reservation form behaviour. */
 document.addEventListener('DOMContentLoaded', function () {
+    var reservationTabs = document.getElementById('t8ReservationTabs');
+    if (reservationTabs) {
+        var tabButtons = Array.prototype.slice.call(reservationTabs.querySelectorAll('[role="tab"]'));
+        var tabPanels = Array.prototype.slice.call(document.querySelectorAll('#t8ReservationTabs ~ .t8-tab-panel'));
+
+        function activateReservationTab(tab, focusTab) {
+            var activeKey = tab.getAttribute('data-tab');
+            tabButtons.forEach(function (button) {
+                var selected = button === tab;
+                button.classList.toggle('is-active', selected);
+                button.setAttribute('aria-selected', selected ? 'true' : 'false');
+                button.setAttribute('tabindex', selected ? '0' : '-1');
+            });
+            tabPanels.forEach(function (panel) {
+                panel.hidden = panel.getAttribute('data-panel') !== activeKey;
+            });
+            var url = new URL(window.location.href);
+            url.searchParams.set('tab', activeKey);
+            window.history.replaceState({}, '', url);
+            if (focusTab) tab.focus();
+        }
+
+        tabButtons.forEach(function (tab, index) {
+            tab.addEventListener('click', function () { activateReservationTab(tab, false); });
+            tab.addEventListener('keydown', function (event) {
+                var nextIndex = index;
+                if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabButtons.length;
+                else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabButtons.length) % tabButtons.length;
+                else if (event.key === 'Home') nextIndex = 0;
+                else if (event.key === 'End') nextIndex = tabButtons.length - 1;
+                else return;
+                event.preventDefault();
+                activateReservationTab(tabButtons[nextIndex], true);
+            });
+        });
+    }
+
     var cancellationModal = document.getElementById('t8CancellationRequestModal');
     document.querySelectorAll('[data-cancel-reservation-id]').forEach(function (button) {
         button.addEventListener('click', function () {

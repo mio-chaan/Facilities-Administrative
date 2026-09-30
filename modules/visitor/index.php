@@ -115,12 +115,13 @@ function t8_visitor_pagination(int $page, int $totalPages, string $pageKey): voi
         return;
     }
     echo '<nav class="t8-pagination" aria-label="Visitor pages">';
+    $tab = $pageKey === 'onsite_page' ? 'onsite' : ($pageKey === 'log_page' ? 'logs' : 'scheduled');
     if ($page > 1) {
-        echo '<a class="t8-btn t8-btn-outline t8-btn-sm" href="' . e(page_url('visitor', [$pageKey => $page - 1])) . '">Previous</a>';
+        echo '<a class="t8-btn t8-btn-outline t8-btn-sm" href="' . e(page_url('visitor', [$pageKey => $page - 1, 'tab' => $tab])) . '">Previous</a>';
     }
     echo '<span class="t8-help-text">Page ' . e((string) $page) . ' of ' . e((string) $totalPages) . '</span>';
     if ($page < $totalPages) {
-        echo '<a class="t8-btn t8-btn-outline t8-btn-sm" href="' . e(page_url('visitor', [$pageKey => $page + 1])) . '">Next</a>';
+        echo '<a class="t8-btn t8-btn-outline t8-btn-sm" href="' . e(page_url('visitor', [$pageKey => $page + 1, 'tab' => $tab])) . '">Next</a>';
     }
     echo '</nav>';
 }
@@ -486,13 +487,17 @@ switch ($action) {
 }
 
 $showForm = $action === 'create';
+$activeVisitorTab = in_array($_GET['tab'] ?? '', ['scheduled', 'onsite', 'logs'], true)
+    ? (string) $_GET['tab']
+    : 'scheduled';
 
 if (!$showForm) {
     // Equal access: no owner-scoping — everyone sees every visitor
     // record in every list/table below, regardless of who logged it.
     $visitorPageSize = 5;
     $scheduledTotalStmt = $pdo->query("SELECT COUNT(*) FROM team8_visitors v WHERE v.status IN ('scheduled', 'late')");
-    $scheduledTotalPages = max(1, (int) ceil((int) $scheduledTotalStmt->fetchColumn() / $visitorPageSize));
+    $scheduledTotalCount = (int) $scheduledTotalStmt->fetchColumn();
+    $scheduledTotalPages = max(1, (int) ceil($scheduledTotalCount / $visitorPageSize));
     $scheduledPage = min(max(1, (int) ($_GET['scheduled_page'] ?? 1)), $scheduledTotalPages);
     $scheduledStmt = $pdo->prepare(
         "SELECT v.*, u.full_name AS logged_by_name
@@ -506,7 +511,8 @@ if (!$showForm) {
     $scheduledVisits = $scheduledStmt->fetchAll(PDO::FETCH_ASSOC);
 
     $currentlyInTotalStmt = $pdo->query("SELECT COUNT(*) FROM team8_visitors v WHERE v.status = 'checked_in'");
-    $currentlyInTotalPages = max(1, (int) ceil((int) $currentlyInTotalStmt->fetchColumn() / $visitorPageSize));
+    $currentlyInTotalCount = (int) $currentlyInTotalStmt->fetchColumn();
+    $currentlyInTotalPages = max(1, (int) ceil($currentlyInTotalCount / $visitorPageSize));
     $currentlyInPage = min(max(1, (int) ($_GET['onsite_page'] ?? 1)), $currentlyInTotalPages);
     $currentlyInStmt = $pdo->prepare(
         "SELECT v.*, u.full_name AS logged_by_name
@@ -520,7 +526,8 @@ if (!$showForm) {
     $currentlyIn = $currentlyInStmt->fetchAll(PDO::FETCH_ASSOC);
 
     $allVisitorsTotalStmt = $pdo->query('SELECT COUNT(*) FROM team8_visitors v WHERE 1=1');
-    $allVisitorsTotalPages = max(1, (int) ceil((int) $allVisitorsTotalStmt->fetchColumn() / $visitorPageSize));
+    $allVisitorsTotalCount = (int) $allVisitorsTotalStmt->fetchColumn();
+    $allVisitorsTotalPages = max(1, (int) ceil($allVisitorsTotalCount / $visitorPageSize));
     $allVisitorsPage = min(max(1, (int) ($_GET['log_page'] ?? 1)), $allVisitorsTotalPages);
     $allVisitorsStmt = $pdo->prepare(
         'SELECT v.*, u.full_name AS logged_by_name
@@ -678,6 +685,19 @@ if (!$showForm) {
 
 <?php else: ?>
 
+    <div class="t8-tabs t8-visitor-tabs" id="t8VisitorTabs" role="tablist" aria-label="Visitor records" data-active-tab="<?= e($activeVisitorTab) ?>">
+        <button type="button" class="t8-tab <?= $activeVisitorTab === 'scheduled' ? 'is-active' : '' ?>" id="visitor-tab-scheduled" data-tab="scheduled" role="tab" aria-controls="visitor-panel-scheduled" aria-selected="<?= $activeVisitorTab === 'scheduled' ? 'true' : 'false' ?>" tabindex="<?= $activeVisitorTab === 'scheduled' ? '0' : '-1' ?>">
+            Scheduled / Upcoming Visits <span class="t8-visitor-tab-count"><?= e((string) $scheduledTotalCount) ?></span>
+        </button>
+        <button type="button" class="t8-tab <?= $activeVisitorTab === 'onsite' ? 'is-active' : '' ?>" id="visitor-tab-onsite" data-tab="onsite" role="tab" aria-controls="visitor-panel-onsite" aria-selected="<?= $activeVisitorTab === 'onsite' ? 'true' : 'false' ?>" tabindex="<?= $activeVisitorTab === 'onsite' ? '0' : '-1' ?>">
+            Currently On-Site <span class="t8-visitor-tab-count"><?= e((string) $currentlyInTotalCount) ?></span>
+        </button>
+        <button type="button" class="t8-tab <?= $activeVisitorTab === 'logs' ? 'is-active' : '' ?>" id="visitor-tab-logs" data-tab="logs" role="tab" aria-controls="visitor-panel-logs" aria-selected="<?= $activeVisitorTab === 'logs' ? 'true' : 'false' ?>" tabindex="<?= $activeVisitorTab === 'logs' ? '0' : '-1' ?>">
+            Visitor Logs <span class="t8-visitor-tab-count"><?= e((string) $allVisitorsTotalCount) ?></span>
+        </button>
+    </div>
+
+    <section class="t8-tab-panel" id="visitor-panel-scheduled" data-panel="scheduled" role="tabpanel" aria-labelledby="visitor-tab-scheduled" tabindex="0" <?= $activeVisitorTab !== 'scheduled' ? 'hidden' : '' ?>>
     <div class="t8-card" id="scheduled-visits">
         <div class="t8-card-header">
             <h2 class="t8-card-title">Scheduled / Upcoming Visits</h2>
@@ -730,7 +750,9 @@ if (!$showForm) {
         </div>
             <?php t8_visitor_pagination($scheduledPage, $scheduledTotalPages, 'scheduled_page'); ?>
     </div>
+    </section>
 
+    <section class="t8-tab-panel" id="visitor-panel-onsite" data-panel="onsite" role="tabpanel" aria-labelledby="visitor-tab-onsite" tabindex="0" <?= $activeVisitorTab !== 'onsite' ? 'hidden' : '' ?>>
     <div class="t8-card">
         <div class="t8-card-header">
             <h2 class="t8-card-title">Currently On-Site</h2>
@@ -784,7 +806,9 @@ if (!$showForm) {
         </div>
             <?php t8_visitor_pagination($currentlyInPage, $currentlyInTotalPages, 'onsite_page'); ?>
     </div>
+    </section>
 
+    <section class="t8-tab-panel" id="visitor-panel-logs" data-panel="logs" role="tabpanel" aria-labelledby="visitor-tab-logs" tabindex="0" <?= $activeVisitorTab !== 'logs' ? 'hidden' : '' ?>>
     <div class="t8-card" id="visitor-log">
         <div class="t8-card-header">
             <h2 class="t8-card-title">Visitor Logs</h2>
@@ -835,6 +859,7 @@ if (!$showForm) {
         </div>
             <?php t8_visitor_pagination($allVisitorsPage, $allVisitorsTotalPages, 'log_page'); ?>
     </div>
+            </section>
 
     <!--
         Shared View Details modal for all three tables above (see
