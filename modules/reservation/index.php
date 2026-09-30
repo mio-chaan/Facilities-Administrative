@@ -1646,27 +1646,34 @@ $reservationFilters['tab'] = $activeReservationTab;
                                     <td><strong><?= e($summary['category']) ?></strong><?php if ($summary['detail'] !== ''): ?><span class="t8-table-subtext">• <?= e($summary['detail']) ?></span><?php endif; ?></td>
                                     <td><strong><?= e($schedule['primary']) ?></strong><?php if ($schedule['secondary'] !== ''): ?><span class="t8-table-subtext"><?= e($schedule['secondary']) ?></span><?php endif; ?></td>
                                     <td><span class="t8-badge t8-badge-pending">Pending</span></td>
-                                    <td style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center;">
+                                    <td class="t8-row-actions">
                                         <?php if ($p['has_conflict']): ?>
                                             <span class="t8-conflict-indicator" title="Time Conflict">
                                                 <i class="fa-solid fa-triangle-exclamation"></i>
                                             </span>
                                         <?php endif; ?>
-                                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'approve'])) ?>">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $p['id']) ?>">
-                                            <button class="t8-btn t8-btn-success t8-btn-sm" type="submit">
-                                                <i class="fa-solid fa-check"></i> Approve
+                                        <div class="t8-res-menu">
+                                            <button type="button" class="t8-res-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions">
+                                                <i class="fa-solid fa-ellipsis-vertical"></i>
                                             </button>
-                                        </form>
-                                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'reject'])) ?>"
-                                              onsubmit="return confirm('Reject this reservation request?');">
-                                            <?= t8_csrf_field() ?>
-                                            <input type="hidden" name="id" value="<?= e((string) $p['id']) ?>">
-                                            <button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">
-                                                <i class="fa-solid fa-xmark"></i> Reject
-                                            </button>
-                                        </form>
+                                            <div class="t8-res-menu-panel" role="menu">
+                                                <form method="post" action="<?= e(page_url('reservation', ['action' => 'approve'])) ?>">
+                                                    <?= t8_csrf_field() ?>
+                                                    <input type="hidden" name="id" value="<?= e((string) $p['id']) ?>">
+                                                    <button class="t8-res-menu-item t8-success" type="submit" role="menuitem">
+                                                        <i class="fa-solid fa-check"></i> Approve Request
+                                                    </button>
+                                                </form>
+                                                <form method="post" action="<?= e(page_url('reservation', ['action' => 'reject'])) ?>"
+                                                      onsubmit="return confirm('Reject this reservation request?');">
+                                                    <?= t8_csrf_field() ?>
+                                                    <input type="hidden" name="id" value="<?= e((string) $p['id']) ?>">
+                                                    <button class="t8-res-menu-item t8-danger" type="submit" role="menuitem">
+                                                        <i class="fa-solid fa-xmark"></i> Reject Request
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -1687,9 +1694,16 @@ $reservationFilters['tab'] = $activeReservationTab;
                 <?php if ($cancellationRequests === []): ?>
                     <tr><td colspan="5" class="t8-table-empty-row">No cancellation requests are waiting for review.</td></tr>
                 <?php else: foreach ($cancellationRequests as $request): ?>
-                    <tr><td><?= e($request['facility_name']) ?></td><td><?= e($request['requester_name']) ?></td><td><?= e((string) $request['cancellation_reason']) ?></td><td><?= e(format_date((string) $request['cancellation_requested_at'], 'M d, Y g:i A')) ?></td><td style="display:flex;gap:8px;">
-                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="approved"><button class="t8-btn t8-btn-success t8-btn-sm" type="submit">Approve Cancellation</button></form>
-                        <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="rejected"><button class="t8-btn t8-btn-danger t8-btn-sm" type="submit">Reject Request</button></form>
+                    <tr><td><?= e($request['facility_name']) ?></td><td><?= e($request['requester_name']) ?></td><td><?= e((string) $request['cancellation_reason']) ?></td><td><?= e(format_date((string) $request['cancellation_requested_at'], 'M d, Y g:i A')) ?></td><td class="t8-row-actions">
+                        <div class="t8-res-menu">
+                            <button type="button" class="t8-res-menu-trigger" aria-haspopup="true" aria-expanded="false" title="More actions">
+                                <i class="fa-solid fa-ellipsis-vertical"></i>
+                            </button>
+                            <div class="t8-res-menu-panel" role="menu">
+                                <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="approved"><button class="t8-res-menu-item t8-success" type="submit" role="menuitem"><i class="fa-solid fa-check"></i> Approve Cancellation</button></form>
+                                <form method="post" action="<?= e(page_url('reservation', ['action' => 'review_cancellation'])) ?>"><?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= e((string) $request['id']) ?>"><input type="hidden" name="decision" value="rejected"><button class="t8-res-menu-item t8-danger" type="submit" role="menuitem"><i class="fa-solid fa-xmark"></i> Reject Request</button></form>
+                            </div>
+                        </div>
                     </td></tr>
                 <?php endforeach; endif; ?>
             </tbody></table></div>

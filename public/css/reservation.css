@@ -491,6 +491,9 @@
 }
 .t8-res-menu-item i { width: 16px; text-align: center; color: var(--t8-text-muted); font-size: .85rem; }
 .t8-res-menu-item:hover { background: var(--t8-secondary); }
+.t8-res-menu-item.t8-success { color: #2e7d32; }
+.t8-res-menu-item.t8-success i { color: #2e7d32; }
+.t8-res-menu-item.t8-success:hover { background: #eaf6ee; }
 .t8-res-menu-item.t8-danger { color: var(--t8-danger); }
 .t8-res-menu-item.t8-danger i { color: var(--t8-danger); }
 .t8-res-menu-item.t8-danger:hover { background: #fdeceb; }
