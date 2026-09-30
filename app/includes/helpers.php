@@ -138,32 +138,45 @@ if (!function_exists('t8_validate_uploaded_file_mime')) {
     }
 }
 
+if (!function_exists('calculateTrackingStatus')) {
+    function calculateTrackingStatus(?string $expirationDateStr): array
+    {
+        if ($expirationDateStr === null || trim($expirationDateStr) === '') {
+            return ['status' => 'Valid', 'daysRemaining' => null, 'alertLevel' => 'Normal'];
+        }
+
+        $expirationDate = DateTimeImmutable::createFromFormat('!Y-m-d', trim($expirationDateStr));
+        $dateErrors = DateTimeImmutable::getLastErrors();
+        if ($expirationDate === false
+            || $expirationDate->format('Y-m-d') !== trim($expirationDateStr)
+            || ($dateErrors !== false && ($dateErrors['warning_count'] > 0 || $dateErrors['error_count'] > 0))) {
+            return ['status' => 'Valid', 'daysRemaining' => null, 'alertLevel' => 'Normal'];
+        }
+
+        $daysRemaining = (int) (new DateTimeImmutable('today'))->diff($expirationDate)->format('%r%a');
+        if ($daysRemaining <= 0) {
+            return ['status' => 'Expired', 'daysRemaining' => $daysRemaining, 'alertLevel' => 'Danger'];
+        }
+        if ($daysRemaining <= 7) {
+            return ['status' => 'Expiring Soon', 'daysRemaining' => $daysRemaining, 'alertLevel' => 'Critical'];
+        }
+        if ($daysRemaining <= 14) {
+            return ['status' => 'Expiring Soon', 'daysRemaining' => $daysRemaining, 'alertLevel' => 'Warning'];
+        }
+        return ['status' => 'Valid', 'daysRemaining' => $daysRemaining, 'alertLevel' => 'Normal'];
+    }
+}
+
 if (!function_exists('t8_document_expiration_state')) {
     /** Returns the lifecycle bucket for a document expiration date. */
     function t8_document_expiration_state(?string $expirationDate, ?string $referenceDate = null): string
     {
-        $normalized = trim((string) ($expirationDate ?? ''));
-        if ($normalized === '') {
-            return 'active';
-        }
-
-        $reference = $referenceDate !== null && trim($referenceDate) !== ''
-            ? strtotime((string) $referenceDate)
-            : strtotime('today');
-        $expiresAt = strtotime($normalized);
-        if ($reference === false || $expiresAt === false) {
-            return 'active';
-        }
-
-        if ($expiresAt < $reference) {
-            return 'expired';
-        }
-
-        if ($expiresAt <= strtotime('+30 days', $reference)) {
-            return 'expiring_soon';
-        }
-
-        return 'active';
+        $tracking = calculateTrackingStatus($expirationDate);
+        return match ($tracking['status']) {
+            'Expired' => 'expired',
+            'Expiring Soon' => 'expiring_soon',
+            default => 'active',
+        };
     }
 }
 
