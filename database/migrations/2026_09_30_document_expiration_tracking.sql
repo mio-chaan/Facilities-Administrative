@@ -1,3 +1,0 @@
-ALTER TABLE team8_documents
-    ADD COLUMN IF NOT EXISTS tracking_status ENUM('Valid', 'Expiring Soon', 'Expired') NOT NULL DEFAULT 'Valid',
-    ADD COLUMN IF NOT EXISTS last_checked_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
