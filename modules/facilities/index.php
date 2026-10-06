@@ -638,7 +638,7 @@ if ($showEquipmentForm) {
         <?php foreach ($facilities as $facilityCard):
                 $facilityId = (int) ($facilityCard['id'] ?? 0);
                 $facilityName = (string) ($facilityCard['name'] ?? '');
-                $facilityPhoto = 'img/ramyunbg.jpg';
+                $facilityPhoto = asset('img/ramyumlogo.jpg');
                 $maintenanceStatus = (string) ($facilityCard['maintenance_status'] ?? 'operational');
                 $cardStatus = (($facilityCard['status'] ?? 'active') === 'archived')
                     ? 'Inactive'
@@ -665,7 +665,7 @@ if ($showEquipmentForm) {
                 $todaysReservations = (int) $todaysReservationsStmt->fetchColumn();
         ?>
             <article class="t8-facility-card">
-                <div class="t8-facility-card-photo" role="img" aria-label="<?= e($facilityName) ?>"><img src="<?= e($facilityPhoto) ?>" alt="" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&amp;fit=crop&amp;w=700&amp;q=80';"><span class="t8-facility-status t8-facility-status-<?= e($statusClass) ?>"><i></i><?= e($cardStatus) ?></span></div>
+                <div class="t8-facility-card-photo" role="img" aria-label="<?= e($facilityName) ?>"><img src="<?= e($facilityPhoto) ?>" alt="" onerror="this.onerror=null;this.src='<?= e(asset('img/ramyumlogo.jpg')) ?>';"><span class="t8-facility-status t8-facility-status-<?= e($statusClass) ?>"><i></i><?= e($cardStatus) ?></span></div>
                 <div class="t8-facility-card-content">
                     <div class="t8-facility-card-heading"><h2><?= e($facilityName) ?></h2></div>
                     <div class="t8-facility-card-details">

@@ -15,16 +15,16 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../app/config/config.php';
-require_once __DIR__ . '/../app/includes/db_connect.php';
-require_once __DIR__ . '/../app/includes/helpers.php';
-require_once __DIR__ . '/../app/includes/audit.php';
+require_once __DIR__ . '/app/config/config.php';
+require_once __DIR__ . '/app/includes/db_connect.php';
+require_once __DIR__ . '/app/includes/helpers.php';
+require_once __DIR__ . '/app/includes/audit.php';
 
 t8_session_start();
 
 // Already logged in? Skip the form.
 if (!empty($_SESSION['user_id'])) {
-    redirect(APP_URL . '/index.php?page=dashboard');
+    redirect(APP_URL . '/dashboard.php');
 }
 
 const T8_LOGIN_MAX_ATTEMPTS  = 5;
@@ -151,7 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 t8_audit_log($pdo, (int) $user['id'], 'user', (int) $user['id'], 'login');
 
                 t8_flash_set('success', 'Welcome back, ' . $user['full_name'] . '.');
-                redirect(APP_URL . '/index.php?page=dashboard');
+                redirect(APP_URL . '/dashboard.php');
             }
         }
     }
@@ -182,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
 
         <?php
-        $bodyPath = __DIR__ . '/assets/ram-yum/ramen/body.png';
+        $bodyPath = __DIR__ . '/public/assets/ram-yum/ramen/body.png';
         if (is_file($bodyPath)):
         ?>
             <div class="t8-auth-mascot">

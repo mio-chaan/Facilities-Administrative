@@ -17,20 +17,20 @@ header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: SAMEORIGIN');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 
-require_once __DIR__ . '/../app/config/config.php';
-require_once __DIR__ . '/../app/config/constants.php';
-require_once __DIR__ . '/../app/includes/db_connect.php';
-require_once __DIR__ . '/../app/includes/auth_check.php';   // sets up $_SESSION, redirects if unauthenticated
-require_once __DIR__ . '/../app/includes/helpers.php';
-require_once __DIR__ . '/../app/includes/permissions.php';
-require_once __DIR__ . '/../app/includes/audit.php';
-require_once __DIR__ . '/../app/includes/notifications.php';
+require_once __DIR__ . '/app/config/config.php';
+require_once __DIR__ . '/app/config/constants.php';
+require_once __DIR__ . '/app/includes/db_connect.php';
+require_once __DIR__ . '/app/includes/auth_check.php';   // sets up $_SESSION, redirects if unauthenticated
+require_once __DIR__ . '/app/includes/helpers.php';
+require_once __DIR__ . '/app/includes/permissions.php';
+require_once __DIR__ . '/app/includes/audit.php';
+require_once __DIR__ . '/app/includes/notifications.php';
 
 // Handle AJAX filter requests before output buffering
 if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
     header('Content-Type: application/json');
 
-    require_once __DIR__ . '/../app/includes/reservation_helpers.php';
+    require_once __DIR__ . '/app/includes/reservation_helpers.php';
 
     $table_type = (string) ($_GET['table'] ?? 'all');
     $facilityFilter = (int) ($_GET['facility'] ?? 0);
@@ -363,7 +363,7 @@ if (isset($_GET['ajax_filter']) && $_GET['page'] === 'reservation') {
 
 if (isset($_GET['ajax_filter']) && $_GET['page'] === 'contracts') {
     define('T8_CONTRACTS_AJAX_FILTER', true);
-    require dirname(__DIR__) . '/modules/contracts/index.php';
+    require __DIR__ . '/modules/contracts/index.php';
     exit;
 }
 
@@ -483,26 +483,26 @@ ob_start();
 // to administrators. User-specific notifications remain owner-scoped.
 t8_refresh_operational_notifications($pdo);
 
-$routes = require __DIR__ . '/../app/config/routes.php';
+$routes = require __DIR__ . '/app/config/routes.php';
 
 $page = $_GET['page'] ?? 'dashboard';
 $t8UnreadNotifications = t8_unread_notification_count($pdo, t8_current_user_id());
 $t8RecentNotifications = t8_recent_notifications($pdo, t8_current_user_id(), 8);
 
 $moduleFile = array_key_exists($page, $routes)
-    ? dirname(__DIR__) . '/' . $routes[$page]['file']
+    ? __DIR__ . '/' . $routes[$page]['file']
     : null;
 
 if ($moduleFile === null || !is_file($moduleFile)) {
     http_response_code(404);
     $pageTitle = 'Page Not Found';
-    require dirname(__DIR__) . '/templates/header.php';
-    require dirname(__DIR__) . '/templates/navbar.php';
+    require __DIR__ . '/templates/header.php';
+    require __DIR__ . '/templates/navbar.php';
     echo '<main class="t8-main t8-main-full">';
     echo '  <div class="t8-alert t8-alert-danger">404 — That page does not exist.</div>';
     echo '  <p><a href="' . e(page_url('dashboard')) . '">Back to dashboard</a></p>';
     echo '</main>';
-    require dirname(__DIR__) . '/templates/footer.php';
+    require __DIR__ . '/templates/footer.php';
     ob_end_flush();
     exit;
 }
@@ -521,11 +521,11 @@ if ($page === 'compliance_reports') {
     $pageTitle = 'All Compliance Reports';
 }
 
-require dirname(__DIR__) . '/templates/header.php';
-require dirname(__DIR__) . '/templates/navbar.php';
+require __DIR__ . '/templates/header.php';
+require __DIR__ . '/templates/navbar.php';
 ?>
 <div class="t8-shell">
-    <?php require dirname(__DIR__) . '/templates/sidebar.php'; ?>
+    <?php require __DIR__ . '/templates/sidebar.php'; ?>
     <main class="t8-main">
         <?php
         if (!empty($routes[$page]['roles'])) {
@@ -536,5 +536,5 @@ require dirname(__DIR__) . '/templates/navbar.php';
     </main>
 </div>
 <?php
-require dirname(__DIR__) . '/templates/footer.php';
+require __DIR__ . '/templates/footer.php';
 ob_end_flush();

@@ -25,5 +25,5 @@ const T8_ROLES = [
 const T8_RESERVATION_STATUSES = ['pending', 'approved', 'rejected', 'pending', 'cancelled', 'completed', 'expired'];
 const T8_VISIT_STATUSES       = ['scheduled', 'late', 'checked_in', 'checked_out', 'cancelled', 'expired'];
 const T8_RECORD_STATUSES      = ['active', 'archived', 'disposed'];
-const T8_CONTRACT_STATUSES    = ['draft', 'approval', 'signing', 'active', 'renewal', 'expiration', 'termination', 'archived'];
+const T8_CONTRACT_STATUSES    = ['draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature', 'partially_signed', 'fully_executed', 'active', 'renewal', 'expiration', 'termination', 'cancelled', 'superseded', 'archived'];
 const T8_LEGAL_CASE_STATUSES  = ['open', 'in_progress', 'closed'];

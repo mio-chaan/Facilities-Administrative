@@ -1,7 +1,7 @@
 <?php
 /**
  * public/api/notifications_action.php
- * Follows the same bootstrap order as public/logout.php and returns
+ * Follows the same bootstrap order as logout.php and returns
  * JSON, same shape as modules/assistant/index.php's endpoint.
  */
 

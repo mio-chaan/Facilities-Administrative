@@ -171,12 +171,34 @@ if (!function_exists('t8_document_expiration_state')) {
     /** Returns the lifecycle bucket for a document expiration date. */
     function t8_document_expiration_state(?string $expirationDate, ?string $referenceDate = null): string
     {
-        $tracking = calculateTrackingStatus($expirationDate);
-        return match ($tracking['status']) {
-            'Expired' => 'expired',
-            'Expiring Soon' => 'expiring_soon',
-            default => 'active',
-        };
+        if ($expirationDate === null || trim((string) $expirationDate) === '') {
+            return 'active';
+        }
+
+        $reference = $referenceDate !== null && trim($referenceDate) !== ''
+            ? DateTimeImmutable::createFromFormat('!Y-m-d', trim($referenceDate))
+            : new DateTimeImmutable('today');
+
+        $expiration = DateTimeImmutable::createFromFormat('!Y-m-d', trim((string) $expirationDate));
+        if ($reference === false || $expiration === false) {
+            $tracking = calculateTrackingStatus($expirationDate);
+            return match ($tracking['status']) {
+                'Expired' => 'expired',
+                'Expiring Soon' => 'expiring_soon',
+                default => 'active',
+            };
+        }
+
+        $daysRemaining = (int) $reference->diff($expiration)->format('%r%a');
+        if ($daysRemaining < 0) {
+            return 'expired';
+        }
+
+        if ($daysRemaining <= 30) {
+            return 'expiring_soon';
+        }
+
+        return 'active';
     }
 }
 
@@ -262,7 +284,7 @@ if (!function_exists('asset')) {
     /** URL to a file served from the public web root, e.g. asset('css/style.css') */
     function asset(string $path): string
     {
-        return base_url(ltrim($path, '/'));
+        return base_url('public/' . ltrim($path, '/'));
     }
 }
 

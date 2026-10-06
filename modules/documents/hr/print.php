@@ -5,7 +5,7 @@
  * (?action=hr_print&type=...&id=...). Renders its OWN complete HTML
  * document — no navbar/sidebar/app chrome — by discarding whatever
  * header.php/navbar.php already wrote into the output buffer that
- * public/index.php opened, then echoing a clean page and exiting
+ * index.php opened, then echoing a clean page and exiting
  * (same "raw response, then exit" pattern the existing 'download'
  * action in this module already uses).
  */

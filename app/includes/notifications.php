@@ -95,7 +95,7 @@ if (!function_exists('t8_refresh_operational_notifications')) {
         $alerts = [
             ["SELECT COUNT(*) FROM team8_reservations WHERE status = 'pending'", 'Reservation approvals require review.', 'index.php?page=reservation'],
             ["SELECT COUNT(*) FROM team8_documents WHERE status = 'pending'", 'Document submissions require review.', 'index.php?page=documents&action=browse&status=pending'],
-            ["SELECT COUNT(*) FROM team8_contracts WHERE status IN ('expiring_soon', 'pending_renewal')", 'Contract renewal attention is required.', 'index.php?page=contracts'],
+            ["SELECT COUNT(*) FROM team8_contracts WHERE deleted_at IS NULL AND status = 'active' AND ((end_date IS NOT NULL AND end_date <= DATE_ADD(CURDATE(), INTERVAL 90 DAY)) OR (renewal_date IS NOT NULL AND renewal_date <= DATE_ADD(CURDATE(), INTERVAL 90 DAY)))", 'Contract renewal attention is required.', 'index.php?page=contracts'],
             ["SELECT COUNT(*) FROM team8_records WHERE disposition_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) AND status = 'active'", 'Retention records are approaching disposition.', 'index.php?page=retention'],
             ["SELECT COUNT(*) FROM team8_visitors WHERE status = 'scheduled' AND DATE(scheduled_date) = CURDATE()", 'Visitor activity is scheduled today.', 'index.php?page=visitor'],
         ];

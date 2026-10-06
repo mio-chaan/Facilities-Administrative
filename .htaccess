@@ -25,10 +25,9 @@
 
 RewriteEngine On
 
-# Only public/ and the front-controller/entry scripts at the root
-# should ever be reachable. Block direct requests into the source
-# trees (defense in depth - app/ and database/ also carry their own
-# deny-all .htaccess, see below).
+# Keep source trees private while allowing public/ assets and the
+# front-controller/entry scripts at the project root. app/ and
+# database/ also carry their own deny-all .htaccess files.
 RewriteRule ^(app|database|modules|templates|docs)(/|$) - [F,L]
 
 # Belt-and-suspenders in case RewriteEngine isn't available/enabled.

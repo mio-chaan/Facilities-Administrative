@@ -188,6 +188,22 @@ CREATE TABLE `team8_contract_approvals` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
+DROP TABLE IF EXISTS `team8_contract_events`;
+CREATE TABLE `team8_contract_events` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `contract_id` int(11) NOT NULL,
+  `actor_id` int(11) DEFAULT NULL,
+  `event_type` varchar(80) NOT NULL,
+  `description` varchar(500) NOT NULL,
+  `metadata` longtext DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_team8_contract_events_contract` (`contract_id`,`created_at`),
+  KEY `idx_team8_contract_events_actor` (`actor_id`),
+  CONSTRAINT `fk_team8_contract_events_contract` FOREIGN KEY (`contract_id`) REFERENCES `team8_contracts` (`id`),
+  CONSTRAINT `fk_team8_contract_events_actor` FOREIGN KEY (`actor_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 --
 -- Table structure for table `team8_contract_documents`
 --
@@ -231,6 +247,31 @@ CREATE TABLE `team8_contract_history` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `team8_contract_negotiations`
+--
+
+DROP TABLE IF EXISTS `team8_contract_negotiations`;
+CREATE TABLE `team8_contract_negotiations` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `contract_id` int(11) NOT NULL,
+  `version_no` int(11) NOT NULL,
+  `proposed_by` int(11) NOT NULL,
+  `change_summary` varchar(1000) NOT NULL,
+  `proposed_data` longtext NOT NULL,
+  `status` enum('pending','accepted','rejected','superseded') NOT NULL DEFAULT 'pending',
+  `source` enum('internal','external') NOT NULL DEFAULT 'internal',
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `resolved_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_team8_contract_negotiations_version` (`contract_id`,`version_no`),
+  KEY `idx_team8_contract_negotiations_contract` (`contract_id`,`created_at`),
+  KEY `idx_team8_contract_negotiations_status` (`status`,`created_at`),
+  CONSTRAINT `fk_team8_contractnegotiations_contract` FOREIGN KEY (`contract_id`) REFERENCES `team8_contracts` (`id`),
+  CONSTRAINT `fk_team8_contractnegotiations_user` FOREIGN KEY (`proposed_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `team8_contract_parties`
 --
 
@@ -250,6 +291,49 @@ CREATE TABLE `team8_contract_parties` (
   CONSTRAINT `fk_team8_contractparties_party` FOREIGN KEY (`party_id`) REFERENCES `team8_parties` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+DROP TABLE IF EXISTS `team8_contract_signatures`;
+CREATE TABLE `team8_contract_signatures` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `contract_id` int(11) NOT NULL,
+  `party_id` int(11) DEFAULT NULL,
+  `signer_name` varchar(200) NOT NULL,
+  `signer_email` varchar(255) NOT NULL,
+  `status` enum('pending','signed','complete','approved','rejected','declined') NOT NULL DEFAULT 'pending',
+  `signed_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_team8_contract_signatures_contract_party` (`contract_id`,`party_id`),
+  UNIQUE KEY `uq_team8_contract_signatures_contract_email` (`contract_id`,`signer_email`),
+  KEY `idx_team8_contract_signatures_status` (`contract_id`,`status`,`signed_at`),
+  CONSTRAINT `fk_team8_contract_signatures_contract` FOREIGN KEY (`contract_id`) REFERENCES `team8_contracts` (`id`),
+  CONSTRAINT `fk_team8_contract_signatures_party` FOREIGN KEY (`party_id`) REFERENCES `team8_parties` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+DROP TABLE IF EXISTS `team8_contract_portal_invites`;
+CREATE TABLE `team8_contract_portal_invites` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `contract_id` int(11) NOT NULL,
+  `party_id` int(11) NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `party_name` varchar(200) DEFAULT NULL,
+  `token_hash` varchar(255) NOT NULL,
+  `status` enum('pending','accepted','rejected','expired') NOT NULL DEFAULT 'pending',
+  `expires_at` datetime DEFAULT NULL,
+  `used_at` datetime DEFAULT NULL,
+  `created_by` int(11) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_team8_contract_portal_invites_token` (`token_hash`),
+  KEY `idx_team8_contract_portal_invites_contract` (`contract_id`,`status`),
+  KEY `idx_team8_contract_portal_invites_party` (`party_id`),
+  KEY `idx_team8_contract_portal_invites_email` (`email`),
+  CONSTRAINT `fk_team8_contractportal_contract` FOREIGN KEY (`contract_id`) REFERENCES `team8_contracts` (`id`),
+  CONSTRAINT `fk_team8_contractportal_party` FOREIGN KEY (`party_id`) REFERENCES `team8_parties` (`id`),
+  CONSTRAINT `fk_team8_contractportal_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Table structure for table `team8_contracts`
@@ -279,11 +363,15 @@ CREATE TABLE `team8_contracts` (
   `notice_period_days` int(11) DEFAULT NULL,
   `termination_date` date DEFAULT NULL,
   `termination_reason` varchar(500) DEFAULT NULL,
+  `terminated_by` int(11) DEFAULT NULL,
   `rejection_reason` varchar(500) DEFAULT NULL,
   `attachment_path` varchar(500) DEFAULT NULL,
   `attachment_type` varchar(20) DEFAULT NULL,
   `attachment_name` varchar(255) DEFAULT NULL,
-  `status` enum('draft','approval','signing','active','renewal','expiration','termination','archived') NOT NULL DEFAULT 'draft',
+  `status` enum('draft','under_review','negotiation','pending_approval','pending_signature','partially_signed','fully_executed','active','renewal','expiration','termination','cancelled','superseded','archived') NOT NULL DEFAULT 'draft',
+  `expiration_alert` enum('normal','low','medium','high','critical') NOT NULL DEFAULT 'normal',
+  `days_remaining` int(11) DEFAULT NULL,
+  `last_monitor_check_at` datetime DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `deleted_at` datetime DEFAULT NULL,

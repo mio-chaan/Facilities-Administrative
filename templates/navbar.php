@@ -47,7 +47,7 @@ $t8RecentNotifications = $t8RecentNotifications ?? [];
         <i class="fa-solid fa-magnifying-glass"></i>
         <input type="search" id="t8GlobalSearch" placeholder="Search anything..." autocomplete="off"
                aria-label="Search all modules" aria-controls="t8GlobalSearchResults"
-               data-search-url="<?= e(base_url('api/global_search.php')) ?>">
+               data-search-url="<?= e(asset('api/global_search.php')) ?>">
         <div class="t8-global-search-results" id="t8GlobalSearchResults" role="region" aria-live="polite" hidden></div>
     </div>
 
@@ -65,7 +65,7 @@ $t8RecentNotifications = $t8RecentNotifications ?? [];
             </button>
 
             <div class="t8-notif-popover" id="t8NotifPopover" role="menu"
-                 data-action-url="<?= e(base_url('api/notifications_action.php')) ?>">
+                 data-action-url="<?= e(asset('api/notifications_action.php')) ?>">
                 <?= t8_csrf_field() ?>
                 <div class="t8-notif-popover-header">
                     <span>Notifications</span>
