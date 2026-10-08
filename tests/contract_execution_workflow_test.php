@@ -27,6 +27,7 @@ require_once __DIR__ . '/../app/includes/contract_signing.php';
 require_once __DIR__ . '/../app/includes/contract_signing_portal.php';
 require_once __DIR__ . '/../app/includes/contract_negotiation.php';
 require_once __DIR__ . '/../app/includes/contract_portal.php';
+require_once __DIR__ . '/../app/includes/contract_renewal.php';
 
 $assert = static function (bool $condition, string $message): void {
     if (!$condition) {
@@ -39,7 +40,7 @@ $newPdo = static function (): PDO {
     $pdo = new PDO('sqlite::memory:');
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->exec(
-        'CREATE TABLE team8_contracts (id INTEGER PRIMARY KEY, contract_number TEXT NOT NULL, status TEXT NOT NULL, signature_version_no INTEGER NULL, signature_document_hash TEXT NULL, title TEXT NOT NULL, deleted_at TEXT, updated_at TEXT);
+        'CREATE TABLE team8_contracts (id INTEGER PRIMARY KEY, contract_number TEXT NOT NULL, status TEXT NOT NULL, signature_version_no INTEGER NULL, signature_document_hash TEXT NULL, title TEXT NOT NULL, renewed_from_id INTEGER, deleted_at TEXT, updated_at TEXT);
          CREATE TABLE team8_contract_history (
              id INTEGER PRIMARY KEY AUTOINCREMENT, contract_id INTEGER NOT NULL, version_no INTEGER NOT NULL,
              data_json TEXT NOT NULL, changed_by INTEGER, created_at TEXT
@@ -382,5 +383,18 @@ try {
     $schemaFailureClosed = true;
 }
 $assert($schemaFailureClosed, 'Case 11: a missing signature schema must fail closed.');
+
+$renewalPdo = $newPdo();
+$renewalPdo->exec('UPDATE team8_contracts SET renewed_from_id = 7 WHERE id = 1');
+$renewalPdo->exec('DELETE FROM team8_contract_history WHERE contract_id = 1');
+$renewalPdo->beginTransaction();
+t8_contract_ensure_renewal_history($renewalPdo, 1, 8);
+$renewalPdo->commit();
+$renewalHistory = $renewalPdo->query('SELECT version_no, data_json, changed_by FROM team8_contract_history WHERE contract_id = 1')->fetch(PDO::FETCH_ASSOC);
+$renewalSnapshot = json_decode((string) $renewalHistory['data_json'], true, 512, JSON_THROW_ON_ERROR);
+$assert((int) $renewalHistory['version_no'] === 1 && (int) $renewalHistory['changed_by'] === 8
+    && $renewalSnapshot['title'] === 'Service Agreement'
+    && !isset($renewalSnapshot['id'], $renewalSnapshot['status']),
+    'Legacy renewals must get an initial history snapshot of their current terms before signature.');
 
 fwrite(STDOUT, "Contract execution and digital signing workflow checks passed.\n");

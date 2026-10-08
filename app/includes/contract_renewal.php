@@ -2,6 +2,47 @@
 declare(strict_types=1);
 
 if (!function_exists('t8_contract_create_renewal')) {
+    function t8_contract_save_initial_renewal_history(PDO $pdo, int $contractId, array $contractData, int $actorId): void
+    {
+        $versionData = $contractData;
+        unset($versionData['id'], $versionData['status'], $versionData['created_at'], $versionData['updated_at'], $versionData['deleted_at']);
+
+        $historyStmt = $pdo->prepare(
+            'INSERT INTO team8_contract_history (contract_id, version_no, data_json, changed_by, created_at)
+             VALUES (:contract_id, :version_no, :data_json, :changed_by, CURRENT_TIMESTAMP)'
+        );
+        $historyStmt->execute([
+            'contract_id' => $contractId,
+            'version_no' => 1,
+            'data_json' => json_encode($versionData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            'changed_by' => $actorId,
+        ]);
+    }
+
+    function t8_contract_ensure_renewal_history(PDO $pdo, int $contractId, int $actorId): void
+    {
+        $versionStmt = $pdo->prepare(
+            'SELECT COALESCE(MAX(version_no), 0) FROM team8_contract_history WHERE contract_id = :contract_id'
+        );
+        $versionStmt->execute(['contract_id' => $contractId]);
+        if ((int) $versionStmt->fetchColumn() > 0) {
+            return;
+        }
+
+        $lockSuffix = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql' ? ' FOR UPDATE' : '';
+        $contractStmt = $pdo->prepare(
+            'SELECT * FROM team8_contracts
+             WHERE id = :id AND renewed_from_id IS NOT NULL AND deleted_at IS NULL' . $lockSuffix
+        );
+        $contractStmt->execute(['id' => $contractId]);
+        $contract = $contractStmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($contract)) {
+            throw new RuntimeException('A saved contract version is missing and this contract is not an available renewal.');
+        }
+
+        t8_contract_save_initial_renewal_history($pdo, $contractId, $contract, $actorId);
+    }
+
     function t8_contract_create_renewal(PDO $pdo, array $contract, int $actorId): ?array
     {
         if (!isset($contract['id'])) {
@@ -60,6 +101,8 @@ if (!function_exists('t8_contract_create_renewal')) {
             if ($newId <= 0) {
                 throw new RuntimeException('Renewal draft insert failed.');
             }
+
+            t8_contract_save_initial_renewal_history($pdo, $newId, $row, $actorId);
 
             $partyRows = $pdo->prepare('SELECT party_id, role_in_contract FROM team8_contract_parties WHERE contract_id = :contract_id');
             $partyRows->execute(['contract_id' => $originalId]);

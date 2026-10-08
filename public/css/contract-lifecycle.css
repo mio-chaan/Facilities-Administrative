@@ -659,8 +659,143 @@
     color: #555;
     font-size: 0.7rem;
 }
+
+.t8-activation-panel {
+    width: 100%;
+    margin-top: 8px;
+    border: 1px solid #d7cfc6;
+    border-radius: 12px;
+    background: #f7f4f2;
+    overflow: hidden;
+}
+.t8-activation-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #d7cfc6;
+    background: transparent;
+}
+.t8-activation-copy {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    margin: 0;
+    color: #3a3a3a;
+}
+.t8-activation-title {
+    font-size: clamp(1.05rem, 1.2vw, 1.45rem);
+    font-weight: 700;
+    line-height: 1.2;
+    color: #2f2f2f;
+}
+.t8-activation-subtitle {
+    font-size: 0.83rem;
+    line-height: 1.5;
+    color: #5d5853;
+}
+.t8-activation-form {
+    margin: 0;
+    flex: 0 0 auto;
+}
+.t8-activation-btn {
+    min-width: 120px;
+    min-height: 34px;
+    padding: 7px 18px;
+    border-radius: 999px;
+    border-color: var(--t8-success);
+    background: var(--t8-success);
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 700;
+    box-shadow: none;
+}
+.t8-activation-btn:hover {
+    background: #3d8b46;
+    border-color: #3d8b46;
+}
+.t8-revision-panel {
+    width: auto;
+    max-width: 100%;
+    margin: 0;
+    border: 0;
+    background: transparent;
+}
+.t8-revision-panel summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px 10px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #2b2b2b;
+    list-style: none;
+}
+.t8-revision-panel summary::-webkit-details-marker { display: none; }
+.t8-revision-panel summary::after {
+    color: #6a6a6a;
+    content: "+";
+    font-size: 1.2rem;
+    font-weight: 300;
+    line-height: 1;
+}
+.t8-revision-panel[open] summary::after {
+    content: "−";
+}
+.t8-revision-panel-body {
+    padding: 0 14px 14px;
+}
+.t8-revision-panel-body .t8-signature-escape-hint {
+    margin: 0 0 12px;
+    color: #6d6a68;
+    font-size: 0.76rem;
+    line-height: 1.6;
+}
+.t8-revision-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 0;
+}
+.t8-revision-input {
+    width: 100%;
+    min-height: 42px;
+    padding: 10px 12px;
+    border: 1px solid #d9d1ca;
+    border-radius: 8px;
+    background: #fff;
+    color: #2d2d2d;
+    font: inherit;
+    font-size: 0.9rem;
+}
+.t8-revision-input:focus {
+    border-color: #6d806f;
+    outline: 2px solid rgba(99, 122, 106, 0.18);
+}
+.t8-revision-submit {
+    width: fit-content;
+    min-width: 150px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    background: transparent;
+    color: #3d3d3d;
+    font-size: 0.92rem;
+    font-weight: 600;
+}
 @media (max-width: 600px) {
     .t8-signature-primary { align-items: stretch; }
     .t8-signature-primary-buttons { width: 100%; flex-direction: column; }
     .t8-signature-primary-buttons .t8-btn { width: 100%; }
+    .t8-activation-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .t8-activation-btn,
+    .t8-revision-submit {
+        width: 100%;
+    }
 }

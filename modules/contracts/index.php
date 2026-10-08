@@ -785,6 +785,7 @@ if ($action === 'workflow') {
     if ($workflow === 'sign') {
         try {
             $pdo->beginTransaction();
+            t8_contract_ensure_renewal_history($pdo, $id, $currentUserId);
             $frozenDocument = t8_contract_freeze_signature_version($pdo, $id);
             t8_contract_event_log_required(
                 $pdo,
@@ -1619,20 +1620,36 @@ if ($action === 'review' || $action === 'view') {
                     <?php endif; ?>
 
                     <?php if ($isAdmin && t8_contract_normalize_status((string) $viewContract['status']) === 'fully_executed'): ?>
-                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
-                            <?= t8_csrf_field() ?>
-                            <input type="hidden" name="id" value="<?= $viewId ?>">
-                            <input type="hidden" name="workflow_action" value="activate">
-                            <button class="t8-btn t8-btn-success">Mark Active</button>
-                        </form>
-                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
-                            <?= t8_csrf_field() ?>
-                            <input type="hidden" name="id" value="<?= $viewId ?>">
-                            <input type="hidden" name="workflow_action" value="reopen_for_revision">
-                            <label class="t8-form-label" for="revision-reason-executed">Reason for reopening</label>
-                            <input id="revision-reason-executed" name="comment" maxlength="1000" placeholder="Optional revision reason">
-                            <button class="t8-btn t8-btn-outline">Reopen for Revision</button>
-                        </form>
+                        <div class="t8-activation-panel">
+                            <div class="t8-activation-header">
+                                <p class="t8-activation-copy">
+                                    <span class="t8-activation-title">Ready to activate.</span>
+                                    <span class="t8-activation-subtitle">Marking active records the start of the contract period.</span>
+                                </p>
+                                <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" class="t8-activation-form">
+                                    <?= t8_csrf_field() ?>
+                                    <input type="hidden" name="id" value="<?= $viewId ?>">
+                                    <input type="hidden" name="workflow_action" value="activate">
+                                    <button class="t8-btn t8-btn-success t8-activation-btn" type="submit">Mark Active</button>
+                                </form>
+                            </div>
+
+                            <details class="t8-revision-panel">
+                                <summary>Reopen for revision</summary>
+                                <div class="t8-revision-panel-body">
+                                    <p class="t8-signature-escape-hint">
+                                        Voids all existing signatures for this version and returns the contract to negotiation. A new version must be frozen before signing resumes.
+                                    </p>
+                                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" class="t8-revision-form">
+                                        <?= t8_csrf_field() ?>
+                                        <input type="hidden" name="id" value="<?= $viewId ?>">
+                                        <input type="hidden" name="workflow_action" value="reopen_for_revision">
+                                        <input class="t8-revision-input" name="comment" maxlength="1000" placeholder="Optional revision reason">
+                                        <button class="t8-btn t8-btn-outline t8-revision-submit" type="submit">Reopen for Revision</button>
+                                    </form>
+                                </div>
+                            </details>
+                        </div>
                     <?php endif; ?>
 
                     <?php if ($isAdmin && $viewContract['status'] === 'active'): ?>
