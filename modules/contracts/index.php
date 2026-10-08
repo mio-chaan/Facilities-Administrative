@@ -25,6 +25,10 @@ $contractSigningPath = __DIR__ . '/../../app/includes/contract_signing.php';
 if (is_file($contractSigningPath)) {
     require_once $contractSigningPath;
 }
+$contractWorkflowPath = __DIR__ . '/../../app/includes/contract_workflow.php';
+if (is_file($contractWorkflowPath)) {
+    require_once $contractWorkflowPath;
+}
 
 $action = (string) ($_GET['action'] ?? 'list');
 t8_require_role(['admin', 'legal_officer', 'facilities_staff', 'employee']);
@@ -101,6 +105,23 @@ function t8_contract_event_log(PDO $pdo, int $contractId, int $actorId, string $
         ]);
     } catch (Throwable $e) {
         // Contract event logging is optional during partial schema upgrades.
+    }
+}
+
+function t8_contract_event_log_required(PDO $pdo, int $contractId, int $actorId, string $eventType, string $description, array $metadata = []): void
+{
+    $logged = $pdo->prepare(
+        'INSERT INTO team8_contract_events (contract_id, actor_id, event_type, description, metadata)
+         VALUES (:contract_id, :actor_id, :event_type, :description, :metadata)'
+    )->execute([
+        'contract_id' => $contractId,
+        'actor_id' => $actorId,
+        'event_type' => $eventType,
+        'description' => $description,
+        'metadata' => json_encode($metadata, JSON_THROW_ON_ERROR),
+    ]);
+    if (!$logged) {
+        throw new RuntimeException('Required contract audit event could not be written.');
     }
 }
 
@@ -564,27 +585,9 @@ if ($action === 'workflow') {
     $contract = t8_contract_fetch($pdo, $id);
     $workflow = (string) ($_POST['workflow_action'] ?? '');
     $comment = trim((string) ($_POST['comment'] ?? ''));
-    $transitions = [
-        'submit' => ['draft', 'under_review'],
-        'revert_to_draft' => ['under_review', 'draft'],
-        'approve' => ['under_review', 'pending_approval'],
-        'request_changes' => ['under_review', 'negotiation'],
-        'propose_changes' => ['under_review', 'under_review'],
-        'accept_negotiation' => ['under_review', 'under_review'],
-        'return_to_review' => ['negotiation', 'under_review'],
-        'sign' => ['pending_approval', 'pending_signature'],
-        'activate' => ['pending_signature', 'active'],
-        'fully_execute' => ['pending_signature', 'fully_executed'],
-        'renewal' => ['active', 'renewal'],
-        'cancel' => ['draft', 'cancelled'],
-        'supersede' => ['active', 'superseded'],
-        'terminate' => ['active', 'termination'],
-        'expire' => ['active', 'expiration'],
-        'reject' => ['under_review', 'archived'],
-    ];
     $normalizedStatus = t8_contract_normalize_status((string) ($contract['status'] ?? ''));
     if ($workflow === 'cancel') {
-        if (!$isAdmin || !in_array($normalizedStatus, ['draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature'], true)) {
+        if (!$isAdmin || t8_contract_workflow_transition_target($workflow, $normalizedStatus, $isAdmin) === null) {
             t8_flash_set('danger', 'That contract cancellation is not allowed.');
             redirect(page_url('contracts'));
         }
@@ -595,6 +598,56 @@ if ($action === 'workflow') {
             redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
         }
         t8_flash_set('success', 'Contract cancelled.');
+        redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+    }
+    if ($workflow === 'reopen_for_revision') {
+        if (!$contract || !$isAdmin
+            || t8_contract_workflow_transition_target($workflow, $normalizedStatus, $isAdmin) === null) {
+            t8_flash_set('danger', 'Only an administrator can reopen a signed contract for revision.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+        try {
+            $pdo->beginTransaction();
+            t8_contract_void_signatures_for_revision($pdo, $id);
+            $update = $pdo->prepare(
+                "UPDATE team8_contracts SET status = 'negotiation', signature_version_no = NULL, signature_document_hash = NULL
+                 WHERE id = :id AND status IN ('pending_signature', 'partially_signed', 'fully_executed')"
+            );
+            $update->execute(['id' => $id]);
+            if ($update->rowCount() !== 1) {
+                throw new RuntimeException('Contract status changed before it could be reopened.');
+            }
+            $pdo->prepare(
+                "UPDATE team8_contract_negotiations SET status = 'superseded', resolved_at = CURRENT_TIMESTAMP
+                 WHERE contract_id = :contract_id AND status = 'pending'"
+            )->execute(['contract_id' => $id]);
+            $revisionMetadata = [
+                'from_status' => $normalizedStatus,
+                'to_status' => 'negotiation',
+                'voided_reason' => 'superseded by new version',
+            ];
+            if ($comment !== '') {
+                $revisionMetadata['reason'] = $comment;
+            }
+            t8_contract_event_log_required(
+                $pdo,
+                $id,
+                $currentUserId,
+                'CONTRACT_REOPENED_FOR_REVISION',
+                'Contract reopened for revision; prior signatures were voided.',
+                $revisionMetadata
+            );
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            t8_flash_set('danger', 'The contract could not be reopened for revision; its signatures were not changed.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+        t8_contract_send_status_notification($pdo, $id, $currentUserId, 'reopen_for_revision', 'The contract was reopened for revision. Previous signatures are void and the revised version must be signed again.');
+        t8_audit_log($pdo, $currentUserId, 'contract', $id, 'reopen_for_revision', $normalizedStatus, 'negotiation');
+        t8_flash_set('success', 'Contract reopened for revision. Prior signatures were voided.');
         redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
     }
     if ($workflow === 'supersede') {
@@ -683,12 +736,40 @@ if ($action === 'workflow') {
         t8_flash_set('danger', 'The contract cannot be approved for contracting until every involved party accepts the latest circulated version.');
         redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
     }
-    if (!$contract || !isset($transitions[$workflow]) || $normalizedStatus !== $transitions[$workflow][0]
-        || (in_array($workflow, ['sign', 'activate'], true) && !$isAdmin)) {
+    $newStatus = t8_contract_workflow_transition_target($workflow, $normalizedStatus, $isAdmin);
+    if (!$contract || $newStatus === null) {
         t8_flash_set('danger', 'That contract transition is not allowed.');
         redirect(page_url('contracts'));
     }
-    $newStatus = $transitions[$workflow][1];
+    $activationAudit = null;
+    if ($workflow === 'fully_execute') {
+        try {
+            if (!t8_contract_all_parties_signed($pdo, $id)) {
+                t8_flash_set('danger', 'Cannot mark as fully executed until every involved party has a valid signature for the frozen contract version.');
+                redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+            }
+        } catch (Throwable $e) {
+            t8_flash_set('danger', 'Cannot verify the required signatures or frozen contract version. Apply the signature schema and retry.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+    }
+    if ($workflow === 'activate') {
+        $activationAudit = t8_contract_activation_audit($normalizedStatus, $comment);
+        if ($activationAudit === null) {
+            t8_flash_set('danger', 'Activating without recorded execution requires a reason.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+        try {
+            if (!t8_contract_can_activate($pdo, $id)
+                || ($normalizedStatus === 'fully_executed' && !t8_contract_all_parties_signed($pdo, $id))) {
+                t8_flash_set('danger', 'The contract cannot be activated because its frozen version is stale, a negotiation is pending, or required signatures are invalid.');
+                redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+            }
+        } catch (Throwable $e) {
+            t8_flash_set('danger', 'The contract cannot be activated until its frozen version and negotiation state can be verified.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+    }
     if ($workflow === 'renewal') {
         $renewedContract = t8_contract_create_renewal($pdo, $contract, $currentUserId);
         if ($renewedContract === null) {
@@ -698,7 +779,87 @@ if ($action === 'workflow') {
         t8_flash_set('success', 'A renewal draft was created and the original contract was marked for renewal.');
         redirect(page_url('contracts', ['action' => 'view', 'id' => (int) $renewedContract['id']]));
     }
-    if ($workflow === 'terminate') {
+    if ($workflow === 'sign') {
+        try {
+            $pdo->beginTransaction();
+            $frozenDocument = t8_contract_freeze_signature_version($pdo, $id);
+            t8_contract_event_log_required(
+                $pdo,
+                $id,
+                $currentUserId,
+                'CONTRACT_VERSION_FROZEN_FOR_SIGNATURE',
+                'The latest saved contract version was frozen for signature.',
+                [
+                    'from_status' => 'pending_approval',
+                    'to_status' => 'pending_signature',
+                    'version_no' => $frozenDocument['version_no'],
+                    'document_hash' => $frozenDocument['document_hash'],
+                ]
+            );
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            t8_flash_set('danger', 'The contract cannot be sent for signature because its latest saved version could not be frozen.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+    } elseif ($workflow === 'fully_execute') {
+        try {
+            $pdo->beginTransaction();
+            $executed = t8_contract_mark_fully_executed($pdo, $id);
+            if (!$executed) {
+                throw new RuntimeException('Required party signatures are incomplete.');
+            }
+            $frozenDocument = t8_contract_frozen_document($pdo, $id);
+            t8_contract_event_log_required(
+                $pdo,
+                $id,
+                $currentUserId,
+                'FULLY_EXECUTED',
+                'All involved parties signed the frozen contract version.',
+                [
+                    'from_status' => $normalizedStatus,
+                    'to_status' => 'fully_executed',
+                    'version_no' => $frozenDocument['version_no'],
+                    'document_hash' => $frozenDocument['document_hash'],
+                ]
+            );
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            t8_flash_set('danger', 'Execution could not be committed because signature verification or contract locking failed.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+    } elseif ($workflow === 'activate') {
+        try {
+            $pdo->beginTransaction();
+            $update = $pdo->prepare(
+                "UPDATE team8_contracts SET status = 'active' WHERE id = :id AND status = :expected_status"
+            );
+            $update->execute(['id' => $id, 'expected_status' => $normalizedStatus]);
+            if ($update->rowCount() !== 1) {
+                throw new RuntimeException('Contract status changed before activation.');
+            }
+            t8_contract_event_log_required(
+                $pdo,
+                $id,
+                $currentUserId,
+                $activationAudit['event_type'],
+                $activationAudit['description'],
+                $activationAudit['metadata']
+            );
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            t8_flash_set('danger', 'The contract was not activated because its status or required audit record could not be saved.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+    } elseif ($workflow === 'terminate') {
         $reason = $comment !== '' ? $comment : 'Termination recorded by ' . $currentUserName;
         $pdo->prepare('UPDATE team8_contracts SET status = :status, termination_date = :termination_date, termination_reason = :reason, terminated_by = :terminated_by WHERE id = :id')->execute([
             'status' => $newStatus,
@@ -727,15 +888,19 @@ if ($action === 'workflow') {
         'return_to_review' => 'Contract was sent back to review for updated terms.',
         'sign' => 'Contract is ready for signature and external execution.',
         'fully_execute' => 'Contract was fully executed and is ready for activation.',
-        'activate' => 'Contract is now active and in force.',
+        'activate' => in_array($normalizedStatus, ['pending_signature', 'partially_signed'], true)
+            ? 'Contract was activated before recorded execution; administrator reason: ' . $comment
+            : 'Fully executed contract is now active and in force.',
         'renewal' => 'Contract renewal review has been initiated.',
         'terminate' => 'Contract termination has been recorded.',
         'expire' => 'Contract expiration has been recorded.',
         'reject' => 'Contract was rejected and moved to archive.',
         default => 'Contract lifecycle updated.'
     };
-    $eventType = $workflow === 'revert_to_draft' ? 'CONTRACT_REVERTED' : $workflow;
-    t8_contract_event_log($pdo, $id, $currentUserId, $eventType, $comment !== '' ? $comment : ucfirst(str_replace('_', ' ', $workflow)), ['from_status' => (string) $contract['status'], 'to_status' => $newStatus]);
+    if (!in_array($workflow, ['activate', 'sign', 'fully_execute'], true)) {
+        $eventType = $workflow === 'revert_to_draft' ? 'CONTRACT_REVERTED' : $workflow;
+        t8_contract_event_log($pdo, $id, $currentUserId, $eventType, $comment !== '' ? $comment : ucfirst(str_replace('_', ' ', $workflow)), ['from_status' => (string) $contract['status'], 'to_status' => $newStatus]);
+    }
     t8_contract_send_status_notification($pdo, $id, $currentUserId, $workflow, $notificationMessage);
     t8_audit_log($pdo, $currentUserId, 'contract', $id, $workflow, (string) $contract['status'], $workflow === 'revert_to_draft' ? $newStatus : $comment);
     if (in_array($newStatus, ['expiration', 'termination', 'archived'], true)) {
@@ -866,7 +1031,7 @@ if (in_array($action, ['create', 'edit'], true)) {
     }
     ?>
     <ol class="t8-lifecycle" aria-label="Contract life cycle">
-        <?php foreach (['Draft', 'Under Review', 'Pending Approval', 'Pending Signature', 'Active', 'Renewal / Expiration / Termination'] as $stepIndex => $stepLabel): ?>
+        <?php foreach (['Draft', 'Under Review / Negotiation', 'Pending Approval', 'Pending Signature / Partially Signed', 'Fully Executed', 'Active', 'Renewal / Expiration / Termination'] as $stepIndex => $stepLabel): ?>
             <li class="t8-lifecycle-step<?= $stepIndex === 0 ? ' is-active' : '' ?>">
                 <span class="t8-lifecycle-indicator" aria-hidden="true"></span>
                 <span><?= e($stepLabel) ?></span>
@@ -1098,7 +1263,7 @@ if (in_array($action, ['review', 'view'], true)) {
 }
 
 if ($action === 'review' || $action === 'view') {
-    $stages = ['draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature', 'fully_executed', 'active', 'renewal'];
+    $stages = ['draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature', 'partially_signed', 'fully_executed', 'active', 'renewal'];
     $normalizedStatus = t8_contract_normalize_status((string) $viewContract['status']);
     $currentStageIndex = array_search($normalizedStatus, $stages, true);
     if ($currentStageIndex === false) {
@@ -1253,14 +1418,31 @@ if ($action === 'review' || $action === 'view') {
                         </form>
                     <?php endif; ?>
 
-                    <?php if ($isAdmin && t8_contract_normalize_status((string) $viewContract['status']) === 'pending_signature'): ?>
+                    <?php if ($isAdmin && in_array(t8_contract_normalize_status((string) $viewContract['status']), ['pending_signature', 'partially_signed'], true)): ?>
                         <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
                             <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="fully_execute">
                             <button class="t8-btn t8-btn-success">Complete Execution</button>
                         </form>
+                    <?php endif; ?>
+
+                    <?php if ($isAdmin && in_array(t8_contract_normalize_status((string) $viewContract['status']), ['pending_signature', 'partially_signed', 'fully_executed'], true)): ?>
                         <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
-                            <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="activate">
+                            <?= t8_csrf_field() ?>
+                            <input type="hidden" name="id" value="<?= $viewId ?>">
+                            <input type="hidden" name="workflow_action" value="activate">
+                            <?php if (in_array(t8_contract_normalize_status((string) $viewContract['status']), ['pending_signature', 'partially_signed'], true)): ?>
+                                <label class="t8-form-label" for="activation-reason">Reason for activating without recorded execution</label>
+                                <input id="activation-reason" name="comment" required maxlength="1000" placeholder="Required override reason">
+                            <?php endif; ?>
                             <button class="t8-btn t8-btn-success">Mark Active</button>
+                        </form>
+                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
+                            <?= t8_csrf_field() ?>
+                            <input type="hidden" name="id" value="<?= $viewId ?>">
+                            <input type="hidden" name="workflow_action" value="reopen_for_revision">
+                            <label class="t8-form-label" for="revision-reason">Reason for reopening</label>
+                            <input id="revision-reason" name="comment" maxlength="1000" placeholder="Optional revision reason">
+                            <button class="t8-btn t8-btn-outline">Reopen for Revision</button>
                         </form>
                     <?php endif; ?>
 
@@ -1278,7 +1460,7 @@ if ($action === 'review' || $action === 'view') {
                             <button class="t8-btn t8-btn-danger">Terminate</button>
                         </form>
                     <?php endif; ?>
-                    <?php if ($isAdmin && in_array(t8_contract_normalize_status((string) $viewContract['status']), ['draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature'], true)): ?>
+                    <?php if ($isAdmin && in_array(t8_contract_normalize_status((string) $viewContract['status']), ['draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature', 'partially_signed', 'fully_executed'], true)): ?>
                         <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
                             <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="cancel">
                             <button class="t8-btn t8-btn-danger">Cancel</button>

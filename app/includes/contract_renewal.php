@@ -221,7 +221,7 @@ if (!function_exists('t8_contract_cancel')) {
             $stmt = $pdo->prepare(
                 "UPDATE team8_contracts
                  SET status = 'cancelled', rejection_reason = :reason
-                 WHERE id = :id AND status IN ('draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature')"
+                 WHERE id = :id AND status IN ('draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature', 'partially_signed', 'fully_executed')"
             );
             $updated = $stmt->execute([
                 'reason' => $message,

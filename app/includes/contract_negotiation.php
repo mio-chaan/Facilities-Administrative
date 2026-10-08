@@ -55,17 +55,15 @@ function t8_contract_create_negotiation(
             throw new RuntimeException('At least one contract field must change.');
         }
 
-        $versionStmt = $pdo->prepare(
-            'SELECT GREATEST(
-                (SELECT COALESCE(MAX(version_no), 0) FROM team8_contract_history WHERE contract_id = :history_contract_id),
-                (SELECT COALESCE(MAX(version_no), 0) FROM team8_contract_negotiations WHERE contract_id = :negotiation_contract_id)
-             ) + 1 AS next_version'
+        $historyVersionStmt = $pdo->prepare(
+            'SELECT COALESCE(MAX(version_no), 0) FROM team8_contract_history WHERE contract_id = :contract_id'
         );
-        $versionStmt->execute([
-            'history_contract_id' => $contractId,
-            'negotiation_contract_id' => $contractId,
-        ]);
-        $versionNo = (int) $versionStmt->fetchColumn();
+        $historyVersionStmt->execute(['contract_id' => $contractId]);
+        $negotiationVersionStmt = $pdo->prepare(
+            'SELECT COALESCE(MAX(version_no), 0) FROM team8_contract_negotiations WHERE contract_id = :contract_id'
+        );
+        $negotiationVersionStmt->execute(['contract_id' => $contractId]);
+        $versionNo = max((int) $historyVersionStmt->fetchColumn(), (int) $negotiationVersionStmt->fetchColumn()) + 1;
 
         $versionData = $contract;
         unset($versionData['id'], $versionData['status'], $versionData['created_at'], $versionData['updated_at'], $versionData['deleted_at']);

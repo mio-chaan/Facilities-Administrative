@@ -42,12 +42,13 @@ Status: All contract implementation phases in the plan have been reviewed and th
   - `modules/party_registry.php`
 
 ### Current Implementation
-The contract module now follows the implementation plan lifecycle: `draft` -> `under_review` -> `negotiation` -> `pending_approval` -> `pending_signature` -> `fully_executed` -> `active`, with monitoring, renewal, termination, cancellation, archive, and event logging support included.
+The contract module follows the lifecycle documented in [contract_lifecycle.md](./contract_lifecycle.md), including review, negotiation, frozen-version signing, explicit full execution, normal activation, an audited activation override, revision reopening, and monitoring, renewal, termination, cancellation, and archive support.
 
 ### Completed Changes
 - Aligned the contract lifecycle with the implementation plan while preserving backward compatibility with legacy statuses already stored in the database.
 - Kept version history intact so each negotiation round remains traceable without overwriting the prior contract record.
 - Updated the contract review UI and action transitions so draft submission, approval, rejection, and signature flow follow the plan.
+- Added a signature gate bound to frozen contract history, all-party execution checks, signature invalidation on revision, and separate audit handling for normal and override activation.
 - Added monitoring, notification, and audit-event support for lifecycle actions and expiration tracking.
 
 ### Final Status
