@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/dashboard_helpers.php';
+
 if (!t8_has_role('admin')) {
     require __DIR__ . '/staff.php';
     return;
@@ -388,7 +390,7 @@ $trendMonthNames = [
     5=>'May',6=>'June',7=>'July',8=>'August',
     9=>'September',10=>'October',11=>'November',12=>'December',
 ];
-$trendYearOptions = range((int) date('Y') - 1, (int) date('Y') + 2);
+$trendYearOptions = t8_dashboard_trend_year_options($trendYear, (int) date('Y'));
 ?>
 
 <div class="t8-main-grid">

@@ -13,6 +13,7 @@ $statMeta = [
     'My Tasks' => ['icon' => 'fa-list-check', 'class' => 't8-staff-icon-purple'],
 ];
 $pending = [];
+$dataError = null;
 
 try {
     $queries = [
@@ -42,7 +43,7 @@ try {
     $pendingStmt->execute(['id' => $userId]);
     $pending = $pendingStmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-    // A partial local schema should not expose unrelated data or stop the page.
+    $dataError = 'Some dashboard information could not be loaded. Please try again later.';
 }
 ?>
 <section class="t8-dashboard" aria-labelledby="dashboard-title">
@@ -52,6 +53,10 @@ try {
             <p class="t8-help-text">Your requests, documents, tasks, and notifications.</p>
         </div>
     </div>
+
+    <?php if ($dataError !== null): ?>
+        <div class="t8-alert t8-alert-warning" role="alert"><?= e($dataError) ?></div>
+    <?php endif; ?>
 
     <div class="t8-staff-summary-grid">
         <?php foreach ($stats as $label => $count): ?>

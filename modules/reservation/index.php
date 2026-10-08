@@ -159,7 +159,7 @@ function t8_reservations_annotate_conflicts(PDO $pdo, array $rows): array
  */
 function t8_reservation_has_started(array $reservation): bool
 {
-    $reference = $reservation['start_time'] ?: ($reservation['schedule'] ?? null);
+    $reference = ($reservation['start_time'] ?? null) ?: ($reservation['schedule'] ?? null);
     if ($reference === null || $reference === '') {
         return false;
     }

@@ -133,7 +133,12 @@ function t8_otp_get_challenge(PDO $pdo, int $userId, int $challengeId): ?array
 
 function t8_otp_is_expired(array $challenge): bool
 {
-    $expiresAt = strtotime((string) ($challenge['expires_at'] ?? '') . ' UTC');
+    $expiry = trim((string) ($challenge['expires_at'] ?? ''));
+    if ($expiry === '') {
+        return true;
+    }
+
+    $expiresAt = strtotime($expiry . ' UTC');
     return $expiresAt === false || $expiresAt <= time();
 }
 

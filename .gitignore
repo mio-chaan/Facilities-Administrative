@@ -37,5 +37,10 @@ Thumbs.db
 !/tests/contract_external_reviews_test.php
 !/tests/phase9_expiration_notification_test.php
 !/tests/contract_execution_workflow_test.php
+!/tests/auth_module_test.php
+!/tests/dashboard_filter_test.php
+!/tests/dashboard_staff_test.php
+!/tests/reservation_helpers_test.php
+!/tests/facility_validation_test.php
 /scripts/
 /Document Life cycle/

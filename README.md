@@ -41,22 +41,18 @@ framework — routing is a small hand-rolled front controller
    secret of at least 32 characters and `T8_SIGNATURE_STORAGE_DIR` as a
    writable private directory outside the web root. Signing links require
    `APP_URL` to be public HTTPS outside local development.
-4. Create the database and import the schema (Team 8's tables only —
-   see `docs/Database.md` for why the shared-table section exists):
+4. Create the database and import the complete schema. It includes the
+   tables and columns from the dated migrations, so a new installation
+   only needs this import:
    ```bash
    mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS capstone_shared_db"
    mysql -u root -p capstone_shared_db < database/schema.sql
-  mysql -u root -p capstone_shared_db < database/seed_account.sql       # optional
-  mysql -u root -p capstone_shared_db < database/seed_dummy_data.sql     # optional
+   mysql -u root -p capstone_shared_db < database/seed_account.sql
    ```
-   For an existing database, apply
-   `database/migrations/20261008_add_contract_portal_invites.sql` if the
-   `team8_contract_portal_invites` table is not present, then apply
-   `database/migrations/20261008_update_contract_party_review_responses.sql`
-   to enable external party decisions and negotiation proposals. Apply
-   `database/migrations/20261008_freeze_contract_signature_versions.sql`
-   and `database/migrations/20261008_digital_contract_signing.sql` to enable
-   frozen-version e-signatures, signing links, and OTP verification.
+   For an existing database, use only the dated migration scripts needed
+   to bring its current schema up to date; do not re-import `schema.sql`
+   over existing data. The seed account uses a real Gmail inbox so sign-in
+   OTP delivery can be tested; Gmail SMTP sender settings must also be configured.
 5. Start PHP's built-in dev server from the project root:
    ```bash
    php -S localhost:8000
@@ -70,7 +66,8 @@ framework — routing is a small hand-rolled front controller
   - OPEN PHPMYADMIN
   - CLICK DATABASE & CREATE 1
   - NAME IT "capstone_shared_db"
-  - IMPORT SQL "schema" | "seed_account.sql" | "seed_dummy_data.sql" [OPTIONAL]
+  - IMPORT SQL "database/schema.sql" (complete schema)
+  - IMPORT SQL "database/seed_account.sql" (admin account for OTP testing)
   - START LOCAL HOST "php -S localhost:8000"
 
 > **Note:** PHP's built-in dev server (`php -S`) does **not** read
@@ -85,7 +82,7 @@ system-wide. Until it's integrated, the project uses a local login flow
 (`login.php` / `logout.php`) against the shared `users` table. See
 `docs/Auth.md` for the full contract, seeded demo accounts, and how to
 swap it out later. Default seeded login:
-`dev.tester@example.local` / `Password123!`.
+`ramyum060@gmail.com` / `Password123!@`.
 
 ## Security note
 This database is **shared across all 10 teams**. DB credentials live

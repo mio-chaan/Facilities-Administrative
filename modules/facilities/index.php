@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/facility_helpers.php';
+
 $pageTitle = 'Facilities';
 $currentUserId = t8_current_user_id();
 $isAdmin = t8_has_role('admin');
@@ -34,39 +36,6 @@ function t8_facility_fetch(PDO $pdo, int $id): ?array
     return $row ?: null;
 }
 
-/**
- * Shared validation for both create and edit forms.
- * $validLocations is the list of currently allowed location NAMEs
- * (from team8_facility_locations) — when it's non-empty, the chosen
- * location must be one of them (the dropdown never lets a user type
- * an arbitrary value, only pick or add-then-pick).
- */
-function t8_facility_validate(string $name, string $location, string $facilityType, int $capacity, array $validLocations): array
-{
-    $errors = [];
-    if ($name === '') {
-        $errors[] = 'Facility name is required.';
-    } elseif (mb_strlen($name) > 150) {
-        $errors[] = 'Facility name must be 150 characters or fewer.';
-    }
-    if ($location === '') {
-        $errors[] = 'Location is required.';
-    } elseif (mb_strlen($location) > 200) {
-        $errors[] = 'Location must be 200 characters or fewer.';
-    } elseif ($validLocations !== [] && !in_array($location, $validLocations, true)) {
-        $errors[] = 'Please select a location from the list, or add it first with "+ Add Location".';
-    }
-    if ($facilityType === '') {
-        $errors[] = 'Please select a facility type.';
-    }
-    if ($capacity < 1) {
-        $errors[] = in_array($facilityType, ['Equipment', 'Asset', 'Utility'], true)
-            ? 'Quantity must be at least 1.'
-            : 'Capacity must be at least 1.';
-    }
-    return $errors;
-}
-
 $facility = ['name' => '', 'location' => '', 'facility_type' => '', 'capacity' => '', 'next_maintenance_date' => '', 'maintenance_note' => ''];
 $equipment = ['id' => 0, 'name' => '', 'home_facility_id' => '', 'quantity' => 0];
 
@@ -91,13 +60,13 @@ switch ($action) {
             echo json_encode(['error' => 'Method not allowed.']);
             exit;
         }
-        if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+        if (!t8_csrf_verify(t8_facility_input_value($_POST, 'csrf_token'))) {
             http_response_code(419);
             echo json_encode(['error' => 'Your session expired. Please refresh the page and try again.']);
             exit;
         }
 
-        $newLocationName = trim((string) ($_POST['name'] ?? ''));
+        $newLocationName = trim(t8_facility_input_value($_POST, 'name'));
         if ($newLocationName === '') {
             echo json_encode(['error' => 'Please enter a location name.']);
             exit;
@@ -137,15 +106,16 @@ switch ($action) {
             $equipment = $equipmentStmt->fetch(PDO::FETCH_ASSOC) ?: $equipment;
         }
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $equipment['name'] = trim((string) ($_POST['name'] ?? ''));
-            $equipment['home_facility_id'] = (string) ($_POST['home_facility_id'] ?? '');
-            $equipment['quantity'] = (int) ($_POST['quantity'] ?? 0);
-            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            $equipment['name'] = trim(t8_facility_input_value($_POST, 'name'));
+            $equipment['home_facility_id'] = t8_facility_input_value($_POST, 'home_facility_id');
+            $quantityValue = t8_facility_input_value($_POST, 'quantity');
+            $equipment['quantity'] = ctype_digit($quantityValue) ? (int) $quantityValue : -1;
+            if (!t8_csrf_verify(t8_facility_input_value($_POST, 'csrf_token'))) {
                 $errors[] = 'Your session expired. Please try again.';
             } elseif ($equipment['name'] === '') {
                 $errors[] = 'Equipment name is required.';
             } elseif ($equipment['quantity'] < 0) {
-                $errors[] = 'Equipment quantity cannot be negative.';
+                $errors[] = 'Equipment quantity must be a non-negative whole number.';
             } else {
                 $facilityId = (int) $equipment['home_facility_id'];
                 if ($facilityId > 0 && !t8_facility_fetch($pdo, $facilityId)) {
@@ -175,23 +145,23 @@ switch ($action) {
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $facility = [
-                'name'          => trim((string) ($_POST['name'] ?? '')),
-                'location'      => trim((string) ($_POST['location'] ?? '')),
-                'facility_type' => (string) ($_POST['facility_type'] ?? ''),
-                'capacity'      => (string) ($_POST['capacity'] ?? ''),
-                'next_maintenance_date' => trim((string) ($_POST['next_maintenance_date'] ?? '')),
+                'name'          => trim(t8_facility_input_value($_POST, 'name')),
+                'location'      => trim(t8_facility_input_value($_POST, 'location')),
+                'facility_type' => t8_facility_input_value($_POST, 'facility_type'),
+                'capacity'      => t8_facility_input_value($_POST, 'capacity'),
+                'next_maintenance_date' => trim(t8_facility_input_value($_POST, 'next_maintenance_date')),
             ];
 
-            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            if (!t8_csrf_verify(t8_facility_input_value($_POST, 'csrf_token'))) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
-                $capacityInt = (int) $facility['capacity'];
-                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt, $validLocationNames);
+                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $facility['capacity'], $validLocationNames);
                 if ($facility['next_maintenance_date'] !== '' && strtotime($facility['next_maintenance_date']) === false) {
                     $errors[] = 'Next maintenance date must be valid.';
                 }
 
                 if (!$errors) {
+                    $capacityInt = (int) $facility['capacity'];
                     $stmt = $pdo->prepare(
                         'INSERT INTO team8_facilities (name, location, facility_type, capacity, next_maintenance_date, status)
                          VALUES (:name, :location, :facility_type, :capacity, :next_maintenance_date, :status)'
@@ -225,23 +195,23 @@ switch ($action) {
         $validLocationNames = array_column($facilityLocations, 'name');
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $facility['name']          = trim((string) ($_POST['name'] ?? ''));
-            $facility['location']      = trim((string) ($_POST['location'] ?? ''));
-            $facility['facility_type'] = (string) ($_POST['facility_type'] ?? '');
-            $facility['capacity']      = (string) ($_POST['capacity'] ?? '');
-            $facility['next_maintenance_date'] = trim((string) ($_POST['next_maintenance_date'] ?? ''));
-            $facility['maintenance_note'] = trim((string) ($_POST['maintenance_note'] ?? ''));
+            $facility['name']          = trim(t8_facility_input_value($_POST, 'name'));
+            $facility['location']      = trim(t8_facility_input_value($_POST, 'location'));
+            $facility['facility_type'] = t8_facility_input_value($_POST, 'facility_type');
+            $facility['capacity']      = t8_facility_input_value($_POST, 'capacity');
+            $facility['next_maintenance_date'] = trim(t8_facility_input_value($_POST, 'next_maintenance_date'));
+            $facility['maintenance_note'] = trim(t8_facility_input_value($_POST, 'maintenance_note'));
 
-            if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+            if (!t8_csrf_verify(t8_facility_input_value($_POST, 'csrf_token'))) {
                 $errors[] = 'Your session expired. Please try again.';
             } else {
-                $capacityInt = (int) $facility['capacity'];
-                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $capacityInt, $validLocationNames);
+                $errors = t8_facility_validate($facility['name'], $facility['location'], $facility['facility_type'], $facility['capacity'], $validLocationNames);
                 if ($facility['next_maintenance_date'] !== '' && strtotime($facility['next_maintenance_date']) === false) {
                     $errors[] = 'Next maintenance date must be valid.';
                 }
 
                 if (!$errors) {
+                    $capacityInt = (int) $facility['capacity'];
                     $stmt = $pdo->prepare(
                         'UPDATE team8_facilities
                          SET name = :name,
@@ -276,7 +246,7 @@ switch ($action) {
             http_response_code(405);
             redirect(page_url('facilities'));
         }
-        if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+        if (!t8_csrf_verify(t8_facility_input_value($_POST, 'csrf_token'))) {
             t8_flash_set('danger', 'Your session expired. Please try again.');
             redirect(page_url('facilities'));
         }
@@ -310,7 +280,7 @@ switch ($action) {
             http_response_code(405);
             redirect(page_url('facilities'));
         }
-        if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+        if (!t8_csrf_verify(t8_facility_input_value($_POST, 'csrf_token'))) {
             t8_flash_set('danger', 'Your session expired. Please try again.');
             redirect(page_url('facilities'));
         }
@@ -342,7 +312,7 @@ switch ($action) {
             http_response_code(405);
             redirect(page_url('facilities'));
         }
-        if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+        if (!t8_csrf_verify(t8_facility_input_value($_POST, 'csrf_token'))) {
             t8_flash_set('danger', 'Your session expired. Please try again.');
             redirect(page_url('facilities'));
         }
