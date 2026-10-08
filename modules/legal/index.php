@@ -9,7 +9,7 @@
  *     Contracts (Phase 2), driven off the existing `deadline` column:
  *     an open/under_review case within 90 days of its deadline shows
  *     a Monitoring badge, exactly mirroring
- *     t8_contract_is_monitoring() in modules/contracts/index.php.
+ *     t8_contract_is_monitoring() in app/includes/contract_status.php.
  *   - A case is registered under retention automatically the moment
  *     it first reaches 'closed' status, anchored to the new
  *     `closed_at` timestamp (see
@@ -112,7 +112,7 @@ function t8_legal_case_fetch(PDO $pdo, int $id): ?array
 
 /**
  * MONITORING (computed, not stored) - mirrors
- * t8_contract_is_monitoring() in modules/contracts/index.php exactly:
+ * t8_contract_is_monitoring() in app/includes/contract_status.php exactly:
  * an open/under_review case within $withinDays of its deadline shows
  * the same visual sub-badge treatment, driven off a real date instead
  * of a second stored status that could drift out of sync.

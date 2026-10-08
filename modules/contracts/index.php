@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/config/constants.php';
 require_once __DIR__ . '/../../app/includes/gmail_dispatch.php';
 require_once __DIR__ . '/../../app/includes/contract_portal.php';
+require_once __DIR__ . '/../../app/includes/contract_status.php';
 
 $retentionHelperPath = __DIR__ . '/../../app/includes/retention_helpers.php';
 if (is_file($retentionHelperPath)) {
@@ -24,6 +25,7 @@ if (is_file($contractNegotiationPath)) {
 $contractSigningPath = __DIR__ . '/../../app/includes/contract_signing.php';
 if (is_file($contractSigningPath)) {
     require_once $contractSigningPath;
+    require_once __DIR__ . '/../../app/includes/contract_signing_portal.php';
 }
 $contractWorkflowPath = __DIR__ . '/../../app/includes/contract_workflow.php';
 if (is_file($contractWorkflowPath)) {
@@ -57,7 +59,6 @@ $errors = [];
 const T8_CONTRACT_TYPES = ['Service Agreement', 'Supplier/Vendor Agreement', 'Employment Contract', 'Lease Agreement', 'Partnership Agreement', 'Non-Disclosure Agreement', 'Maintenance Agreement', 'Purchase Agreement', 'Other'];
 const T8_CONTRACT_CURRENCIES = ['PHP', 'USD', 'JPY', 'KRW', 'EUR'];
 const T8_CONTRACT_PAYMENT_FREQUENCIES = ['One-time', 'Monthly', 'Quarterly', 'Semi-annually', 'Annually', 'Per milestone', 'Other'];
-const T8_CONTRACT_MONITORING_DAYS = 90;
 const T8_CONTRACT_MAX_UPLOAD_MB = 10;
 const T8_CONTRACT_PAGE_SIZE = 10;
 
@@ -339,28 +340,6 @@ function t8_contract_status_badge(string $status): string
     };
 }
 
-function t8_contract_is_monitoring(array $contract, int $withinDays = T8_CONTRACT_MONITORING_DAYS): bool
-{
-    if (t8_contract_normalize_status((string) ($contract['status'] ?? '')) !== 'active') {
-        return false;
-    }
-
-    $storedAlert = strtolower(trim((string) ($contract['expiration_alert'] ?? '')));
-    if (in_array($storedAlert, ['low', 'medium', 'high', 'critical'], true)) {
-        return true;
-    }
-
-    $horizon = strtotime('+' . $withinDays . ' days');
-    foreach (['end_date', 'renewal_date'] as $field) {
-        $date = $contract[$field] ?? null;
-        $timestamp = $date ? strtotime((string) $date) : false;
-        if ($timestamp !== false && $timestamp <= $horizon) {
-            return true;
-        }
-    }
-    return false;
-}
-
 function t8_contract_store_attachment(array $file): ?array
 {
     if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
@@ -464,7 +443,7 @@ function t8_contract_render_rows(array $contracts, bool $isAdmin, bool $isLegal,
             <td><?= e(format_date((string) $contract['start_date'], 'M d, Y')) ?><?= $contract['end_date'] ? ' — ' . e(format_date((string) $contract['end_date'], 'M d, Y')) : '' ?></td>
             <td><?= e((string) $contract['owner_name']) ?></td>
             <td><span class="t8-badge <?= e(t8_contract_status_badge($status)) ?>"><?= e(t8_contract_status_label($status)) ?></span>
-                <?php if ($monitoring): ?><span class="t8-badge-monitoring">Expiring Soon</span><?php endif; ?>
+                <?php if (t8_contract_is_open($contract)): ?><span class="t8-badge-monitoring t8-badge-open-contract">Open Contract</span><?php elseif ($monitoring): ?><span class="t8-badge-monitoring">Expiring Soon</span><?php endif; ?>
                 <?php if ($rejected): ?><span class="t8-badge t8-badge-rejected">Rejected</span><?php endif; ?>
             </td>
             <td class="t8-table-actions">
@@ -586,6 +565,29 @@ if ($action === 'workflow') {
     $workflow = (string) ($_POST['workflow_action'] ?? '');
     $comment = trim((string) ($_POST['comment'] ?? ''));
     $normalizedStatus = t8_contract_normalize_status((string) ($contract['status'] ?? ''));
+    if ($workflow === 'resend_signing_invites') {
+        if (!$contract || !$isAdmin
+            || !in_array($normalizedStatus, ['pending_signature', 'partially_signed'], true)) {
+            t8_flash_set('danger', 'Only an administrator can resend signing invitations while the contract is accepting signatures.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+        try {
+            $delivery = t8_contract_send_signing_invitations($pdo, $id, $currentUserId);
+            if ($delivery['failed'] !== []) {
+                t8_flash_set('danger', 'Signing links sent to ' . $delivery['sent'] . ' party/parties; delivery failed for: ' . implode(', ', $delivery['failed']) . '. Correct contact details or mail configuration, then retry.');
+            } elseif ($delivery['sent'] === 0 && $delivery['signed'] > 0) {
+                t8_flash_set('success', 'All involved parties have already signed this frozen version.');
+            } elseif ($delivery['sent'] === 0) {
+                t8_flash_set('danger', 'No unsigned parties could be sent a signing link.');
+            } else {
+                t8_flash_set('success', 'Signing links sent to ' . $delivery['sent'] . ' unsigned party/parties.');
+            }
+        } catch (Throwable $e) {
+            t8_gmail_diagnostic_log('Contract Signing Invitation Setup Failure', 'Contract #' . $id . ': ' . $e->getMessage());
+            t8_flash_set('danger', 'Signing invitations could not be prepared. Check the frozen contract version, party email addresses, HTTPS URL, and SMTP configuration.');
+        }
+        redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+    }
     if ($workflow === 'cancel') {
         if (!$isAdmin || t8_contract_workflow_transition_target($workflow, $normalizedStatus, $isAdmin) === null) {
             t8_flash_set('danger', 'That contract cancellation is not allowed.');
@@ -609,6 +611,7 @@ if ($action === 'workflow') {
         try {
             $pdo->beginTransaction();
             t8_contract_void_signatures_for_revision($pdo, $id);
+            t8_contract_revoke_signing_invites_for_revision($pdo, $id);
             $update = $pdo->prepare(
                 "UPDATE team8_contracts SET status = 'negotiation', signature_version_no = NULL, signature_document_hash = NULL
                  WHERE id = :id AND status IN ('pending_signature', 'partially_signed', 'fully_executed')"
@@ -699,35 +702,35 @@ if ($action === 'workflow') {
             t8_flash_set('danger', 'The proposed changes could not be saved.');
             redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
         }
-        t8_contract_event_log($pdo, $id, $currentUserId, 'NEGOTIATION_STARTED', $changeSummary, ['version_no' => $proposal['version_no']]);
-        t8_audit_log($pdo, $currentUserId, 'contract', $id, 'negotiation_proposed', (string) $contract['status'], (string) $contract['status']);
-        t8_flash_set('success', 'Proposed version ' . $proposal['version_no'] . ' was saved for review.');
-        redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
-    }
-    if ($workflow === 'accept_negotiation') {
-        if (!$isAdmin && !$isLegal) {
-            t8_flash_set('danger', 'Only an authorized internal reviewer may accept a proposed version.');
-            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
-        }
-        $proposalId = (int) ($_POST['proposal_id'] ?? 0);
-        if (!t8_contract_accept_negotiation($pdo, $id, $proposalId, $currentUserId)) {
-            t8_flash_set('danger', 'The proposed version could not be accepted.');
-            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
-        }
-        t8_contract_event_log($pdo, $id, $currentUserId, 'NEGOTIATION_ACCEPTED', 'Authorized internal reviewer accepted a proposed contract version.', ['proposal_id' => $proposalId]);
-        t8_audit_log($pdo, $currentUserId, 'contract', $id, 'negotiation_accepted', (string) $contract['status'], 'under_review');
+        t8_contract_event_log($pdo, $id, $currentUserId, 'NEGOTIATION_TERMS_PUBLISHED', $changeSummary, ['version_no' => $proposal['version_no']]);
+        t8_audit_log($pdo, $currentUserId, 'contract', $id, 'negotiation_terms_published', (string) $contract['status'], 'under_review');
         try {
             $inviteResult = t8_contract_send_involved_party_invites($pdo, $id, $currentUserId);
-            if ($inviteResult['failed'] !== []) {
-                t8_flash_set('danger', 'Revised terms were accepted internally, but invitations failed for: ' . implode(', ', $inviteResult['failed']) . '. The contract cannot be approved until every party reviews the latest version.');
+            if ($inviteResult['failed'] !== [] || $inviteResult['sent'] === 0) {
+                $sentDetail = $inviteResult['sent'] > 0
+                    ? $inviteResult['sent'] . ' linked ' . ($inviteResult['sent'] === 1 ? 'party received' : 'parties received') . ' an invitation.'
+                    : '';
+                $failureDetail = $inviteResult['failed'] !== []
+                    ? ' Invitations could not be sent to: ' . implode(', ', $inviteResult['failed']) . '.'
+                    : ' No linked parties could be invited.';
+                t8_flash_set(
+                    'danger',
+                    'Changes saved as current version ' . $proposal['version_no'] . ' and the contract is In Review, but not every party received a review invitation.'
+                    . ' ' . $sentDetail . $failureDetail . ' Use Resend review invitations after resolving the issue.'
+                );
             } elseif ($inviteResult['sent'] > 0) {
-                t8_flash_set('success', 'Revised terms were sent to ' . $inviteResult['sent'] . ' involved ' . ($inviteResult['sent'] === 1 ? 'party' : 'parties') . ' for fresh review.');
-            } else {
-                t8_flash_set('danger', 'Revised terms were accepted internally, but no involved parties could be invited. The contract cannot be approved until every party reviews the latest version.');
+                t8_flash_set(
+                    'success',
+                    'Changes saved — awaiting party review. Version ' . $proposal['version_no'] . ' is now current; review invitations were sent to '
+                    . $inviteResult['sent'] . ' linked ' . ($inviteResult['sent'] === 1 ? 'party' : 'parties') . '.'
+                );
             }
         } catch (Throwable $e) {
             t8_gmail_diagnostic_log('Revised Contract Review Invite Setup Failure', $e->getMessage());
-            t8_flash_set('danger', 'Revised terms were accepted internally, but new review invitations could not be prepared. The contract cannot be approved until every party reviews the latest version.');
+            t8_flash_set(
+                'danger',
+                'Changes were saved as current version ' . $proposal['version_no'] . ' and the contract is In Review, but review invitations could not be prepared. Use Resend review invitations after resolving the issue.'
+            );
         }
         redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
     }
@@ -803,6 +806,28 @@ if ($action === 'workflow') {
             }
             t8_flash_set('danger', 'The contract cannot be sent for signature because its latest saved version could not be frozen.');
             redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
+        try {
+            $delivery = t8_contract_send_signing_invitations($pdo, $id, $currentUserId);
+            if ($delivery['failed'] !== []) {
+                $signingFlash = [
+                    'type' => 'danger',
+                    'message' => 'The contract version was frozen. Signing invitations failed for: '
+                        . implode(', ', $delivery['failed']) . '. Correct contact details or mail configuration, then use Resend Signing Invitations.',
+                ];
+            } else {
+                $signingFlash = [
+                    'type' => 'success',
+                    'message' => 'The contract version was frozen and signing links were sent to '
+                        . $delivery['sent'] . ' involved party/parties.',
+                ];
+            }
+        } catch (Throwable $e) {
+            t8_gmail_diagnostic_log('Contract Signing Invitation Setup Failure', 'Contract #' . $id . ': ' . $e->getMessage());
+            $signingFlash = [
+                'type' => 'danger',
+                'message' => 'The contract version was frozen, but signing invitations could not be prepared. Check party contacts, HTTPS URL, and SMTP configuration; then retry from the contract.',
+            ];
         }
     } elseif ($workflow === 'fully_execute') {
         try {
@@ -907,7 +932,11 @@ if ($action === 'workflow') {
         $updated = t8_contract_fetch($pdo, $id);
         if ($updated) t8_contract_register_retention($pdo, $updated, $currentUserId);
     }
-    t8_flash_set('success', 'Contract status updated to ' . t8_contract_status_label($newStatus) . '.');
+    if ($workflow === 'sign' && isset($signingFlash)) {
+        t8_flash_set($signingFlash['type'], $signingFlash['message']);
+    } else {
+        t8_flash_set('success', 'Contract status updated to ' . t8_contract_status_label($newStatus) . '.');
+    }
     redirect($workflow === 'revert_to_draft'
         ? page_url('contracts', ['action' => 'edit', 'id' => $id])
         : page_url('contracts', ['action' => 'view', 'id' => $id]));
@@ -1260,6 +1289,27 @@ if (in_array($action, ['review', 'view'], true)) {
     $viewParties = $partyStmt->fetchAll(PDO::FETCH_ASSOC);
     $viewPartyReviews = t8_contract_get_party_review_statuses($pdo, $viewId);
     $viewPartiesAccepted = t8_contract_parties_have_accepted_latest_review($pdo, $viewId);
+    $viewLatestPublishedRevision = null;
+    if (t8_contract_normalize_status((string) $viewContract['status']) === 'under_review') {
+        $latestRevisionStmt = $pdo->prepare(
+            "SELECT n.version_no, n.change_summary, n.created_at
+             FROM team8_contract_negotiations n
+             WHERE n.contract_id = :contract_id AND n.source = 'internal' AND n.status = 'accepted'
+               AND n.version_no = (
+                   SELECT MAX(h.version_no)
+                   FROM team8_contract_history h
+                   WHERE h.contract_id = n.contract_id
+               )
+             ORDER BY n.created_at DESC
+             LIMIT 1"
+        );
+        $latestRevisionStmt->execute(['contract_id' => $viewId]);
+        $viewLatestPublishedRevision = $latestRevisionStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+    $viewSigningStatuses = [];
+    if (in_array(t8_contract_normalize_status((string) $viewContract['status']), ['pending_signature', 'partially_signed', 'fully_executed'], true)) {
+        $viewSigningStatuses = t8_contract_signing_party_statuses($pdo, $viewId);
+    }
 }
 
 if ($action === 'review' || $action === 'view') {
@@ -1269,22 +1319,51 @@ if ($action === 'review' || $action === 'view') {
     if ($currentStageIndex === false) {
         $currentStageIndex = 0;
     }
+    $canResendReviewInvites = $canManage && $normalizedStatus === 'under_review';
+    $canCancelContract = $isAdmin && in_array($normalizedStatus, ['draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature', 'partially_signed', 'fully_executed'], true);
     ?>
     <div class="t8-card" style="padding: 24px; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-        <a class="t8-btn t8-btn-outline" href="<?= e(page_url('contracts')) ?>" style="margin-bottom: 16px;"><i class="fa-solid fa-arrow-left"></i> Back to Registry</a>
+        <div class="t8-contract-view-toolbar">
+            <a class="t8-btn t8-btn-outline" href="<?= e(page_url('contracts')) ?>"><i class="fa-solid fa-arrow-left"></i> Back to Registry</a>
+            <?php if ($canResendReviewInvites || $canCancelContract): ?>
+                <div class="t8-contract-view-actions">
+                    <div class="t8-meatball-wrap">
+                        <button type="button" class="t8-btn t8-btn-outline t8-btn-sm t8-meatball-btn" aria-label="More contract actions" aria-haspopup="true" aria-expanded="false" title="More actions">
+                            <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
+                        </button>
+                        <div class="t8-meatball-menu" role="menu" hidden>
+                            <ul>
+                                <?php if ($canResendReviewInvites): ?>
+                                    <li>
+                                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'send_invites'])) ?>">
+                                            <?= t8_csrf_field() ?>
+                                            <input type="hidden" name="id" value="<?= $viewId ?>">
+                                            <button class="t8-row-menu-item" type="submit" role="menuitem"><i class="fa-solid fa-envelope" aria-hidden="true"></i>Resend review invitations</button>
+                                        </form>
+                                    </li>
+                                <?php endif; ?>
+                                <?php if ($canCancelContract): ?>
+                                    <li>
+                                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" onsubmit="return confirm('Cancel this contract? This action cannot be undone.')">
+                                            <?= t8_csrf_field() ?>
+                                            <input type="hidden" name="id" value="<?= $viewId ?>">
+                                            <input type="hidden" name="workflow_action" value="cancel">
+                                            <button class="t8-row-menu-item t8-danger" type="submit" role="menuitem"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>Cancel contract</button>
+                                        </form>
+                                    </li>
+                                <?php endif; ?>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+        </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+        <div class="t8-contract-view-header">
             <div>
                 <h1 style="margin: 0 0 8px 0;"><?= e((string) $viewContract['title']) ?></h1>
                 <p class="t8-help-text" style="margin: 0;"><?= e((string) $viewContract['contract_number']) ?> · <?= e((string) ($viewContract['contract_type'] ?? '—')) ?></p>
             </div>
-            <?php if ($canManage && t8_contract_normalize_status((string) $viewContract['status']) === 'under_review'): ?>
-                <form method="post" action="<?= e(page_url('contracts', ['action' => 'send_invites'])) ?>">
-                    <?= t8_csrf_field() ?>
-                    <input type="hidden" name="id" value="<?= $viewId ?>">
-                    <button class="t8-btn t8-btn-outline" type="submit">Resend review invitations</button>
-                </form>
-            <?php endif; ?>
         </div>
 
         <div class="t8-lifecycle" aria-label="Contract life cycle">
@@ -1308,12 +1387,18 @@ if ($action === 'review' || $action === 'view') {
         </div>
 
         <section class="t8-tab-panel" data-panel="overview" role="tabpanel">
+            <?php if ($viewLatestPublishedRevision !== null): ?>
+                <div class="t8-revision-saved-notice" role="status">
+                    <strong>Changes saved — awaiting party review</strong>
+                    <span>Version <?= (int) $viewLatestPublishedRevision['version_no'] ?> is current. <?= e((string) $viewLatestPublishedRevision['change_summary']) ?></span>
+                </div>
+            <?php endif; ?>
             <div class="t8-detail-grid">
                 <div class="t8-detail-item">
                     <span class="t8-detail-label">Status</span>
                     <span class="t8-detail-value">
                         <span class="t8-badge <?= e(t8_contract_status_badge((string) $viewContract['status'])) ?>"><?= e(t8_contract_status_label((string) $viewContract['status'])) ?></span>
-                        <?= t8_contract_is_monitoring($viewContract) ? ' <span class="t8-badge-monitoring">Expiring Soon</span>' : '' ?>
+                        <?php if (t8_contract_is_open($viewContract)): ?> <span class="t8-badge-monitoring t8-badge-open-contract">Open Contract</span><?php elseif (t8_contract_is_monitoring($viewContract)): ?> <span class="t8-badge-monitoring">Expiring Soon</span><?php endif; ?>
                     </span>
                 </div>
                 <div class="t8-detail-item">
@@ -1359,27 +1444,64 @@ if ($action === 'review' || $action === 'view') {
             </div>
 
             <?php if ($canManage && t8_contract_normalize_status((string) $viewContract['status']) === 'negotiation'): ?>
-                <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin-top:24px;padding:16px;border:1px solid #e6dada;border-radius:8px;">
-                    <h3 style="margin-top:0;">Prepare revised terms</h3>
-                    <p class="t8-help-text">Review the external negotiation requests above and propose revised terms for internal review. Accepting the proposal will send the revised version to every involved party for fresh acceptance.</p>
-                    <?= t8_csrf_field() ?>
-                    <input type="hidden" name="id" value="<?= $viewId ?>">
-                    <input type="hidden" name="workflow_action" value="propose_changes">
-                    <label class="t8-form-label" for="change-summary">Summary of proposed changes</label>
-                    <textarea id="change-summary" name="change_summary" required maxlength="1000" rows="3" style="display:block;width:100%;margin:.4rem 0 1rem;"></textarea>
-                    <div class="t8-form-grid">
-                        <label>Contract title<input name="title" value="<?= e((string) $viewContract['title']) ?>" required></label>
-                        <label>Description<textarea name="description" rows="3"><?= e((string) ($viewContract['description'] ?? '')) ?></textarea></label>
-                        <label>Amount<input name="amount" type="number" min="0" step="0.01" value="<?= e((string) ($viewContract['amount'] ?? '')) ?>"></label>
-                        <label>Currency<select name="currency"><?php foreach (T8_CONTRACT_CURRENCIES as $currency): ?><option value="<?= e($currency) ?>" <?= (string) ($viewContract['currency'] ?? 'PHP') === $currency ? 'selected' : '' ?>><?= e($currency) ?></option><?php endforeach; ?></select></label>
-                        <label>Payment terms<textarea name="payment_terms" rows="3"><?= e((string) ($viewContract['payment_terms'] ?? '')) ?></textarea></label>
-                        <label>Payment frequency<select name="payment_frequency"><option value="">Not specified</option><?php foreach (T8_CONTRACT_PAYMENT_FREQUENCIES as $frequency): ?><option value="<?= e($frequency) ?>" <?= (string) ($viewContract['payment_frequency'] ?? '') === $frequency ? 'selected' : '' ?>><?= e($frequency) ?></option><?php endforeach; ?></select></label>
-                        <label>Deposit amount<input name="deposit_amount" type="number" min="0" step="0.01" value="<?= e((string) ($viewContract['deposit_amount'] ?? '')) ?>"></label>
-                        <label>Additional financial notes<textarea name="financial_notes" rows="3"><?= e((string) ($viewContract['financial_notes'] ?? '')) ?></textarea></label>
-                        <label>Notice period (days)<input name="notice_period_days" type="number" min="0" value="<?= e((string) ($viewContract['notice_period_days'] ?? '')) ?>"></label>
-                    </div>
-                    <button class="t8-btn t8-btn-accent" type="submit" style="margin-top:12px;">Save proposed terms</button>
-                </form>
+                <?php
+                $partyFeedbackRequests = array_values(array_filter(
+                    $viewPartyReviews,
+                    static fn (array $review): bool => !empty($review['response_feedback']) || !empty($review['meeting_details'])
+                ));
+                ?>
+                <?php if ($partyFeedbackRequests !== []): ?>
+                    <section class="t8-external-request-card" aria-labelledby="external-request-heading">
+                        <h3 id="external-request-heading">External request</h3>
+                        <p class="t8-help-text">Read what each party asked for, then choose how to respond.</p>
+                        <div class="t8-party-feedback-list">
+                            <?php foreach ($partyFeedbackRequests as $partyReview): ?>
+                                <article class="t8-party-feedback-item">
+                                    <div class="t8-party-feedback-heading">
+                                        <strong><?= e((string) $partyReview['party_name']) ?></strong>
+                                        <span class="t8-badge"><?= e(ucfirst(str_replace('_', ' ', (string) ($partyReview['status'] ?? 'not invited')))) ?></span>
+                                    </div>
+                                    <?php if (!empty($partyReview['response_feedback'])): ?>
+                                        <blockquote><?= nl2br(e((string) $partyReview['response_feedback'])) ?></blockquote>
+                                    <?php endif; ?>
+                                    <?php if (!empty($partyReview['meeting_details'])): ?>
+                                        <p class="t8-party-meeting-request"><strong>Meeting requested:</strong> <?= nl2br(e((string) $partyReview['meeting_details'])) ?></p>
+                                    <?php endif; ?>
+                                    <small class="t8-party-request-meta">
+                                        Requested by: <?= e((string) $partyReview['party_name']) ?>
+                                        <?php if (!empty($partyReview['invited_at'])): ?>
+                                            · <?= e(format_date((string) $partyReview['invited_at'], 'M d, Y g:i A')) ?>
+                                        <?php endif; ?>
+                                    </small>
+                                </article>
+                            <?php endforeach; ?>
+                        </div>
+                    </section>
+                <?php endif; ?>
+                <details class="t8-proposal-editor">
+                    <summary class="t8-btn t8-btn-accent">Respond with revised terms</summary>
+                    <form class="t8-contract-proposal-form" method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                        <h3>Prepare revised terms</h3>
+                        <p class="t8-help-text">Saving publishes these terms as the current version and automatically sends every linked party a fresh review invitation.</p>
+                        <?= t8_csrf_field() ?>
+                        <input type="hidden" name="id" value="<?= $viewId ?>">
+                        <input type="hidden" name="workflow_action" value="propose_changes">
+                        <label class="t8-form-label" for="change-summary">Summary of proposed changes</label>
+                        <textarea id="change-summary" name="change_summary" required maxlength="1000" rows="3"></textarea>
+                        <div class="t8-form-grid">
+                            <label>Contract title<input name="title" value="<?= e((string) $viewContract['title']) ?>" required></label>
+                            <label>Description<textarea name="description" rows="3"><?= e((string) ($viewContract['description'] ?? '')) ?></textarea></label>
+                            <label>Amount<input name="amount" type="number" min="0" step="0.01" value="<?= e((string) ($viewContract['amount'] ?? '')) ?>"></label>
+                            <label>Currency<select name="currency"><?php foreach (T8_CONTRACT_CURRENCIES as $currency): ?><option value="<?= e($currency) ?>" <?= (string) ($viewContract['currency'] ?? 'PHP') === $currency ? 'selected' : '' ?>><?= e($currency) ?></option><?php endforeach; ?></select></label>
+                            <label>Payment terms<textarea name="payment_terms" rows="3"><?= e((string) ($viewContract['payment_terms'] ?? '')) ?></textarea></label>
+                            <label>Payment frequency<select name="payment_frequency"><option value="">Not specified</option><?php foreach (T8_CONTRACT_PAYMENT_FREQUENCIES as $frequency): ?><option value="<?= e($frequency) ?>" <?= (string) ($viewContract['payment_frequency'] ?? '') === $frequency ? 'selected' : '' ?>><?= e($frequency) ?></option><?php endforeach; ?></select></label>
+                            <label>Deposit amount<input name="deposit_amount" type="number" min="0" step="0.01" value="<?= e((string) ($viewContract['deposit_amount'] ?? '')) ?>"></label>
+                            <label>Additional financial notes<textarea name="financial_notes" rows="3"><?= e((string) ($viewContract['financial_notes'] ?? '')) ?></textarea></label>
+                            <label>Notice period (days)<input name="notice_period_days" type="number" min="0" value="<?= e((string) ($viewContract['notice_period_days'] ?? '')) ?>"></label>
+                        </div>
+                        <button class="t8-btn t8-btn-accent" type="submit">Save changes and send for review</button>
+                    </form>
+                </details>
             <?php endif; ?>
 
             <?php if ($canManage): ?>
@@ -1404,7 +1526,7 @@ if ($action === 'review' || $action === 'view') {
                             <p class="t8-help-text" style="flex-basis:100%;">Contracting approval is locked until every involved party accepts the latest circulated version.</p>
                         <?php endif; ?>
                         <?php if ($canManage): ?>
-                            <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 12px 0 0;">
+                            <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
                                 <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="revert_to_draft">
                                 <button class="t8-btn t8-btn-outline" type="submit">Back to Edit (Revert to Draft)</button>
                             </form>
@@ -1419,29 +1541,96 @@ if ($action === 'review' || $action === 'view') {
                     <?php endif; ?>
 
                     <?php if ($isAdmin && in_array(t8_contract_normalize_status((string) $viewContract['status']), ['pending_signature', 'partially_signed'], true)): ?>
-                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
-                            <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="fully_execute">
-                            <button class="t8-btn t8-btn-success">Complete Execution</button>
-                        </form>
+                        <?php
+                        $signedPartyCount = count(array_filter($viewSigningStatuses, static fn (array $party): bool => $party['signing_status'] === 'signed'));
+                        $totalSigningParties = count($viewSigningStatuses);
+                        $allPartiesSigned = $totalSigningParties > 0 && $signedPartyCount === $totalSigningParties;
+                        $pendingSignatureCount = $totalSigningParties - $signedPartyCount;
+                        $frozenDocumentHash = (string) ($viewContract['signature_document_hash'] ?? '');
+                        ?>
+                        <section class="t8-signature-actions" aria-label="Signature execution actions">
+                            <div class="t8-signature-primary" role="status">
+                                <p class="t8-signature-primary-text">
+                                    <?php if ($allPartiesSigned): ?>
+                                        <strong>Ready to execute.</strong> All parties have signed.
+                                    <?php else: ?>
+                                        <strong>Not ready to execute.</strong>
+                                        Waiting on <?= $pendingSignatureCount ?> of <?= $totalSigningParties ?> signature<?= $totalSigningParties === 1 ? '' : 's' ?>.
+                                    <?php endif; ?>
+                                </p>
+                                <div class="t8-signature-primary-buttons">
+                                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                                        <?= t8_csrf_field() ?>
+                                        <input type="hidden" name="id" value="<?= $viewId ?>">
+                                        <input type="hidden" name="workflow_action" value="resend_signing_invites">
+                                        <button class="t8-btn t8-btn-outline" type="submit">Resend Signing Invitations</button>
+                                    </form>
+                                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                                        <?= t8_csrf_field() ?>
+                                        <input type="hidden" name="id" value="<?= $viewId ?>">
+                                        <input type="hidden" name="workflow_action" value="fully_execute">
+                                        <button class="t8-btn t8-btn-success" type="submit" <?= $allPartiesSigned ? '' : 'disabled title="All parties must sign first"' ?>>Complete Execution</button>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <details class="t8-signature-escape">
+                                <summary>Activate without recorded execution</summary>
+                                <div class="t8-signature-escape-body">
+                                    <p class="t8-signature-escape-hint">Admin-only override. This logs an <code>ACTIVATED_WITHOUT_EXECUTION</code> audit event and requires a written reason. Signatures remain outstanding.</p>
+                                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                                        <?= t8_csrf_field() ?>
+                                        <input type="hidden" name="id" value="<?= $viewId ?>">
+                                        <input type="hidden" name="workflow_action" value="activate">
+                                        <label class="t8-signature-sr-only" for="activation-reason">Reason for activating without recorded execution (required)</label>
+                                        <input class="t8-signature-escape-input" id="activation-reason" name="comment" required maxlength="1000" placeholder="Reason for activating without recorded execution (required)">
+                                        <button class="t8-btn t8-btn-danger" type="submit">Mark Active</button>
+                                    </form>
+                                </div>
+                            </details>
+
+                            <details class="t8-signature-escape">
+                                <summary>Reopen for revision</summary>
+                                <div class="t8-signature-escape-body">
+                                    <p class="t8-signature-escape-hint">Voids all existing signatures for this version and returns the contract to negotiation. A new version must be frozen before signing resumes.</p>
+                                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>">
+                                        <?= t8_csrf_field() ?>
+                                        <input type="hidden" name="id" value="<?= $viewId ?>">
+                                        <input type="hidden" name="workflow_action" value="reopen_for_revision">
+                                        <label class="t8-signature-sr-only" for="revision-reason">Optional revision reason</label>
+                                        <input class="t8-signature-escape-input" id="revision-reason" name="comment" maxlength="1000" placeholder="Optional revision reason">
+                                        <button class="t8-btn t8-btn-outline" type="submit">Reopen for Revision</button>
+                                    </form>
+                                </div>
+                            </details>
+
+                            <div class="t8-signature-audit-strip">
+                                <span>Frozen version:</span>
+                                <code>v<?= (int) ($viewContract['signature_version_no'] ?? 0) ?></code>
+                                <span aria-hidden="true">·</span>
+                                <span>Document hash:</span>
+                                <?php if ($frozenDocumentHash !== ''): ?>
+                                    <code title="<?= e($frozenDocumentHash) ?>"><?= e(substr($frozenDocumentHash, 0, 4)) ?>&hellip;<?= e(substr($frozenDocumentHash, -4)) ?></code>
+                                <?php else: ?>
+                                    <code>Unavailable</code>
+                                <?php endif; ?>
+                            </div>
+                        </section>
                     <?php endif; ?>
 
-                    <?php if ($isAdmin && in_array(t8_contract_normalize_status((string) $viewContract['status']), ['pending_signature', 'partially_signed', 'fully_executed'], true)): ?>
+                    <?php if ($isAdmin && t8_contract_normalize_status((string) $viewContract['status']) === 'fully_executed'): ?>
                         <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
                             <?= t8_csrf_field() ?>
                             <input type="hidden" name="id" value="<?= $viewId ?>">
                             <input type="hidden" name="workflow_action" value="activate">
-                            <?php if (in_array(t8_contract_normalize_status((string) $viewContract['status']), ['pending_signature', 'partially_signed'], true)): ?>
-                                <label class="t8-form-label" for="activation-reason">Reason for activating without recorded execution</label>
-                                <input id="activation-reason" name="comment" required maxlength="1000" placeholder="Required override reason">
-                            <?php endif; ?>
                             <button class="t8-btn t8-btn-success">Mark Active</button>
                         </form>
                         <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
                             <?= t8_csrf_field() ?>
                             <input type="hidden" name="id" value="<?= $viewId ?>">
                             <input type="hidden" name="workflow_action" value="reopen_for_revision">
-                            <label class="t8-form-label" for="revision-reason">Reason for reopening</label>
-                            <input id="revision-reason" name="comment" maxlength="1000" placeholder="Optional revision reason">
+                            <label class="t8-form-label" for="revision-reason-executed">Reason for reopening</label>
+                            <input id="revision-reason-executed" name="comment" maxlength="1000" placeholder="Optional revision reason">
                             <button class="t8-btn t8-btn-outline">Reopen for Revision</button>
                         </form>
                     <?php endif; ?>
@@ -1460,12 +1649,6 @@ if ($action === 'review' || $action === 'view') {
                             <button class="t8-btn t8-btn-danger">Terminate</button>
                         </form>
                     <?php endif; ?>
-                    <?php if ($isAdmin && in_array(t8_contract_normalize_status((string) $viewContract['status']), ['draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature', 'partially_signed', 'fully_executed'], true)): ?>
-                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
-                            <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="cancel">
-                            <button class="t8-btn t8-btn-danger">Cancel</button>
-                        </form>
-                    <?php endif; ?>
                 </div>
             <?php endif; ?>
         </section>
@@ -1475,7 +1658,7 @@ if ($action === 'review' || $action === 'view') {
                 <p class="t8-empty">No parties attached.</p>
             <?php else: ?>
                 <table class="t8-table">
-                    <thead><tr><th>Name</th><th>Type</th><th>Role</th><th>Contact</th><th>Latest Review</th><th>Party Feedback</th></tr></thead>
+                    <thead><tr><th>Name</th><th>Type</th><th>Role</th><th>Contact</th><th>Latest Review</th><th>Signing</th><th>Party Feedback</th></tr></thead>
                     <tbody>
                         <?php foreach ($viewParties as $party): ?>
                             <?php
@@ -1486,6 +1669,13 @@ if ($action === 'review' || $action === 'view') {
                                     break;
                                 }
                             }
+                            $signingStatus = '—';
+                            foreach ($viewSigningStatuses as $signingParty) {
+                                if ((int) $signingParty['party_id'] === (int) $party['party_id']) {
+                                    $signingStatus = str_replace('_', ' ', (string) $signingParty['signing_status']);
+                                    break;
+                                }
+                            }
                             ?>
                             <tr>
                                 <td><?= e((string) $party['party_name']) ?></td>
@@ -1493,6 +1683,7 @@ if ($action === 'review' || $action === 'view') {
                                 <td><?= e((string) $party['role_in_contract']) ?></td>
                                 <td><?= e((string) ($party['primary_contact'] ?? $party['contact_email'] ?? '—')) ?></td>
                                 <td><?= e(ucfirst(str_replace('_', ' ', (string) ($partyReview['status'] ?? 'not invited')))) ?></td>
+                                <td><?= e(ucfirst($signingStatus)) ?></td>
                                 <td>
                                     <?= !empty($partyReview['response_feedback']) ? nl2br(e((string) $partyReview['response_feedback'])) : '—' ?>
                                     <?php if (!empty($partyReview['meeting_details'])): ?>
@@ -1562,17 +1753,7 @@ if ($action === 'review' || $action === 'view') {
                             <?php if (!empty($proposal['external_meeting_details'])): ?>
                                 <tr><td colspan="5"><strong>Meeting request:</strong> <?= nl2br(e((string) $proposal['external_meeting_details'])) ?></td></tr>
                             <?php endif; ?>
-                            <?php if ($canManage && $proposal['status'] === 'pending' && $proposal['source'] === 'internal'): ?>
-                                <tr>
-                                    <td colspan="5">
-                                        <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                                            <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="accept_negotiation"><input type="hidden" name="proposal_id" value="<?= (int) $proposal['id'] ?>">
-                                            <button class="t8-btn t8-btn-success t8-btn-sm">Accept Proposed Version</button>
-                                            <span class="t8-help-text">The contract remains in review until internal approval.</span>
-                                        </form>
-                                    </td>
-                                </tr>
-                            <?php elseif ($canManage && $proposal['status'] === 'pending' && $proposal['source'] === 'external'): ?>
+                            <?php if ($canManage && $proposal['status'] === 'pending' && $proposal['source'] === 'external'): ?>
                                 <tr><td colspan="5" class="t8-help-text">External request recorded. Prepare revised terms above; party requests are not applied directly to the contract.</td></tr>
                             <?php endif; ?>
                         <?php endforeach; ?>

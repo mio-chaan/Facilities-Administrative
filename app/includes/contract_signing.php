@@ -6,7 +6,9 @@ if (!function_exists('t8_contract_signature_table_name')) {
     function t8_contract_signature_table_name(PDO $pdo): string
     {
         $pdo->query(
-            'SELECT signature_version_no, document_hash, signature_hash, voided_at, voided_reason, ip_address, user_agent
+            'SELECT signature_version_no, document_hash, signature_hash, signature_method, drawn_signature_path,
+                    drawn_signature_hash, consented_at, consent_text,
+                    voided_at, voided_reason, ip_address, user_agent
              FROM team8_contract_signatures LIMIT 0'
         );
         return 'team8_contract_signatures';
@@ -100,16 +102,33 @@ if (!function_exists('t8_contract_signature_digest')) {
         string $documentHash,
         string $signedAt,
         string $signerName,
-        string $signerEmail
+        string $signerEmail,
+        ?string $signatureMethod = null,
+        ?string $consentedAt = null,
+        ?string $consentText = null,
+        ?string $drawnSignatureHash = null
     ): string {
-        $payload = json_encode([
+        $payload = [
             'contract_id' => $contractId,
             'party_id' => $partyId,
             'document_hash' => $documentHash,
             'signed_at' => $signedAt,
             'signer_name' => trim($signerName),
             'signer_email' => strtolower(trim($signerEmail)),
-        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        ];
+        if ($signatureMethod !== null) {
+            $payload['signature_method'] = $signatureMethod;
+        }
+        if ($consentedAt !== null) {
+            $payload['consented_at'] = $consentedAt;
+        }
+        if ($consentText !== null) {
+            $payload['consent_text'] = $consentText;
+        }
+        if ($drawnSignatureHash !== null) {
+            $payload['drawn_signature_hash'] = $drawnSignatureHash;
+        }
+        $payload = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 
         return hash('sha256', $payload);
     }
@@ -133,9 +152,40 @@ if (!function_exists('t8_contract_signature_is_valid')) {
             (string) $document['document_hash'],
             $signedAt,
             $signerName,
-            $signerEmail
+            $signerEmail,
+            isset($signature['signature_method']) && $signature['signature_method'] !== ''
+                ? (string) $signature['signature_method']
+                : null,
+            isset($signature['consented_at']) && $signature['consented_at'] !== ''
+                ? (string) $signature['consented_at']
+                : null,
+            isset($signature['consent_text']) && $signature['consent_text'] !== ''
+                ? (string) $signature['consent_text']
+                : null,
+            isset($signature['drawn_signature_hash']) && $signature['drawn_signature_hash'] !== ''
+                ? (string) $signature['drawn_signature_hash']
+                : null
         );
-        return hash_equals($expectedDigest, (string) ($signature['signature_hash'] ?? ''));
+        if (!hash_equals($expectedDigest, (string) ($signature['signature_hash'] ?? ''))) {
+            return false;
+        }
+        $method = (string) ($signature['signature_method'] ?? '');
+        if (str_starts_with($method, 'drawn_')) {
+            $relativePath = (string) ($signature['drawn_signature_path'] ?? '');
+            $expectedFileHash = (string) ($signature['drawn_signature_hash'] ?? '');
+            $storageRoot = defined('T8_SIGNATURE_STORAGE_DIR') ? (string) T8_SIGNATURE_STORAGE_DIR : '';
+            if (preg_match('/^[a-f0-9]{64}\.svg$/', $relativePath) !== 1
+                || preg_match('/^[a-f0-9]{64}$/', $expectedFileHash) !== 1
+                || $storageRoot === '') {
+                return false;
+            }
+            $filePath = rtrim($storageRoot, '/\\') . DIRECTORY_SEPARATOR . $relativePath;
+            $actualFileHash = is_file($filePath) ? hash_file('sha256', $filePath) : false;
+            if (!is_string($actualFileHash) || !hash_equals($expectedFileHash, $actualFileHash)) {
+                return false;
+            }
+        }
+        return true;
     }
 }
 
@@ -156,7 +206,9 @@ if (!function_exists('t8_contract_all_parties_signed')) {
         }
 
         $signatureStmt = $pdo->prepare(
-            "SELECT signature_version_no, document_hash, signature_hash, signer_name, signer_email, signed_at, status
+            "SELECT signature_version_no, document_hash, signature_hash, signature_method, drawn_signature_path,
+                    drawn_signature_hash, consented_at, consent_text,
+                    signer_name, signer_email, signed_at, status
              FROM team8_contract_signatures
              WHERE contract_id = :contract_id AND party_id = :party_id AND voided_at IS NULL
                AND signature_version_no = :version_no
@@ -235,22 +287,36 @@ if (!function_exists('t8_contract_refresh_signature_status')) {
         }
 
         $document = t8_contract_frozen_document($pdo, $contractId);
-        if (t8_contract_all_parties_signed($pdo, $contractId)) {
-            return 'fully_executed';
-        }
         $signedStmt = $pdo->prepare(
-            "SELECT COUNT(*) FROM team8_contract_signatures
+            "SELECT DISTINCT party_id FROM team8_contract_signatures
              WHERE contract_id = :contract_id AND voided_at IS NULL
                AND signature_version_no = :version_no
                AND LOWER(status) IN ('signed', 'complete', 'approved')"
         );
         $signedStmt->execute(['contract_id' => $contractId, 'version_no' => $document['version_no']]);
-        $signedCount = (int) $signedStmt->fetchColumn();
-
-        if ($signedCount === 0) {
-            return 'pending_signature';
+        $signedPartyIds = array_map('intval', $signedStmt->fetchAll(PDO::FETCH_COLUMN));
+        foreach ($signedPartyIds as $partyId) {
+            $signatureStmt = $pdo->prepare(
+                "SELECT signature_version_no, document_hash, signature_hash, signature_method, drawn_signature_path,
+                        drawn_signature_hash, consented_at, consent_text,
+                        signer_name, signer_email, signed_at, status
+                 FROM team8_contract_signatures
+                 WHERE contract_id = :contract_id AND party_id = :party_id AND voided_at IS NULL
+                   AND signature_version_no = :version_no
+                   AND LOWER(status) IN ('signed', 'complete', 'approved')
+                 ORDER BY id DESC LIMIT 1"
+            );
+            $signatureStmt->execute([
+                'contract_id' => $contractId,
+                'party_id' => $partyId,
+                'version_no' => $document['version_no'],
+            ]);
+            $signature = $signatureStmt->fetch(PDO::FETCH_ASSOC);
+            if ($signature && t8_contract_signature_is_valid($signature, $contractId, $partyId, $document)) {
+                return 'partially_signed';
+            }
         }
-        return 'partially_signed';
+        return 'pending_signature';
     }
 }
 
@@ -261,7 +327,7 @@ if (!function_exists('t8_contract_register_signature')) {
         int $partyId,
         string $signerName,
         string $signerEmail,
-        string $status = 'signed',
+        string $status = 'pending',
         ?string $signedAt = null,
         ?string $ipAddress = null,
         ?string $userAgent = null
@@ -276,6 +342,9 @@ if (!function_exists('t8_contract_register_signature')) {
         }
         if (!in_array($status, ['pending', 'signed', 'complete', 'approved'], true)) {
             throw new InvalidArgumentException('Only pending or completed party signatures can be recorded.');
+        }
+        if ($status !== 'pending') {
+            throw new LogicException('Completed signatures must be submitted through the token and OTP verified signing flow.');
         }
 
         t8_contract_signature_table_name($pdo);
@@ -292,7 +361,7 @@ if (!function_exists('t8_contract_register_signature')) {
             $contractStmt = $pdo->prepare($lockSql);
             $contractStmt->execute(['id' => $contractId]);
             $contract = $contractStmt->fetch(PDO::FETCH_ASSOC);
-            if (!$contract || $contract['status'] !== 'pending_signature') {
+            if (!$contract || !in_array($contract['status'], ['pending_signature', 'partially_signed'], true)) {
                 throw new RuntimeException('Signatures can only be recorded while the contract is pending signature.');
             }
 
@@ -304,12 +373,8 @@ if (!function_exists('t8_contract_register_signature')) {
                 throw new RuntimeException('The signer is not an involved party on this contract.');
             }
             $document = t8_contract_frozen_document($pdo, $contractId);
-            $signedAtValue = in_array($status, ['signed', 'complete', 'approved'], true)
-                ? ($signedAt ?: date('Y-m-d H:i:s'))
-                : null;
-            $signatureHash = $signedAtValue === null
-                ? null
-                : t8_contract_signature_digest($contractId, $partyId, $document['document_hash'], $signedAtValue, $signerName, $signerEmail);
+            $signedAtValue = null;
+            $signatureHash = null;
 
             $existingStmt = $pdo->prepare(
                 'SELECT id, status FROM team8_contract_signatures

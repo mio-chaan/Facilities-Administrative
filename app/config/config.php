@@ -31,6 +31,12 @@ if (!defined('GMAIL_SMTP_USER')) {
 if (!defined('GMAIL_SMTP_APP_PASSWORD')) {
     define('GMAIL_SMTP_APP_PASSWORD', getenv('GMAIL_SMTP_APP_PASSWORD') ?: ($_ENV['GMAIL_SMTP_APP_PASSWORD'] ?? ($GMAIL_SMTP_APP_PASSWORD_LOCAL ?? '')));
 }
+if (!defined('T8_SIGNING_OTP_PEPPER')) {
+    define('T8_SIGNING_OTP_PEPPER', getenv('T8_SIGNING_OTP_PEPPER') ?: ($_ENV['T8_SIGNING_OTP_PEPPER'] ?? ($T8_SIGNING_OTP_PEPPER_LOCAL ?? '')));
+}
+if (!defined('T8_SIGNATURE_STORAGE_DIR')) {
+    define('T8_SIGNATURE_STORAGE_DIR', getenv('T8_SIGNATURE_STORAGE_DIR') ?: ($_ENV['T8_SIGNATURE_STORAGE_DIR'] ?? ($T8_SIGNATURE_STORAGE_DIR_LOCAL ?? '')));
+}
 define('UPLOAD_MAX_SIZE_MB', 10);
 define('MANDATORY_COMPLIANCE_DOCUMENTS', [
     'Sanitary Permit' => ['Sanitary Permit'],

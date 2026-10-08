@@ -67,17 +67,46 @@ function t8_contract_create_negotiation(
 
         $versionData = $contract;
         unset($versionData['id'], $versionData['status'], $versionData['created_at'], $versionData['updated_at'], $versionData['deleted_at']);
+        $updateData = [];
         foreach ($sanitizedData as $field => $value) {
             if ($field === 'amount' || $field === 'deposit_amount') {
-                $versionData[$field] = $value === '' || $value === null ? null : (float) $value;
+                $normalizedValue = $value === '' || $value === null ? null : (float) $value;
             } elseif ($field === 'department_id' || $field === 'notice_period_days' || $field === 'renewed_from_id') {
-                $versionData[$field] = $value === '' || $value === null ? null : (int) $value;
+                $normalizedValue = $value === '' || $value === null ? null : (int) $value;
             } else {
-                $versionData[$field] = $value === '' ? null : $value;
+                $normalizedValue = $value === '' ? null : $value;
             }
+            $versionData[$field] = $normalizedValue;
+            $updateData[$field] = $normalizedValue;
         }
 
         $versionJson = json_encode($versionData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $setClause = implode(', ', array_map(
+            static fn (string $field): string => $field . ' = :' . $field,
+            array_keys($updateData)
+        ));
+        $updateData['contract_status'] = 'under_review';
+        $updateData['updated_at'] = date('Y-m-d H:i:s');
+        $updateData['id'] = $contractId;
+        $updateStmt = $pdo->prepare(
+            'UPDATE team8_contracts SET ' . $setClause . ', status = :contract_status, updated_at = :updated_at WHERE id = :id AND status IN (\'under_review\', \'negotiation\')'
+        );
+        $updateStmt->execute($updateData);
+        if ($updateStmt->rowCount() !== 1) {
+            throw new RuntimeException('Contract status changed while saving revised terms.');
+        }
+
+        $pdo->prepare(
+            "UPDATE team8_contract_negotiations
+             SET status = 'superseded', resolved_at = CURRENT_TIMESTAMP
+             WHERE contract_id = :contract_id AND source = 'internal' AND status = 'pending'"
+        )->execute(['contract_id' => $contractId]);
+        $pdo->prepare(
+            "UPDATE team8_contract_negotiations
+             SET status = 'accepted', resolved_at = CURRENT_TIMESTAMP
+             WHERE contract_id = :contract_id AND source = 'external' AND status = 'pending'"
+        )->execute(['contract_id' => $contractId]);
+
         $historyStmt = $pdo->prepare('INSERT INTO team8_contract_history (contract_id, version_no, data_json, changed_by, created_at) VALUES (:contract_id, :version_no, :data_json, :changed_by, CURRENT_TIMESTAMP)');
         $historyStmt->execute([
             'contract_id' => $contractId,
@@ -86,14 +115,14 @@ function t8_contract_create_negotiation(
             'changed_by' => $proposedBy,
         ]);
 
-        $proposalStmt = $pdo->prepare('INSERT INTO team8_contract_negotiations (contract_id, version_no, proposed_by, change_summary, proposed_data, status, source, created_at) VALUES (:contract_id, :version_no, :proposed_by, :change_summary, :proposed_data, :status, :source, CURRENT_TIMESTAMP)');
+        $proposalStmt = $pdo->prepare('INSERT INTO team8_contract_negotiations (contract_id, version_no, proposed_by, change_summary, proposed_data, status, source, created_at, resolved_at) VALUES (:contract_id, :version_no, :proposed_by, :change_summary, :proposed_data, :status, :source, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)');
         $proposalStmt->execute([
             'contract_id' => $contractId,
             'version_no' => $versionNo,
             'proposed_by' => $proposedBy,
             'change_summary' => $summary,
             'proposed_data' => json_encode($sanitizedData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-            'status' => 'pending',
+            'status' => 'accepted',
             'source' => $source,
         ]);
 
@@ -104,67 +133,14 @@ function t8_contract_create_negotiation(
             'version_no' => $versionNo,
             'proposed_by' => $proposedBy,
             'change_summary' => $summary,
-            'status' => 'pending',
+            'status' => 'accepted',
             'source' => $source,
         ];
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
+        error_log('Contract revision could not be saved for contract #' . $contractId . ': ' . $e->getMessage());
         return null;
-    }
-}
-
-function t8_contract_accept_negotiation(PDO $pdo, int $contractId, int $proposalId, int $approvedBy): bool
-{
-    if ($contractId <= 0 || $proposalId <= 0 || $approvedBy <= 0) {
-        return false;
-    }
-
-    $pdo->beginTransaction();
-    try {
-        $proposalStmt = $pdo->prepare("SELECT * FROM team8_contract_negotiations WHERE id = :id AND contract_id = :contract_id AND status = :status AND source = 'internal' AND proposed_by IS NOT NULL");
-        $proposalStmt->execute([
-            'id' => $proposalId,
-            'contract_id' => $contractId,
-            'status' => 'pending',
-        ]);
-        $proposal = $proposalStmt->fetch(PDO::FETCH_ASSOC);
-        if ($proposal === false) {
-            throw new RuntimeException('Pending negotiation proposal not found.');
-        }
-
-        $proposedData = json_decode((string) $proposal['proposed_data'], true, 512, JSON_THROW_ON_ERROR);
-        if (!is_array($proposedData)) {
-            throw new RuntimeException('Proposal data is invalid.');
-        }
-        $updateFields = array_keys($proposedData);
-        if ($updateFields === []) {
-            throw new RuntimeException('Proposal contains no fields.');
-        }
-        $setClause = implode(', ', array_map(static fn (string $field): string => $field . ' = :' . $field, $updateFields));
-        $updateParams = $proposedData;
-        $updateParams['id'] = $contractId;
-        $updateParams['status'] = 'under_review';
-        $updateParams['updated_at'] = date('Y-m-d H:i:s');
-        $pdo->prepare('UPDATE team8_contracts SET ' . $setClause . ', status = :status, updated_at = :updated_at WHERE id = :id')->execute($updateParams);
-
-        $pdo->prepare('UPDATE team8_contract_negotiations SET status = :status, resolved_at = CURRENT_TIMESTAMP WHERE id = :id AND status = :pending')->execute([
-            'status' => 'accepted',
-            'id' => $proposalId,
-            'pending' => 'pending',
-        ]);
-        $pdo->prepare(
-            "UPDATE team8_contract_negotiations
-             SET status = 'accepted', resolved_at = CURRENT_TIMESTAMP
-             WHERE contract_id = :contract_id AND source = 'external' AND status = 'pending'"
-        )->execute(['contract_id' => $contractId]);
-        $pdo->commit();
-        return true;
-    } catch (Throwable $e) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-        return false;
     }
 }

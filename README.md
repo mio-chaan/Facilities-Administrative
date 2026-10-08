@@ -37,6 +37,10 @@ framework — routing is a small hand-rolled front controller
    For Gmail delivery, add `GMAIL_SMTP_USER` and the 16-character
    `GMAIL_SMTP_APP_PASSWORD` in the ignored `app/config/config.local.php`
    or set those environment variables. Never commit real credentials.
+   For contract signing, also configure `T8_SIGNING_OTP_PEPPER` as a random
+   secret of at least 32 characters and `T8_SIGNATURE_STORAGE_DIR` as a
+   writable private directory outside the web root. Signing links require
+   `APP_URL` to be public HTTPS outside local development.
 4. Create the database and import the schema (Team 8's tables only —
    see `docs/Database.md` for why the shared-table section exists):
    ```bash
@@ -49,7 +53,10 @@ framework — routing is a small hand-rolled front controller
    `database/migrations/20261008_add_contract_portal_invites.sql` if the
    `team8_contract_portal_invites` table is not present, then apply
    `database/migrations/20261008_update_contract_party_review_responses.sql`
-   to enable external party decisions and negotiation proposals.
+   to enable external party decisions and negotiation proposals. Apply
+   `database/migrations/20261008_freeze_contract_signature_versions.sql`
+   and `database/migrations/20261008_digital_contract_signing.sql` to enable
+   frozen-version e-signatures, signing links, and OTP verification.
 5. Start PHP's built-in dev server from the project root:
    ```bash
    php -S localhost:8000

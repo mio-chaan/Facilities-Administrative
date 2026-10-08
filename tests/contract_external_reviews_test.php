@@ -119,12 +119,34 @@ $assert = static function (bool $condition, string $message): void {
     }
 };
 
+$assert(
+    !t8_contract_review_consent_is_valid('accepted', null)
+        && !t8_contract_review_consent_is_valid('accepted', '0')
+        && !t8_contract_review_consent_is_valid('accepted', ['1']),
+    'Acceptance must require the explicit consent checkbox value.'
+);
+$assert(
+    t8_contract_review_consent_is_valid('accepted', '1'),
+    'Explicit acceptance consent should pass validation.'
+);
+$assert(
+    t8_contract_review_consent_is_valid('negotiation_requested', null)
+        && t8_contract_review_consent_is_valid('rejected', null),
+    'Negotiation and rejection decisions must not require acceptance consent.'
+);
+
 $pdo = new ExternalReviewPdo();
 $pdo->partyReviews = [
-    ['party_id' => 1, 'party_name' => 'Alpha Ltd', 'status' => 'accepted'],
+    ['party_id' => 1, 'party_name' => 'Alpha Ltd', 'status' => 'accepted', 'response_feedback' => 'Approved as written.', 'meeting_details' => null],
     ['party_id' => 2, 'party_name' => 'Beta Ltd', 'status' => 'accepted'],
 ];
 $assert(t8_contract_parties_have_accepted_latest_review($pdo, 12), 'Every linked party accepting the latest review should allow approval.');
+$partyReviews = t8_contract_get_party_review_statuses($pdo, 12);
+$assert(
+    $partyReviews[0]['response_feedback'] === 'Approved as written.'
+        && $partyReviews[0]['meeting_details'] === null,
+    'Latest party review feedback and meeting details must remain available to the inline revision reference.'
+);
 
 foreach (['negotiation_requested', 'rejected', 'pending', 'expired', null] as $nonAcceptingStatus) {
     $pdo->partyReviews[1]['status'] = $nonAcceptingStatus;

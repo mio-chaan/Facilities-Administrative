@@ -33,6 +33,11 @@ function t8_contract_review_url_is_allowed(string $baseUrl, string $appEnv): boo
     return $urlIsPublicHttps || $urlIsLocal;
 }
 
+function t8_contract_review_consent_is_valid(string $decision, mixed $consent): bool
+{
+    return $decision !== 'accepted' || $consent === '1';
+}
+
 function t8_contract_get_party_review_statuses(PDO $pdo, int $contractId): array
 {
     $stmt = $pdo->prepare(

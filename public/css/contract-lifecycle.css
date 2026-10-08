@@ -116,6 +116,29 @@
 .t8-lifecycle-step.is-active { color: var(--t8-primary); font-weight: 700; }
 .t8-lifecycle-step.is-active .t8-lifecycle-indicator { border-color: var(--t8-primary); box-shadow: 0 0 0 3px rgba(178, 34, 34, .16); }
 
+.t8-contract-view-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.t8-contract-view-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+.t8-contract-view-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.t8-contract-view-actions .t8-meatball-wrap { position: relative; }
+
 @media (max-width: 720px) {
     .t8-contract-stepper {
         flex-direction: column;
@@ -123,6 +146,8 @@
         gap: 6px;
     }
     .t8-contract-step:not(:last-child)::after { display: none; }
+    .t8-contract-view-toolbar { align-items: center; flex-wrap: wrap; }
+    .t8-contract-view-actions { margin-left: auto; }
 }
 
 /* ---- Monitoring sub-state badge ----
@@ -143,6 +168,12 @@
     color: #8a5c10;
     border: 1px dashed #f3d9ae;
     margin-left: 6px;
+}
+
+.t8-badge-open-contract {
+    background: #ecfdf5;
+    color: #166534;
+    border-color: #a7f3d0;
 }
 
 /* ---- Contract registry and entry forms ---- */
@@ -216,6 +247,161 @@
 .t8-detail-list dt { font-weight:600; color:var(--t8-text-muted); }
 .t8-detail-list dd { margin:0; overflow-wrap:anywhere; }
 @media (max-width:720px) { .t8-detail-list { grid-template-columns:minmax(0,1fr); gap:3px; } .t8-detail-list dd { margin-bottom:var(--t8-space-2); } }
+.t8-contract-proposal-form {
+    margin-top: 24px;
+    padding: 22px;
+    border: 1px solid #e6dada;
+    border-radius: 10px;
+    background: #fdfaf5;
+}
+.t8-contract-proposal-form h3 {
+    margin: 0 0 6px;
+    color: var(--t8-text);
+    font-size: 1.15rem;
+}
+.t8-contract-proposal-form > .t8-help-text {
+    margin: 0 0 18px;
+    line-height: 1.6;
+}
+.t8-party-feedback-reference {
+    margin: 0 0 18px;
+    padding: 16px;
+    border: 1px solid #e6dada;
+    border-radius: 8px;
+    background: #fff;
+}
+.t8-party-feedback-reference h4 {
+    margin: 0 0 12px;
+    font-size: .95rem;
+}
+.t8-party-feedback-list { display:grid; gap:10px; }
+.t8-party-feedback-item {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid #eee5e5;
+    border-radius: 6px;
+    overflow-wrap: anywhere;
+}
+.t8-party-feedback-heading { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+.t8-party-feedback-item p { margin:8px 0 0; white-space:normal; }
+.t8-external-request-card {
+    margin-top:24px;
+    padding:22px;
+    border:1px solid #e6dada;
+    border-radius:10px;
+    background:#fdfaf5;
+}
+.t8-external-request-card h3 { margin:0 0 6px; font-size:1.05rem; }
+.t8-external-request-card > .t8-help-text { margin:0 0 14px; }
+.t8-external-request-card .t8-party-feedback-item { background:#fff; }
+.t8-party-feedback-item blockquote {
+    margin:10px 0 0;
+    padding:12px 16px;
+    border-left:3px solid var(--t8-primary);
+    border-radius:4px;
+    background:#fff;
+    color:var(--t8-text);
+}
+.t8-party-feedback-item .t8-party-meeting-request {
+    padding:10px 12px;
+    border-radius:4px;
+    background:#f8f4f2;
+}
+.t8-party-request-meta { display:block; margin:9px 0 0; color:var(--t8-text-muted); }
+.t8-proposal-editor { margin-top:14px; }
+.t8-proposal-editor > summary {
+    display:inline-flex;
+    width:max-content;
+    cursor:pointer;
+    list-style:none;
+}
+.t8-proposal-editor > summary::-webkit-details-marker { display:none; }
+.t8-proposal-editor[open] > summary { margin-bottom:4px; }
+.t8-proposal-editor > .t8-contract-proposal-form { margin-top:8px; }
+.t8-revision-saved-notice {
+    display:grid;
+    gap:4px;
+    margin:0 0 18px;
+    padding:14px 16px;
+    border:1px solid #b8ddc2;
+    border-radius:8px;
+    background:#f0faf3;
+    color:#245b35;
+}
+.t8-contract-proposal-form > .t8-form-label {
+    display: block;
+    margin: 0 0 5px;
+    color: var(--t8-text);
+    font-size: .82rem;
+    font-weight: 600;
+}
+.t8-contract-proposal-form > #change-summary {
+    display: block;
+    width: 100%;
+    min-height: 64px;
+    margin: 0 0 18px;
+    padding: 10px;
+    border: 1px solid #d2cccc;
+    border-radius: 6px;
+    background: #fff;
+    color: var(--t8-text);
+    font: inherit;
+    font-size: .82rem;
+    resize: vertical;
+}
+.t8-contract-proposal-form .t8-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 22px;
+}
+.t8-contract-proposal-form .t8-form-grid > label {
+    display: block;
+    min-width: 0;
+    color: var(--t8-text);
+    font-size: .82rem;
+    font-weight: 600;
+}
+.t8-contract-proposal-form .t8-form-grid input,
+.t8-contract-proposal-form .t8-form-grid select,
+.t8-contract-proposal-form .t8-form-grid textarea {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+    margin-top: 5px;
+    padding: 8px 10px;
+    border: 1px solid #d2cccc;
+    border-radius: 6px;
+    background: #fff;
+    color: var(--t8-text);
+    font: inherit;
+    font-size: .82rem;
+    font-weight: 400;
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+.t8-contract-proposal-form .t8-form-grid textarea {
+    min-height: 52px;
+    resize: vertical;
+}
+.t8-contract-proposal-form .t8-form-grid input:focus,
+.t8-contract-proposal-form .t8-form-grid select:focus,
+.t8-contract-proposal-form .t8-form-grid textarea:focus,
+.t8-contract-proposal-form > #change-summary:focus {
+    outline: none;
+    border-color: var(--t8-primary);
+    box-shadow: 0 0 0 3px rgba(178, 34, 34, .12);
+}
+.t8-contract-proposal-form > .t8-btn {
+    margin-top: 14px;
+    padding: 9px 18px;
+    border: 2px solid #2c2020;
+    border-radius: 999px;
+    font-size: .82rem;
+    font-weight: 700;
+}
+@media (max-width: 720px) {
+    .t8-contract-proposal-form { padding: 16px; }
+    .t8-contract-proposal-form .t8-form-grid { grid-template-columns: minmax(0, 1fr); }
+}
 .t8-badge-rejected { background:#fde8e8; color:#a01818; border:1px solid #f5c2c2; }
 .t8-party-picker { display:grid; gap:var(--t8-space-2); }
 .t8-party-selected { display:flex; flex-wrap:wrap; gap:6px; }
@@ -344,4 +530,137 @@
 @media (max-width: 720px) {
     .t8-detail-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
     .t8-detail-item.t8-detail-span-2 { grid-column: auto; }
+}
+
+/* ---- Pending-signature execution actions ---- */
+.t8-signature-actions {
+    flex: 1 0 100%;
+    min-width: 0;
+    margin-top: 8px;
+}
+.t8-signature-primary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding: 16px 18px;
+    border: 1px solid #c8e3d0;
+    border-radius: 10px;
+    background: #e3f2e7;
+}
+.t8-signature-primary-text {
+    margin: 0;
+    color: #1f6a37;
+    font-size: 0.84rem;
+    font-weight: 500;
+}
+.t8-signature-primary-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.t8-signature-primary-buttons form,
+.t8-signature-escape-body form { margin: 0; }
+.t8-signature-primary-buttons .t8-btn,
+.t8-signature-escape-body .t8-btn { justify-content: center; }
+.t8-signature-primary-buttons .t8-btn-success[disabled] {
+    background: #b6d6c1;
+    color: #fff;
+    opacity: 0.8;
+}
+.t8-signature-primary-buttons .t8-btn-success[disabled]:hover {
+    background: #b6d6c1;
+    transform: none;
+    box-shadow: none;
+}
+.t8-signature-escape {
+    overflow: hidden;
+    margin-bottom: 10px;
+    border: 1px solid var(--t8-border);
+    border-radius: 10px;
+    background: #fff;
+}
+.t8-signature-escape summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    cursor: pointer;
+    font-size: 0.84rem;
+    font-weight: 600;
+    list-style: none;
+}
+.t8-signature-escape summary::-webkit-details-marker { display: none; }
+.t8-signature-escape summary::after {
+    color: var(--t8-text-muted);
+    content: "+";
+    font-size: 1.1rem;
+    font-weight: 400;
+}
+.t8-signature-escape[open] summary::after { content: "\2212"; }
+.t8-signature-escape[open] summary { border-bottom: 1px solid var(--t8-border); }
+.t8-signature-escape summary:focus-visible {
+    outline: 2px solid var(--t8-primary);
+    outline-offset: -3px;
+}
+.t8-signature-escape-body {
+    padding: 16px 18px;
+    background: #fbfaf6;
+}
+.t8-signature-escape-hint {
+    margin: 0 0 12px;
+    color: var(--t8-text-muted);
+    font-size: 0.78rem;
+}
+.t8-signature-escape-hint code {
+    overflow-wrap: anywhere;
+}
+.t8-signature-escape-input {
+    display: block;
+    width: 100%;
+    min-height: 42px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--t8-border);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--t8-text);
+    font: inherit;
+    font-size: 0.82rem;
+}
+.t8-signature-escape-input:focus {
+    border-color: var(--t8-primary);
+    outline: 2px solid rgba(178, 34, 34, 0.16);
+}
+.t8-signature-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+}
+.t8-signature-audit-strip {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 22px;
+    color: var(--t8-text-muted);
+    font-size: 0.75rem;
+}
+.t8-signature-audit-strip code {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #f1ece2;
+    color: #555;
+    font-size: 0.7rem;
+}
+@media (max-width: 600px) {
+    .t8-signature-primary { align-items: stretch; }
+    .t8-signature-primary-buttons { width: 100%; flex-direction: column; }
+    .t8-signature-primary-buttons .t8-btn { width: 100%; }
 }
