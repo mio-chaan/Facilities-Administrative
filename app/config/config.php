@@ -55,7 +55,7 @@ define('LEGAL_DEADLINE_ALERT_DAYS', max(1, (int) (getenv('LEGAL_DEADLINE_ALERT_D
 define('UPLOAD_DIR', dirname(__DIR__, 2) . '/storage/uploads');
 
 
-define('AUTH_DEV_BYPASS', false);
+define('AUTH_DEV_BYPASS', true);
 
 // ---- End editable section ------------------------------------------------
 

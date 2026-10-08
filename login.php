@@ -19,6 +19,7 @@ require_once __DIR__ . '/app/config/config.php';
 require_once __DIR__ . '/app/includes/db_connect.php';
 require_once __DIR__ . '/app/includes/helpers.php';
 require_once __DIR__ . '/app/includes/audit.php';
+require_once __DIR__ . '/app/includes/auth_otp.php';
 
 t8_session_start();
 
@@ -122,36 +123,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 t8_login_clear_throttle($pdo, $identifier);
 
-                $roleStmt = $pdo->prepare(
-                    'SELECT r.role_name
-                     FROM user_roles ur
-                     JOIN roles r ON r.id = ur.role_id
-                     WHERE ur.user_id = :user_id'
-                );
-                $roleStmt->execute(['user_id' => $user['id']]);
-                $roles = array_map('strval', $roleStmt->fetchAll(PDO::FETCH_COLUMN));
-                $priority = ['admin', 'facilities_staff', 'front_desk', 'records_officer', 'legal_officer', 'employee'];
-                $role = null;
-                foreach ($priority as $candidate) {
-                    if (in_array($candidate, $roles, true)) {
-                        $role = $candidate;
-                        break;
-                    }
+                try {
+                    $challengeId = t8_otp_issue($pdo, (int) $user['id'], $emailValue);
+                    $_SESSION['t8_otp_user_id'] = (int) $user['id'];
+                    $_SESSION['t8_otp_challenge_id'] = $challengeId;
+                    redirect(APP_URL . '/verify_otp.php');
+                } catch (T8OtpRateLimitException $e) {
+                    $errors[] = 'Please wait ' . $e->getWaitSeconds() . ' seconds before requesting another verification code.';
+                } catch (T8OtpDeliveryException $e) {
+                    $errors[] = 'We could not send a verification code. Please try again later.';
                 }
-                if ($role === null && $roles !== []) {
-                    $role = $roles[0];
-                }
-
-                session_regenerate_id(true);
-                $_SESSION['user_id']       = (int) $user['id'];
-                $_SESSION['full_name']     = $user['full_name'];
-                $_SESSION['role']          = $role ?: 'employee';
-                $_SESSION['department_id'] = $user['department_id'] !== null ? (int) $user['department_id'] : null;
-
-                t8_audit_log($pdo, (int) $user['id'], 'user', (int) $user['id'], 'login');
-
-                t8_flash_set('success', 'Welcome back, ' . $user['full_name'] . '.');
-                redirect(APP_URL . '/dashboard.php');
             }
         }
     }
@@ -231,8 +212,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </form>
 
         <p class="t8-help-text t8-auth-hint">
-            Local dev seed account: <code>dev.tester@example.local</code> /
-            <code>Password123!</code> (see <code>database/seed_account.sql</code>).
+            Local dev seed account: <code>ramyum060@gmail.com</code> /
+            <code> Password123!@ </code> (see <code>database/seed_account.sql</code>); sign-in also requires
+            access to the account's registered email for the OTP.
         </p>
     </div>
 </div>
