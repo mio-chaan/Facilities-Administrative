@@ -1,35 +1,88 @@
 document.addEventListener('DOMContentLoaded', function () {
+    var openMeatballMenu = null;
+    var openMeatballButton = null;
+    var meatballPlaceholder = null;
+
+    function positionMeatballMenu(menu, button) {
+        var margin = 8;
+        var rect = button.getBoundingClientRect();
+        var menuRect = menu.getBoundingClientRect();
+        var width = menuRect.width;
+        var height = menuRect.height;
+        var spaceBelow = window.innerHeight - rect.bottom;
+        var top = spaceBelow < height + margin && rect.top > height + margin
+            ? rect.top - height - margin
+            : rect.bottom + margin;
+        var left = rect.right - width;
+
+        menu.style.top = Math.max(margin, Math.min(top, window.innerHeight - height - margin)) + 'px';
+        menu.style.left = Math.max(margin, Math.min(left, window.innerWidth - width - margin)) + 'px';
+    }
+
     function initMeatballMenus(scope) {
         (scope || document).querySelectorAll('.t8-meatball-btn').forEach(function (button) {
             if (button.dataset.t8MeatballBound === '1') return;
             button.dataset.t8MeatballBound = '1';
             button.addEventListener('click', function (event) {
                 event.stopPropagation();
-                var menu = button.parentElement.querySelector('.t8-meatball-menu');
-                var shouldOpen = menu && menu.hidden;
+                var wrap = button.closest('.t8-meatball-wrap');
+                var menu = wrap && wrap.querySelector('.t8-meatball-menu');
+                var shouldOpen = menu && (menu.hidden || menu !== openMeatballMenu);
                 closeMeatballMenus();
                 if (shouldOpen) {
+                    meatballPlaceholder = document.createComment('t8-meatball-menu-slot');
+                    menu.parentNode.insertBefore(meatballPlaceholder, menu);
+                    document.body.appendChild(menu);
                     menu.hidden = false;
+                    menu.style.position = 'fixed';
+                    menu.style.right = 'auto';
+                    menu.style.bottom = 'auto';
+                    menu.style.maxHeight = Math.max(0, window.innerHeight - 16) + 'px';
+                    menu.style.overflowY = 'auto';
+                    openMeatballMenu = menu;
+                    openMeatballButton = button;
                     button.setAttribute('aria-expanded', 'true');
+                    positionMeatballMenu(menu, button);
                 }
             });
         });
     }
 
     function closeMeatballMenus() {
-        document.querySelectorAll('.t8-meatball-menu:not([hidden])').forEach(function (menu) {
-            menu.hidden = true;
-            var button = menu.parentElement.querySelector('.t8-meatball-btn');
-            if (button) button.setAttribute('aria-expanded', 'false');
-        });
+        if (!openMeatballMenu) return;
+        openMeatballMenu.hidden = true;
+        openMeatballMenu.style.position = '';
+        openMeatballMenu.style.top = '';
+        openMeatballMenu.style.left = '';
+        openMeatballMenu.style.right = '';
+        openMeatballMenu.style.bottom = '';
+        openMeatballMenu.style.maxHeight = '';
+        openMeatballMenu.style.overflowY = '';
+        if (meatballPlaceholder && meatballPlaceholder.parentNode) {
+            meatballPlaceholder.parentNode.insertBefore(openMeatballMenu, meatballPlaceholder);
+            meatballPlaceholder.parentNode.removeChild(meatballPlaceholder);
+        }
+        if (openMeatballButton) openMeatballButton.setAttribute('aria-expanded', 'false');
+        openMeatballMenu = null;
+        openMeatballButton = null;
+        meatballPlaceholder = null;
     }
 
     document.addEventListener('click', function (event) {
-        if (!event.target.closest('.t8-meatball-wrap')) closeMeatballMenus();
+        var target = event.target;
+        if (!target.closest('.t8-meatball-wrap') && !(openMeatballMenu && openMeatballMenu.contains(target))) {
+            closeMeatballMenus();
+        }
     });
     document.addEventListener('keydown', function (event) {
         if (event.key === 'Escape') closeMeatballMenus();
     });
+    window.addEventListener('resize', function () {
+        if (openMeatballMenu && openMeatballButton) positionMeatballMenu(openMeatballMenu, openMeatballButton);
+    });
+    window.addEventListener('scroll', function () {
+        if (openMeatballMenu && openMeatballButton) positionMeatballMenu(openMeatballMenu, openMeatballButton);
+    }, true);
 
     initMeatballMenus(document);
 
@@ -80,6 +133,7 @@ document.addEventListener('DOMContentLoaded', function () {
             })
             .then(function (data) {
                 if (currentRequest !== requestId || typeof data.html === 'undefined') return;
+                closeMeatballMenus();
                 results.innerHTML = data.html;
                 if (pagination && typeof data.pagination !== 'undefined') pagination.innerHTML = data.pagination;
                 results.removeAttribute('aria-busy');
@@ -203,6 +257,48 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         var modalForm = document.getElementById('t8PartyModalForm');
         if (modalForm) {
+            var partyNameInput = document.getElementById('party_name');
+            var tradeNameInput = document.getElementById('trade_name');
+            var primaryContactInput = document.getElementById('primary_contact');
+            var tradeRequiredMarker = modal.querySelector('[data-trade-required]');
+            var autoFilledContact = false;
+            var previousOwnerName = '';
+            var partyTypeInputs = modalForm.querySelectorAll('input[name="type"]');
+
+            function updatePartyTypeFields(copyOwnerName) {
+                var isIndividual = modalForm.querySelector('input[name="type"]:checked').value === 'individual';
+                tradeNameInput.required = !isIndividual;
+                tradeRequiredMarker.hidden = isIndividual;
+                if (isIndividual && copyOwnerName) {
+                    primaryContactInput.value = partyNameInput.value;
+                    previousOwnerName = partyNameInput.value;
+                    autoFilledContact = true;
+                } else if (!isIndividual) {
+                    autoFilledContact = false;
+                }
+            }
+
+            partyTypeInputs.forEach(function (input) {
+                input.addEventListener('change', function () {
+                    updatePartyTypeFields(input.value === 'individual');
+                });
+            });
+            partyNameInput.addEventListener('input', function () {
+                if (modalForm.querySelector('input[name="type"]:checked').value === 'individual'
+                    && autoFilledContact && primaryContactInput.value === previousOwnerName) {
+                    primaryContactInput.value = partyNameInput.value;
+                    previousOwnerName = partyNameInput.value;
+                }
+            });
+            primaryContactInput.addEventListener('input', function () {
+                if (primaryContactInput.value !== previousOwnerName) autoFilledContact = false;
+            });
+            modalForm.addEventListener('reset', function () {
+                autoFilledContact = false;
+                window.setTimeout(function () { updatePartyTypeFields(false); }, 0);
+            });
+            updatePartyTypeFields(false);
+
             modalForm.addEventListener('submit', function (event) {
                 event.preventDefault();
                 if (phoneInput && phoneInput.value.length !== 10) {

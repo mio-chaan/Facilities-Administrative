@@ -32,7 +32,7 @@ if (!function_exists('t8_admin_notification_once_today')) {
     function t8_admin_notification_once_today(PDO $pdo, string $message, string $targetUrl): void
     {
         try {
-            $admins = $pdo->query("SELECT ur.user_id FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.role_name = 'admin'")->fetchAll(PDO::FETCH_COLUMN);
+            $admins = $pdo->query("SELECT ur.user_id FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE r.role_name IN ('admin', 'super_admin')")->fetchAll(PDO::FETCH_COLUMN);
             foreach ($admins as $adminId) {
                 $check = $pdo->prepare('SELECT id FROM notifications WHERE user_id = :user_id AND message = :message AND DATE(created_at) = CURDATE() LIMIT 1');
                 $check->execute(['user_id' => $adminId, 'message' => $message]);

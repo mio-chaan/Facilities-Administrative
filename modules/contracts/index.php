@@ -2,6 +2,10 @@
 /** Contract Management v3: registry, draft review, workflow, and party links. */
 declare(strict_types=1);
 
+require_once __DIR__ . '/../../app/config/constants.php';
+require_once __DIR__ . '/../../app/includes/gmail_dispatch.php';
+require_once __DIR__ . '/../../app/includes/contract_portal.php';
+
 $retentionHelperPath = __DIR__ . '/../../app/includes/retention_helpers.php';
 if (is_file($retentionHelperPath)) {
     require_once $retentionHelperPath;
@@ -23,10 +27,7 @@ if (is_file($contractSigningPath)) {
 }
 
 $action = (string) ($_GET['action'] ?? 'list');
-$publicPortalAction = in_array($action, ['portal', 'portal_review'], true);
-if (!$publicPortalAction) {
-    t8_require_role(['admin', 'legal_officer', 'facilities_staff', 'employee']);
-}
+t8_require_role(['admin', 'legal_officer', 'facilities_staff', 'employee']);
 
 $pageTitle = 'Contract Management';
 $pdo = $pdo ?? null;
@@ -52,7 +53,6 @@ $errors = [];
 const T8_CONTRACT_TYPES = ['Service Agreement', 'Supplier/Vendor Agreement', 'Employment Contract', 'Lease Agreement', 'Partnership Agreement', 'Non-Disclosure Agreement', 'Maintenance Agreement', 'Purchase Agreement', 'Other'];
 const T8_CONTRACT_CURRENCIES = ['PHP', 'USD', 'JPY', 'KRW', 'EUR'];
 const T8_CONTRACT_PAYMENT_FREQUENCIES = ['One-time', 'Monthly', 'Quarterly', 'Semi-annually', 'Annually', 'Per milestone', 'Other'];
-const T8_CONTRACT_STATUSES = ['draft', 'under_review', 'negotiation', 'pending_approval', 'pending_signature', 'partially_signed', 'fully_executed', 'active', 'renewal', 'expiration', 'termination', 'cancelled', 'superseded', 'archived'];
 const T8_CONTRACT_MONITORING_DAYS = 90;
 const T8_CONTRACT_MAX_UPLOAD_MB = 10;
 const T8_CONTRACT_PAGE_SIZE = 10;
@@ -382,137 +382,33 @@ function t8_contract_register_retention(PDO $pdo, array $contract, int $actorId)
     t8_audit_log($pdo, $actorId, 'contract', (int) $contract['id'], 'retention_registered');
 }
 
-function t8_contract_ensure_portal_invites_table(PDO $pdo): void
-{
-    try {
-        $pdo->query("SHOW TABLES LIKE 'team8_contract_portal_invites'")->fetchColumn();
-    } catch (Throwable $e) {
-        return;
-    }
-
-    try {
-        $exists = $pdo->query("SHOW TABLES LIKE 'team8_contract_portal_invites'")->fetchColumn();
-        if ($exists !== false) {
-            return;
-        }
-    } catch (Throwable $e) {
-        return;
-    }
-
-    try {
-        $pdo->exec(
-            "CREATE TABLE `team8_contract_portal_invites` (
-                `id` int(11) NOT NULL AUTO_INCREMENT,
-                `contract_id` int(11) NOT NULL,
-                `party_id` int(11) NOT NULL,
-                `email` varchar(255) NOT NULL,
-                `party_name` varchar(200) DEFAULT NULL,
-                `token_hash` varchar(255) NOT NULL,
-                `status` enum('pending','accepted','rejected','expired') NOT NULL DEFAULT 'pending',
-                `expires_at` datetime DEFAULT NULL,
-                `used_at` datetime DEFAULT NULL,
-                `created_by` int(11) DEFAULT NULL,
-                `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-                PRIMARY KEY (`id`),
-                UNIQUE KEY `uq_team8_contract_portal_invites_token` (`token_hash`),
-                KEY `idx_team8_contract_portal_invites_contract` (`contract_id`,`status`),
-                KEY `idx_team8_contract_portal_invites_party` (`party_id`),
-                KEY `idx_team8_contract_portal_invites_email` (`email`),
-                CONSTRAINT `fk_team8_contractportal_contract` FOREIGN KEY (`contract_id`) REFERENCES `team8_contracts` (`id`),
-                CONSTRAINT `fk_team8_contractportal_party` FOREIGN KEY (`party_id`) REFERENCES `team8_parties` (`id`),
-                CONSTRAINT `fk_team8_contractportal_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
-             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;"
-        );
-    } catch (Throwable $e) {
-        // Optional during partial schema upgrades.
-    }
-}
-
-function t8_contract_generate_portal_token(): string
-{
-    return bin2hex(random_bytes(24));
-}
-
-function t8_contract_create_portal_invite(PDO $pdo, int $contractId, int $partyId, string $email, ?string $partyName = null, ?int $createdBy = null, ?string $expiresAt = null): ?array
-{
-    t8_contract_ensure_portal_invites_table($pdo);
-
-    $contract = t8_contract_fetch($pdo, $contractId);
-    if ($contract === null) {
-        return null;
-    }
-
-    $token = t8_contract_generate_portal_token();
-    $expires = $expiresAt ?: date('Y-m-d H:i:s', strtotime('+7 days'));
-    $status = 'pending';
-
-    $stmt = $pdo->prepare(
-        'INSERT INTO team8_contract_portal_invites (contract_id, party_id, email, party_name, token_hash, status, expires_at, created_by) VALUES (:contract_id, :party_id, :email, :party_name, :token_hash, :status, :expires_at, :created_by)'
-    );
-    $result = $stmt->execute([
-        'contract_id' => $contractId,
-        'party_id' => $partyId,
-        'email' => trim($email),
-        'party_name' => $partyName !== null ? trim($partyName) : null,
-        'token_hash' => hash('sha256', $token),
-        'status' => $status,
-        'expires_at' => $expires,
-        'created_by' => $createdBy,
-    ]);
-
-    if (!$result) {
-        return null;
-    }
-
-    $inviteId = (int) $pdo->lastInsertId();
-    return [
-        'id' => $inviteId,
-        'contract_id' => $contractId,
-        'party_id' => $partyId,
-        'email' => trim($email),
-        'party_name' => $partyName !== null ? trim($partyName) : null,
-        'token' => $token,
-        'status' => $status,
-        'expires_at' => $expires,
-    ];
-}
-
-function t8_contract_get_portal_invite(PDO $pdo, string $token): ?array
-{
-    t8_contract_ensure_portal_invites_table($pdo);
-    $cleanToken = trim($token);
-    if ($cleanToken === '') {
-        return null;
-    }
-
-    $stmt = $pdo->prepare(
-        'SELECT * FROM team8_contract_portal_invites WHERE token_hash = :token_hash AND status = :status AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1'
-    );
-    $stmt->execute([
-        'token_hash' => hash('sha256', $cleanToken),
-        'status' => 'pending',
-    ]);
-    $invite = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($invite === false) {
-        return null;
-    }
-
-    $contract = t8_contract_fetch($pdo, (int) $invite['contract_id']);
-    if ($contract === null) {
-        return null;
-    }
-
-    return array_merge($invite, ['token' => $cleanToken, 'contract' => $contract]);
-}
-
-function t8_contract_portal_url(string $token): string
-{
-    return APP_URL . '/index.php?page=contracts&action=portal&token=' . rawurlencode($token);
-}
-
 function t8_contract_status_label(string $status): string
 {
     return ucwords(str_replace('_', ' ', $status));
+}
+
+function t8_contract_sanitize_money_value(mixed $value): string
+{
+    $normalized = trim((string) $value);
+    if ($normalized === '') {
+        return '';
+    }
+
+    $normalized = str_replace(',', '', $normalized);
+    return $normalized;
+}
+
+function t8_contract_format_money(mixed $value, ?string $currency = null): string
+{
+    $normalized = t8_contract_sanitize_money_value($value);
+    if ($normalized === '' || !is_numeric($normalized)) {
+        return '—';
+    }
+
+    $amount = (float) $normalized;
+    $formatted = number_format($amount, 2, '.', ',');
+    $currencyCode = strtoupper(trim((string) ($currency ?? '')));
+    return $currencyCode !== '' ? $currencyCode . ' ' . $formatted : $formatted;
 }
 
 function t8_contract_render_pagination(int $currentPage, int $totalPages, array $filters): void
@@ -658,146 +554,6 @@ foreach ($owners as $owner) {
     }
 }
 
-if ($action === 'issue_portal_invite' && $_SERVER['REQUEST_METHOD'] === 'POST' && $canManage) {
-    if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
-        t8_flash_set('danger', 'Your session expired or the invite request was invalid.');
-        redirect(page_url('contracts', ['action' => 'view', 'id' => (int) ($_POST['contract_id'] ?? 0)]));
-    }
-
-    $contractId = (int) ($_POST['contract_id'] ?? 0);
-    $partyId = (int) ($_POST['party_id'] ?? 0);
-    $email = trim((string) ($_POST['email'] ?? ''));
-    $partyName = trim((string) ($_POST['party_name'] ?? ''));
-    if ($contractId <= 0 || $partyId <= 0 || $email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-        t8_flash_set('danger', 'A valid party and email are required before issuing a portal invite.');
-        redirect(page_url('contracts', ['action' => 'view', 'id' => $contractId]));
-    }
-
-    $invite = t8_contract_create_portal_invite($pdo, $contractId, $partyId, $email, $partyName !== '' ? $partyName : null, $currentUserId, date('Y-m-d H:i:s', strtotime('+7 days')));
-    if ($invite === null) {
-        t8_flash_set('danger', 'The secure contract portal invite could not be created.');
-        redirect(page_url('contracts', ['action' => 'view', 'id' => $contractId]));
-    }
-
-    t8_contract_event_log($pdo, $contractId, (int) $currentUserId, 'PORTAL_INVITE_ISSUED', 'Secure external portal invite sent to party contact.', ['party_id' => $partyId, 'email' => $email, 'token' => $invite['token']]);
-    t8_audit_log($pdo, (int) $currentUserId, 'contract', $contractId, 'portal_invite', '', 'issued');
-    t8_flash_set('success', 'A secure portal invite has been issued.');
-    redirect(page_url('contracts', ['action' => 'view', 'id' => $contractId]));
-}
-
-if ($action === 'portal' || $action === 'portal_review') {
-    $token = trim((string) ($_GET['token'] ?? ($_POST['token'] ?? '')));
-    $invite = $token !== '' ? t8_contract_get_portal_invite($pdo, $token) : null;
-
-    if ($invite === null) {
-        echo '<!doctype html><html><head><meta charset="utf-8"><title>Contract Portal</title></head><body style="font-family:Arial,sans-serif;padding:32px;max-width:720px;margin:0 auto;">';
-        echo '<h1>Invalid or expired portal link</h1>';
-        echo '<p>This contract invitation is no longer valid. Please contact the contract owner for a fresh access link.</p>';
-        echo '</body></html>';
-        return;
-    }
-
-    $contract = $invite['contract'];
-    if ($action === 'portal_review' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) {
-            t8_flash_set('danger', 'Your secure session expired. Please try again.');
-            redirect(page_url('contracts', ['action' => 'portal', 'token' => $token]));
-        }
-
-        $decision = strtolower(trim((string) ($_POST['decision'] ?? '')));
-        $comment = trim((string) ($_POST['comment'] ?? ''));
-        $allowed = ['accept', 'reject'];
-        if (!in_array($decision, $allowed, true)) {
-            t8_flash_set('danger', 'Please choose whether to accept or request changes.');
-            redirect(page_url('contracts', ['action' => 'portal', 'token' => $token]));
-        }
-
-        if ($decision === 'reject') {
-            $changeSummary = trim((string) ($_POST['change_summary'] ?? ''));
-            $proposedData = [
-                'title' => trim((string) ($_POST['title'] ?? $contract['title'])),
-                'contract_type' => trim((string) ($_POST['contract_type'] ?? $contract['contract_type'])),
-                'description' => trim((string) ($_POST['description'] ?? $contract['description'])),
-                'amount' => trim((string) ($_POST['amount'] ?? $contract['amount'])),
-                'currency' => trim((string) ($_POST['currency'] ?? $contract['currency'])),
-                'payment_terms' => trim((string) ($_POST['payment_terms'] ?? $contract['payment_terms'])),
-                'payment_frequency' => trim((string) ($_POST['payment_frequency'] ?? $contract['payment_frequency'])),
-                'deposit_amount' => trim((string) ($_POST['deposit_amount'] ?? $contract['deposit_amount'])),
-                'financial_notes' => trim((string) ($_POST['financial_notes'] ?? $contract['financial_notes'])),
-                'notice_period_days' => trim((string) ($_POST['notice_period_days'] ?? $contract['notice_period_days'])),
-            ];
-            if ($changeSummary === '') {
-                t8_flash_set('danger', 'Add a brief summary of the proposed changes.');
-                redirect(page_url('contracts', ['action' => 'portal', 'token' => $token]));
-            }
-            $proposal = t8_contract_create_negotiation($pdo, (int) $contract['id'], (int) $invite['party_id'], $changeSummary, $proposedData, 'external');
-            if ($proposal === null) {
-                t8_flash_set('danger', 'The proposed changes could not be saved.');
-                redirect(page_url('contracts', ['action' => 'portal', 'token' => $token]));
-            }
-            $newStatus = 'under_review';
-            $eventType = 'NEGOTIATION_STARTED';
-            $description = 'External party proposed negotiation changes.';
-            $pdo->prepare('UPDATE team8_contract_portal_invites SET status = :status, used_at = NOW() WHERE id = :id')->execute(['status' => 'accepted', 'id' => (int) $invite['id']]);
-            t8_contract_event_log($pdo, (int) $contract['id'], 0, $eventType, $changeSummary, ['version_no' => $proposal['version_no'], 'token' => $token]);
-            t8_audit_log($pdo, (int) $invite['party_id'], 'contract', (int) $contract['id'], 'negotiation_proposed', (string) $contract['status'], $newStatus);
-            t8_flash_set('success', 'Your proposed version was saved and the contract is back in review.');
-            redirect(page_url('contracts', ['action' => 'portal', 'token' => $token]));
-        }
-
-        $newStatus = 'pending_approval';
-        $eventType = 'PARTIES_AGREED';
-        $description = 'External party accepted the current contract version.';
-        $pdo->prepare('UPDATE team8_contracts SET status = :status WHERE id = :id')->execute(['status' => $newStatus, 'id' => (int) $contract['id']]);
-        $pdo->prepare('UPDATE team8_contract_portal_invites SET status = :status, used_at = NOW() WHERE id = :id')->execute(['status' => 'accepted', 'id' => (int) $invite['id']]);
-        t8_contract_event_log($pdo, (int) $contract['id'], 0, $eventType, $comment !== '' ? $comment : $description, ['token' => $token, 'decision' => $decision, 'from_status' => (string) $contract['status'], 'to_status' => $newStatus]);
-        t8_audit_log($pdo, (int) $invite['party_id'], 'contract', (int) $contract['id'], 'portal_accept', (string) $contract['status'], $newStatus);
-        t8_flash_set('success', 'Thank you. The contract has advanced to internal approval.');
-        redirect(page_url('contracts', ['action' => 'portal', 'token' => $token]));
-    }
-
-    $viewContract = $contract;
-    $viewParties = [];
-    try {
-        $partyStmt = $pdo->prepare(
-            'SELECT cp.*, p.name AS party_name, p.type AS party_type, p.primary_contact, p.contact_email
-             FROM team8_contract_parties cp
-             JOIN team8_parties p ON p.id = cp.party_id
-             WHERE cp.contract_id = :contract_id ORDER BY p.name'
-        );
-        $partyStmt->execute(['contract_id' => (int) $contract['id']]);
-        $viewParties = $partyStmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (Throwable $e) {
-        $viewParties = [];
-    }
-
-    $portalUrl = t8_contract_portal_url($token);
-    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Contract Portal</title><style>body{font-family:Arial,sans-serif;max-width:1100px;margin:0 auto;padding:32px 20px 64px;color:#1f2937;background:#f8fafc}h1,h2,h3{margin:0 0 12px;color:#0f172a}.meta{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0 28px}.pill{display:inline-block;padding:6px 12px;border-radius:999px;background:#e2e8f0;color:#0f172a;font-size:12px;font-weight:700}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;box-shadow:0 1px 2px rgba(15,23,42,.04)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}.label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#64748b;margin-bottom:4px}.value{font-size:15px}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}.btn{display:inline-block;padding:12px 18px;border:0;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none;cursor:pointer;font-weight:700}.btn-danger{background:#dc2626}.btn-success{background:#15803d}.textarea{width:100%;box-sizing:border-box;padding:12px;border:1px solid #cbd5e1;border-radius:8px;min-height:100px;margin-top:10px}.table{width:100%;border-collapse:collapse;margin-top:12px}.table th,.table td{padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:left}.note{margin-top:16px;padding:12px 14px;border-left:4px solid #0ea5e9;background:#e0f2fe;border-radius:8px}.small{font-size:12px;color:#475569}</style></head><body>';
-    echo '<h1>Secure Contract Review Portal</h1>';
-    echo '<div class="meta"><span class="pill">' . e((string) $contract['contract_number']) . '</span><span class="pill">' . e(t8_contract_status_label((string) $contract['status'])) . '</span></div>';
-    echo '<div class="card"><h2>' . e((string) $contract['title']) . '</h2><p class="small">Access link for ' . e((string) ($invite['party_name'] ?: $invite['email'])) . '</p>';
-    echo '<div class="grid"><div><span class="label">Contract Type</span><div class="value">' . e((string) ($contract['contract_type'] ?? '—')) . '</div></div><div><span class="label">Owner</span><div class="value">' . e((string) ($contract['owner_name'] ?? '—')) . '</div></div><div><span class="label">Effective</span><div class="value">' . e((string) ($contract['start_date'] ?? '—')) . ' to ' . e((string) ($contract['end_date'] ?? '—')) . '</div></div><div><span class="label">Value</span><div class="value">' . e((string) ($contract['currency'] ?? 'PHP')) . ' ' . e((string) ($contract['amount'] ?? '—')) . '</div></div></div>';
-    echo '<div class="note">Please review the current contract version below. You may accept the terms or request changes before approval continues.</div>';
-    echo '<div style="margin-top:16px;"><h3>Contract Summary</h3><p>' . nl2br(e((string) ($contract['description'] ?? 'No description provided.'))) . '</p></div>';
-    echo '<div style="margin-top:16px;"><h3>Related Parties</h3>';
-    if ($viewParties === []) {
-        echo '<p class="small">No parties are assigned to this contract.</p>';
-    } else {
-        echo '<table class="table"><thead><tr><th>Name</th><th>Type</th><th>Role</th></tr></thead><tbody>';
-        foreach ($viewParties as $party) {
-            echo '<tr><td>' . e((string) $party['party_name']) . '</td><td>' . e((string) $party['party_type']) . '</td><td>' . e((string) $party['role_in_contract']) . '</td></tr>';
-        }
-        echo '</tbody></table>';
-    }
-    echo '</div>';
-    echo '<div style="margin-top:24px;">';
-    echo '<h3>Your decision</h3>';
-    echo '<form method="post" action="' . e($portalUrl) . '">' . t8_csrf_field() . '<input type="hidden" name="token" value="' . e($token) . '"><textarea class="textarea" name="comment" placeholder="Add comments, requested changes, or notes for the counterparty."></textarea><div class="actions"><button type="submit" name="decision" value="accept" class="btn btn-success">I agree to this version</button><button type="submit" name="decision" value="reject" class="btn btn-danger">Request changes</button></div></form>';
-    echo '<details style="margin-top:18px;"><summary class="btn btn-danger">Submit proposed changes</summary><form method="post" action="' . e($portalUrl) . '">' . t8_csrf_field() . '<input type="hidden" name="token" value="' . e($token) . '"><input type="hidden" name="decision" value="reject"><div class="grid" style="margin-top:12px"><div><label class="small">Change summary</label><input class="textarea" name="change_summary" required placeholder="Briefly describe the changes"></div><div><label class="small">Payment terms</label><input class="textarea" name="payment_terms" value="' . e((string) ($contract['payment_terms'] ?? '')) . '"></div><div><label class="small">Amount</label><input class="textarea" name="amount" type="number" min="0" step="0.01" value="' . e((string) ($contract['amount'] ?? '')) . '"></div><div><label class="small">Currency</label><input class="textarea" name="currency" value="' . e((string) ($contract['currency'] ?? 'PHP')) . '"></div><div><label class="small">Description</label><textarea class="textarea" name="description">' . e((string) ($contract['description'] ?? '')) . '</textarea></div><div><label class="small">Special conditions</label><textarea class="textarea" name="financial_notes">' . e((string) ($contract['financial_notes'] ?? '')) . '</textarea></div></div><div class="actions"><button type="submit" class="btn btn-danger">Save proposed version</button></div></form></details>';
-    echo '</div></div>';
-    echo '</body></html>';
-    return;
-}
 
 if ($action === 'workflow') {
     if (!$canManage || $_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
@@ -810,6 +566,7 @@ if ($action === 'workflow') {
     $comment = trim((string) ($_POST['comment'] ?? ''));
     $transitions = [
         'submit' => ['draft', 'under_review'],
+        'revert_to_draft' => ['under_review', 'draft'],
         'approve' => ['under_review', 'pending_approval'],
         'request_changes' => ['under_review', 'negotiation'],
         'propose_changes' => ['under_review', 'under_review'],
@@ -872,13 +629,25 @@ if ($action === 'workflow') {
             'financial_notes' => trim((string) ($_POST['financial_notes'] ?? $contract['financial_notes'])),
             'notice_period_days' => trim((string) ($_POST['notice_period_days'] ?? $contract['notice_period_days'])),
         ];
+        if ($proposedData['title'] === ''
+            || !in_array($proposedData['currency'], T8_CONTRACT_CURRENCIES, true)
+            || ($proposedData['payment_frequency'] !== ''
+                && !in_array($proposedData['payment_frequency'], T8_CONTRACT_PAYMENT_FREQUENCIES, true))
+            || ($proposedData['amount'] !== '' && (!is_numeric($proposedData['amount']) || (float) $proposedData['amount'] < 0))
+            || ($proposedData['deposit_amount'] !== '' && (!is_numeric($proposedData['deposit_amount']) || (float) $proposedData['deposit_amount'] < 0))
+            || ($proposedData['notice_period_days'] !== ''
+                && (filter_var($proposedData['notice_period_days'], FILTER_VALIDATE_INT) === false
+                    || (int) $proposedData['notice_period_days'] < 0))) {
+            t8_flash_set('danger', 'Check the revised title, currency, payment frequency, amount, deposit, and notice period.');
+            redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+        }
         $proposal = t8_contract_create_negotiation($pdo, $id, $currentUserId, $changeSummary, $proposedData, 'internal');
         if ($proposal === null) {
             t8_flash_set('danger', 'The proposed changes could not be saved.');
             redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
         }
         t8_contract_event_log($pdo, $id, $currentUserId, 'NEGOTIATION_STARTED', $changeSummary, ['version_no' => $proposal['version_no']]);
-        t8_audit_log($pdo, $currentUserId, 'contract', $id, 'negotiation_proposed', (string) $contract['status'], 'under_review');
+        t8_audit_log($pdo, $currentUserId, 'contract', $id, 'negotiation_proposed', (string) $contract['status'], (string) $contract['status']);
         t8_flash_set('success', 'Proposed version ' . $proposal['version_no'] . ' was saved for review.');
         redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
     }
@@ -894,7 +663,24 @@ if ($action === 'workflow') {
         }
         t8_contract_event_log($pdo, $id, $currentUserId, 'NEGOTIATION_ACCEPTED', 'Authorized internal reviewer accepted a proposed contract version.', ['proposal_id' => $proposalId]);
         t8_audit_log($pdo, $currentUserId, 'contract', $id, 'negotiation_accepted', (string) $contract['status'], 'under_review');
-        t8_flash_set('success', 'Proposed version accepted. The contract remains in review until internal approval.');
+        try {
+            $inviteResult = t8_contract_send_involved_party_invites($pdo, $id, $currentUserId);
+            if ($inviteResult['failed'] !== []) {
+                t8_flash_set('danger', 'Revised terms were accepted internally, but invitations failed for: ' . implode(', ', $inviteResult['failed']) . '. The contract cannot be approved until every party reviews the latest version.');
+            } elseif ($inviteResult['sent'] > 0) {
+                t8_flash_set('success', 'Revised terms were sent to ' . $inviteResult['sent'] . ' involved ' . ($inviteResult['sent'] === 1 ? 'party' : 'parties') . ' for fresh review.');
+            } else {
+                t8_flash_set('danger', 'Revised terms were accepted internally, but no involved parties could be invited. The contract cannot be approved until every party reviews the latest version.');
+            }
+        } catch (Throwable $e) {
+            t8_gmail_diagnostic_log('Revised Contract Review Invite Setup Failure', $e->getMessage());
+            t8_flash_set('danger', 'Revised terms were accepted internally, but new review invitations could not be prepared. The contract cannot be approved until every party reviews the latest version.');
+        }
+        redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+    }
+    if ($workflow === 'approve' && $contract && $normalizedStatus === 'under_review'
+        && !t8_contract_parties_have_accepted_latest_review($pdo, $id)) {
+        t8_flash_set('danger', 'The contract cannot be approved for contracting until every involved party accepts the latest circulated version.');
         redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
     }
     if (!$contract || !isset($transitions[$workflow]) || $normalizedStatus !== $transitions[$workflow][0]
@@ -935,6 +721,7 @@ if ($action === 'workflow') {
     }
     $notificationMessage = match ($workflow) {
         'submit' => 'Contract submitted for review and is awaiting internal assessment.',
+        'revert_to_draft' => 'Contract returned to draft for editing.',
         'approve' => 'Contract approved and moved to the approval pipeline.',
         'request_changes' => 'Contract review requested changes and has returned to negotiation.',
         'return_to_review' => 'Contract was sent back to review for updated terms.',
@@ -947,15 +734,18 @@ if ($action === 'workflow') {
         'reject' => 'Contract was rejected and moved to archive.',
         default => 'Contract lifecycle updated.'
     };
-    t8_contract_event_log($pdo, $id, $currentUserId, $workflow, $comment !== '' ? $comment : ucfirst(str_replace('_', ' ', $workflow)), ['from_status' => (string) $contract['status'], 'to_status' => $newStatus]);
+    $eventType = $workflow === 'revert_to_draft' ? 'CONTRACT_REVERTED' : $workflow;
+    t8_contract_event_log($pdo, $id, $currentUserId, $eventType, $comment !== '' ? $comment : ucfirst(str_replace('_', ' ', $workflow)), ['from_status' => (string) $contract['status'], 'to_status' => $newStatus]);
     t8_contract_send_status_notification($pdo, $id, $currentUserId, $workflow, $notificationMessage);
-    t8_audit_log($pdo, $currentUserId, 'contract', $id, $workflow, (string) $contract['status'], $comment);
+    t8_audit_log($pdo, $currentUserId, 'contract', $id, $workflow, (string) $contract['status'], $workflow === 'revert_to_draft' ? $newStatus : $comment);
     if (in_array($newStatus, ['expiration', 'termination', 'archived'], true)) {
         $updated = t8_contract_fetch($pdo, $id);
         if ($updated) t8_contract_register_retention($pdo, $updated, $currentUserId);
     }
     t8_flash_set('success', 'Contract status updated to ' . t8_contract_status_label($newStatus) . '.');
-    redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+    redirect($workflow === 'revert_to_draft'
+        ? page_url('contracts', ['action' => 'edit', 'id' => $id])
+        : page_url('contracts', ['action' => 'view', 'id' => $id]));
 }
 
 if (in_array($action, ['create', 'edit'], true)) {
@@ -964,12 +754,12 @@ if (in_array($action, ['create', 'edit'], true)) {
     }
     $id = $action === 'edit' ? (int) ($_GET['id'] ?? 0) : 0;
     $existing = $id ? t8_contract_fetch($pdo, $id) : null;
-    if ($action === 'edit' && (!$existing || $existing['status'] !== 'draft')) {
+    if ($action === 'edit' && (!$existing || t8_contract_normalize_status((string) $existing['status']) !== 'draft')) {
         t8_flash_set('danger', 'Only draft contracts can be edited.');
         redirect(page_url('contracts'));
     }
     $values = $existing ?: ['contract_number' => t8_contract_next_number($pdo), 'title' => '', 'contract_type' => '', 'description' => '', 'department_id' => '', 'start_date' => date('Y-m-d'), 'end_date' => '', 'renewal_date' => '', 'amount' => '', 'currency' => 'PHP', 'payment_terms' => '', 'payment_frequency' => '', 'deposit_amount' => '', 'financial_notes' => '', 'notice_period_days' => '', 'renewed_from_id' => ''];
-    $allParties = $pdo->query('SELECT id, name, type FROM team8_parties ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
+    $allParties = $pdo->query("SELECT id, COALESCE(NULLIF(trade_name, ''), name) AS name, type FROM team8_parties ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
     $selectedPartyIds = [];
     if ($existing) {
         $st = $pdo->prepare('SELECT party_id FROM team8_contract_parties WHERE contract_id = :id');
@@ -979,11 +769,37 @@ if (in_array($action, ['create', 'edit'], true)) {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach (['title', 'contract_type', 'description', 'department_id', 'start_date', 'end_date', 'renewal_date', 'amount', 'currency', 'payment_terms', 'payment_frequency', 'deposit_amount', 'financial_notes', 'notice_period_days', 'renewed_from_id'] as $key) {
             $values[$key] = trim((string) ($_POST[$key] ?? ($key === 'currency' ? 'PHP' : '')));
+            if (in_array($key, ['amount', 'deposit_amount'], true)) {
+                $values[$key] = t8_contract_sanitize_money_value($values[$key]);
+            }
         }
         $selectedPartyIds = array_values(array_unique(array_filter(array_map('intval', (array) ($_POST['party_ids'] ?? [])))));
         if (!t8_csrf_verify($_POST['csrf_token'] ?? null)) $errors[] = 'Your session expired.';
         if ($values['title'] === '') $errors[] = 'Contract title is required.';
         if ($selectedPartyIds === []) $errors[] = 'At least one party is required.';
+        if ($selectedPartyIds !== []) {
+            $partyPlaceholders = [];
+            $partyParams = [];
+            foreach ($selectedPartyIds as $index => $partyId) {
+                $placeholder = 'party_' . $index;
+                $partyPlaceholders[] = ':' . $placeholder;
+                $partyParams[$placeholder] = $partyId;
+            }
+            $selectedPartyStmt = $pdo->prepare(
+                "SELECT id, COALESCE(NULLIF(trade_name, ''), name) AS name, contact_email FROM team8_parties WHERE id IN (" . implode(', ', $partyPlaceholders) . ')'
+            );
+            $selectedPartyStmt->execute($partyParams);
+            $selectedPartyRows = $selectedPartyStmt->fetchAll(PDO::FETCH_ASSOC);
+            if (count($selectedPartyRows) !== count($selectedPartyIds)) {
+                $errors[] = 'One or more selected parties could not be found.';
+            }
+            foreach ($selectedPartyRows as $selectedParty) {
+                $partyEmail = trim((string) ($selectedParty['contact_email'] ?? ''));
+                if ($partyEmail === '' || filter_var($partyEmail, FILTER_VALIDATE_EMAIL) === false) {
+                    $errors[] = 'A valid Party Email is required for ' . (string) $selectedParty['name'] . '. Update the party in the Party Registry before continuing.';
+                }
+            }
+        }
         $validDate = static function (string $value): bool {
             if ($value === '') return true;
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) return false;
@@ -1064,12 +880,12 @@ if (in_array($action, ['create', 'edit'], true)) {
         <?= t8_csrf_field() ?>
         <div class="t8-card"><h2 class="t8-card-title">Contract Information</h2><div class="t8-form-grid">
             <div class="t8-field"><label class="t8-label">Contract Number</label><input class="t8-input" value="<?= e((string) $values['contract_number']) ?>" readonly></div>
-            <div class="t8-field"><label class="t8-label" for="contract_type">Contract Type *</label><select class="t8-select" id="contract_type" name="contract_type" required><option value="">Select type</option><?php foreach (T8_CONTRACT_TYPES as $type): ?><option value="<?= e($type) ?>" <?= ($values['contract_type'] ?? '') === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></div>
-            <div class="t8-field t8-form-span-2"><label class="t8-label" for="title">Contract Title *</label><input class="t8-input" id="title" name="title" required value="<?= e((string) $values['title']) ?>"></div>
+            <div class="t8-field"><label class="t8-label" for="contract_type">Contract Type <span class="t8-required">*</span></label><select class="t8-select" id="contract_type" name="contract_type" required><option value="">Select type</option><?php foreach (T8_CONTRACT_TYPES as $type): ?><option value="<?= e($type) ?>" <?= ($values['contract_type'] ?? '') === $type ? 'selected' : '' ?>><?= e($type) ?></option><?php endforeach; ?></select></div>
+            <div class="t8-field t8-form-span-2"><label class="t8-label" for="title">Contract Title <span class="t8-required">*</span></label><input class="t8-input" id="title" name="title" required value="<?= e((string) $values['title']) ?>"></div>
             <div class="t8-field t8-form-span-2"><label class="t8-label" for="description">Description / Purpose</label><textarea class="t8-input" id="description" name="description" rows="3"><?= e((string) ($values['description'] ?? '')) ?></textarea></div>
         </div></div>
         <div class="t8-card">
-            <h2 class="t8-card-title">Parties *</h2>
+            <h2 class="t8-card-title">Parties <span class="t8-required">*</span></h2>
             <p class="t8-help-text">At least one party is required. Search to browse existing records, or create a new one.</p>
             <div class="t8-party-picker" id="t8PartyPicker">
                 <div class="t8-party-selected" id="t8PartySelected">
@@ -1096,20 +912,85 @@ if (in_array($action, ['create', 'edit'], true)) {
         <div class="t8-card"><h2 class="t8-card-title">Responsibility &amp; Schedule</h2><div class="t8-form-grid">
             <div class="t8-field"><label class="t8-label">Responsible Officer</label><input class="t8-input" value="<?= e($existing ? (string) $existing['owner_name'] : $currentUserName) ?>" readonly></div>
             <div class="t8-field"><label class="t8-label" for="department_id">Department</label><select class="t8-select" id="department_id" name="department_id"><option value="">Not assigned</option><?php foreach ($departments as $department): ?><option value="<?= (int) $department['id'] ?>" <?= (string) $department['id'] === (string) ($values['department_id'] ?? '') ? 'selected' : '' ?>><?= e((string) $department['name']) ?></option><?php endforeach; ?></select></div>
-            <?php foreach (['start_date' => 'Start Date *', 'end_date' => 'End Date', 'renewal_date' => 'Renewal Date'] as $field => $label): ?><div class="t8-field"><label class="t8-label" for="<?= e($field) ?>"><?= e($label) ?></label><input class="t8-input" type="date" id="<?= e($field) ?>" name="<?= e($field) ?>" value="<?= e((string) ($values[$field] ?? '')) ?>" <?= $field === 'start_date' ? 'min="' . e(date('Y-m-d')) . '" required' : '' ?>></div><?php endforeach; ?>
+            <?php foreach (['start_date' => 'Start Date', 'end_date' => 'End Date', 'renewal_date' => 'Renewal Date'] as $field => $label): ?><div class="t8-field"><label class="t8-label" for="<?= e($field) ?>"><?= e($label) ?><?= $field === 'start_date' ? ' <span class="t8-required">*</span>' : '' ?></label><input class="t8-input" type="date" id="<?= e($field) ?>" name="<?= e($field) ?>" value="<?= e((string) ($values[$field] ?? '')) ?>" <?= $field === 'start_date' ? 'min="' . e(date('Y-m-d')) . '" required' : '' ?>></div><?php endforeach; ?>
             <div class="t8-field"><label class="t8-label" for="renewed_from_id">Renewed From</label><select class="t8-select" id="renewed_from_id" name="renewed_from_id"><option value="">Not a renewal</option><?php foreach ($pdo->query('SELECT id, title FROM team8_contracts WHERE id <> ' . (int) $id . ' ORDER BY title')->fetchAll(PDO::FETCH_ASSOC) as $renewable): ?><option value="<?= (int) $renewable['id'] ?>" <?= (string) $renewable['id'] === (string) ($values['renewed_from_id'] ?? '') ? 'selected' : '' ?>><?= e((string) $renewable['title']) ?></option><?php endforeach; ?></select></div>
         </div></div>
         <div class="t8-card"><h2 class="t8-card-title">Financial Terms</h2><div class="t8-form-grid">
             <div class="t8-field"><label class="t8-label" for="currency">Currency</label><select class="t8-select" id="currency" name="currency"><?php foreach (T8_CONTRACT_CURRENCIES as $currency): ?><option <?= ($values['currency'] ?? 'PHP') === $currency ? 'selected' : '' ?>><?= e($currency) ?></option><?php endforeach; ?></select></div>
-            <div class="t8-field"><label class="t8-label" for="amount">Contract Value</label><input class="t8-input" type="number" min="0" step="0.01" id="amount" name="amount" value="<?= e((string) ($values['amount'] ?? '')) ?>"></div>
+            <div class="t8-field"><label class="t8-label" for="amount">Contract Value</label><input class="t8-input" type="text" inputmode="decimal" id="amount" name="amount" value="<?= e((string) ($values['amount'] ?? '')) ?>" data-money-input></div>
             <div class="t8-field"><label class="t8-label" for="payment_frequency">Payment Frequency</label><select class="t8-select" id="payment_frequency" name="payment_frequency"><option value="">Select frequency</option><?php foreach (T8_CONTRACT_PAYMENT_FREQUENCIES as $frequency): ?><option <?= ($values['payment_frequency'] ?? '') === $frequency ? 'selected' : '' ?>><?= e($frequency) ?></option><?php endforeach; ?></select></div>
-            <div class="t8-field"><label class="t8-label" for="deposit_amount">Deposit / Advance</label><input class="t8-input" type="number" min="0" step="0.01" id="deposit_amount" name="deposit_amount" value="<?= e((string) ($values['deposit_amount'] ?? '')) ?>"></div>
+            <div class="t8-field"><label class="t8-label" for="deposit_amount">Deposit / Advance</label><input class="t8-input" type="text" inputmode="decimal" id="deposit_amount" name="deposit_amount" value="<?= e((string) ($values['deposit_amount'] ?? '')) ?>" data-money-input></div>
             <div class="t8-field"><label class="t8-label" for="notice_period_days">Notice Period (days)</label><input class="t8-input" type="number" min="0" id="notice_period_days" name="notice_period_days" value="<?= e((string) ($values['notice_period_days'] ?? '')) ?>"></div>
             <div class="t8-field"><label class="t8-label" for="payment_terms">Payment Terms</label><input class="t8-input" id="payment_terms" name="payment_terms" value="<?= e((string) ($values['payment_terms'] ?? '')) ?>"></div>
         </div></div>
         <div class="t8-card"><h2 class="t8-card-title">Additional Notes &amp; Attachment</h2><div class="t8-field"><label class="t8-label" for="financial_notes">Notes / Special Conditions</label><textarea class="t8-input" id="financial_notes" name="financial_notes" rows="3"><?= e((string) ($values['financial_notes'] ?? '')) ?></textarea></div><div class="t8-field"><label class="t8-label" for="attachment">Attachment (image or document, max 10 MB)</label><input class="t8-input" type="file" id="attachment" name="attachment" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"><span class="t8-help-text">An existing attachment is retained when no new file is selected.</span></div></div>
         <div class="t8-form-actions"><button class="t8-btn t8-btn-accent" type="submit"><i class="fa-solid fa-arrow-right"></i> Continue to Review</button><a class="t8-btn t8-btn-outline" href="<?= e(page_url('contracts')) ?>">Cancel</a></div>
     </form>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const normalizeMoneyInput = function (value) {
+                let sanitized = (value ?? '').toString().replace(/[^\d.]/g, '');
+                const firstDot = sanitized.indexOf('.');
+                if (firstDot !== -1) {
+                    const whole = sanitized.slice(0, firstDot).replace(/\D/g, '');
+                    const fraction = sanitized.slice(firstDot + 1).replace(/\./g, '').slice(0, 2);
+                    sanitized = whole + (fraction !== '' ? '.' + fraction : '');
+                } else {
+                    sanitized = sanitized.replace(/\D/g, '');
+                }
+                return sanitized;
+            };
+
+            const formatMoneyValue = function (value) {
+                const normalized = normalizeMoneyInput(value);
+                if (normalized === '' || normalized === '.') {
+                    return '';
+                }
+
+                const [wholePart, fractionPart = ''] = normalized.split('.');
+                const formattedWhole = wholePart === '' ? '0' : Number(wholePart).toLocaleString('en-US');
+                return fractionPart !== '' ? formattedWhole + '.' + fractionPart : formattedWhole;
+            };
+
+            document.querySelectorAll('[data-money-input]').forEach(function (input) {
+                input.addEventListener('input', function () {
+                    const normalized = normalizeMoneyInput(input.value);
+                    input.value = formatMoneyValue(normalized);
+                });
+
+                input.addEventListener('focus', function () {
+                    input.value = normalizeMoneyInput(input.value);
+                });
+
+                input.addEventListener('blur', function () {
+                    const normalized = normalizeMoneyInput(input.value);
+                    if (normalized === '') {
+                        input.value = '';
+                        return;
+                    }
+                    const numericValue = Number(normalized);
+                    if (!Number.isFinite(numericValue)) {
+                        input.value = '';
+                        return;
+                    }
+                    input.value = new Intl.NumberFormat('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                    }).format(numericValue);
+                });
+            });
+
+            document.addEventListener('submit', function (event) {
+                const form = event.target;
+                if (!(form instanceof HTMLFormElement)) {
+                    return;
+                }
+                form.querySelectorAll('[data-money-input]').forEach(function (input) {
+                    input.value = normalizeMoneyInput(input.value);
+                });
+            });
+        });
+    </script>
     <?php include __DIR__ . '/_party_modal.php'; ?>
     <?php return; ?>
     <?php
@@ -1127,7 +1008,47 @@ if ($action === 'submit') {
     $pdo->prepare("UPDATE team8_contracts SET status = 'under_review' WHERE id = :id")->execute(['id' => $id]);
     t8_contract_event_log($pdo, $id, $currentUserId, 'CONTRACT_SUBMITTED', 'Contract submitted for review.', ['from_status' => 'draft', 'to_status' => 'under_review']);
     t8_audit_log($pdo, $currentUserId, 'contract', $id, 'submit', 'draft', 'under_review');
-    t8_flash_set('success', 'Contract submitted for review.');
+    try {
+        $inviteResult = t8_contract_send_involved_party_invites($pdo, $id, $currentUserId);
+        if ($inviteResult['failed'] !== []) {
+            $failedNames = implode(', ', $inviteResult['failed']);
+            t8_flash_set('danger', 'Contract submitted for review, but secure review invitations could not be sent to: ' . $failedNames . '. Check the mail configuration and try sending the invites again.');
+        } elseif ($inviteResult['sent'] > 0) {
+            t8_flash_set('success', 'Contract submitted for review and secure review invitations sent to ' . $inviteResult['sent'] . ' involved ' . ($inviteResult['sent'] === 1 ? 'party.' : 'parties.'));
+        } else {
+            t8_flash_set('danger', 'Contract submitted for review, but no involved parties with valid email addresses were available to invite.');
+        }
+    } catch (Throwable $e) {
+        t8_gmail_diagnostic_log('Contract Portal Invite Setup Failure', $e->getMessage());
+        t8_flash_set('danger', 'Contract submitted for review, but secure review invitations could not be prepared. Check the application log and try again.');
+    }
+    redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
+}
+
+if ($action === 'send_invites') {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !t8_csrf_verify($_POST['csrf_token'] ?? null)) {
+        t8_flash_set('danger', 'Your session expired.');
+        redirect(page_url('contracts'));
+    }
+    $id = (int) ($_POST['id'] ?? 0);
+    $contract = t8_contract_fetch($pdo, $id);
+    if (!$canManage || !$contract || t8_contract_normalize_status((string) $contract['status']) !== 'under_review') {
+        t8_flash_set('danger', 'Only an under-review contract can send external review invitations.');
+        redirect(page_url('contracts'));
+    }
+    try {
+        $inviteResult = t8_contract_send_involved_party_invites($pdo, $id, $currentUserId);
+        if ($inviteResult['failed'] !== []) {
+            t8_flash_set('danger', 'Review invitations sent to ' . $inviteResult['sent'] . ' parties. Failed: ' . implode(', ', $inviteResult['failed']) . '. Check the mail configuration and try again.');
+        } elseif ($inviteResult['sent'] > 0) {
+            t8_flash_set('success', 'Secure review invitations sent to ' . $inviteResult['sent'] . ' involved ' . ($inviteResult['sent'] === 1 ? 'party.' : 'parties.'));
+        } else {
+            t8_flash_set('danger', 'No involved parties with valid email addresses were available to invite.');
+        }
+    } catch (Throwable $e) {
+        t8_gmail_diagnostic_log('Contract Portal Invite Setup Failure', $e->getMessage());
+        t8_flash_set('danger', 'Secure review invitations could not be prepared. Check the application log and try again.');
+    }
     redirect(page_url('contracts', ['action' => 'view', 'id' => $id]));
 }
 
@@ -1169,9 +1090,11 @@ if (in_array($action, ['review', 'view'], true)) {
     if (!$viewContract || (!$canManage && (int) $viewContract['owner_id'] !== $currentUserId)) {
         t8_flash_set('danger', 'Contract not found.'); redirect(page_url('contracts'));
     }
-    $partyStmt = $pdo->prepare('SELECT cp.*, p.name AS party_name, p.type AS party_type, p.primary_contact, p.contact_email FROM team8_contract_parties cp JOIN team8_parties p ON p.id = cp.party_id WHERE cp.contract_id = :id ORDER BY cp.created_at');
+    $partyStmt = $pdo->prepare("SELECT cp.*, COALESCE(NULLIF(p.trade_name, ''), p.name) AS party_name, p.type AS party_type, p.primary_contact, p.contact_email FROM team8_contract_parties cp JOIN team8_parties p ON p.id = cp.party_id WHERE cp.contract_id = :id ORDER BY cp.created_at");
     $partyStmt->execute(['id' => $viewId]);
     $viewParties = $partyStmt->fetchAll(PDO::FETCH_ASSOC);
+    $viewPartyReviews = t8_contract_get_party_review_statuses($pdo, $viewId);
+    $viewPartiesAccepted = t8_contract_parties_have_accepted_latest_review($pdo, $viewId);
 }
 
 if ($action === 'review' || $action === 'view') {
@@ -1190,6 +1113,13 @@ if ($action === 'review' || $action === 'view') {
                 <h1 style="margin: 0 0 8px 0;"><?= e((string) $viewContract['title']) ?></h1>
                 <p class="t8-help-text" style="margin: 0;"><?= e((string) $viewContract['contract_number']) ?> · <?= e((string) ($viewContract['contract_type'] ?? '—')) ?></p>
             </div>
+            <?php if ($canManage && t8_contract_normalize_status((string) $viewContract['status']) === 'under_review'): ?>
+                <form method="post" action="<?= e(page_url('contracts', ['action' => 'send_invites'])) ?>">
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= $viewId ?>">
+                    <button class="t8-btn t8-btn-outline" type="submit">Resend review invitations</button>
+                </form>
+            <?php endif; ?>
         </div>
 
         <div class="t8-lifecycle" aria-label="Contract life cycle">
@@ -1235,7 +1165,7 @@ if ($action === 'review' || $action === 'view') {
                 </div>
                 <div class="t8-detail-item">
                     <span class="t8-detail-label">Value</span>
-                    <span class="t8-detail-value"><?= e($viewContract['amount'] !== null ? $viewContract['currency'] . ' ' . number_format((float) $viewContract['amount'], 2) : '—') ?></span>
+                    <span class="t8-detail-value"><?= e($viewContract['amount'] !== null ? t8_contract_format_money((string) $viewContract['amount'], (string) ($viewContract['currency'] ?? 'PHP')) : '—') ?></span>
                 </div>
                 <div class="t8-detail-item">
                     <span class="t8-detail-label">Payment Terms</span>
@@ -1263,21 +1193,31 @@ if ($action === 'review' || $action === 'view') {
                 <?php endif; ?>
             </div>
 
+            <?php if ($canManage && t8_contract_normalize_status((string) $viewContract['status']) === 'negotiation'): ?>
+                <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin-top:24px;padding:16px;border:1px solid #e6dada;border-radius:8px;">
+                    <h3 style="margin-top:0;">Prepare revised terms</h3>
+                    <p class="t8-help-text">Review the external negotiation requests above and propose revised terms for internal review. Accepting the proposal will send the revised version to every involved party for fresh acceptance.</p>
+                    <?= t8_csrf_field() ?>
+                    <input type="hidden" name="id" value="<?= $viewId ?>">
+                    <input type="hidden" name="workflow_action" value="propose_changes">
+                    <label class="t8-form-label" for="change-summary">Summary of proposed changes</label>
+                    <textarea id="change-summary" name="change_summary" required maxlength="1000" rows="3" style="display:block;width:100%;margin:.4rem 0 1rem;"></textarea>
+                    <div class="t8-form-grid">
+                        <label>Contract title<input name="title" value="<?= e((string) $viewContract['title']) ?>" required></label>
+                        <label>Description<textarea name="description" rows="3"><?= e((string) ($viewContract['description'] ?? '')) ?></textarea></label>
+                        <label>Amount<input name="amount" type="number" min="0" step="0.01" value="<?= e((string) ($viewContract['amount'] ?? '')) ?>"></label>
+                        <label>Currency<select name="currency"><?php foreach (T8_CONTRACT_CURRENCIES as $currency): ?><option value="<?= e($currency) ?>" <?= (string) ($viewContract['currency'] ?? 'PHP') === $currency ? 'selected' : '' ?>><?= e($currency) ?></option><?php endforeach; ?></select></label>
+                        <label>Payment terms<textarea name="payment_terms" rows="3"><?= e((string) ($viewContract['payment_terms'] ?? '')) ?></textarea></label>
+                        <label>Payment frequency<select name="payment_frequency"><option value="">Not specified</option><?php foreach (T8_CONTRACT_PAYMENT_FREQUENCIES as $frequency): ?><option value="<?= e($frequency) ?>" <?= (string) ($viewContract['payment_frequency'] ?? '') === $frequency ? 'selected' : '' ?>><?= e($frequency) ?></option><?php endforeach; ?></select></label>
+                        <label>Deposit amount<input name="deposit_amount" type="number" min="0" step="0.01" value="<?= e((string) ($viewContract['deposit_amount'] ?? '')) ?>"></label>
+                        <label>Additional financial notes<textarea name="financial_notes" rows="3"><?= e((string) ($viewContract['financial_notes'] ?? '')) ?></textarea></label>
+                        <label>Notice period (days)<input name="notice_period_days" type="number" min="0" value="<?= e((string) ($viewContract['notice_period_days'] ?? '')) ?>"></label>
+                    </div>
+                    <button class="t8-btn t8-btn-accent" type="submit" style="margin-top:12px;">Save proposed terms</button>
+                </form>
+            <?php endif; ?>
+
             <?php if ($canManage): ?>
-                <?php if (!empty($viewParties)): ?>
-                    <form method="post" action="<?= e(page_url('contracts', ['action' => 'issue_portal_invite'])) ?>" style="margin-top: 24px; border-top: 1px solid #eee; padding-top: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-                        <?= t8_csrf_field() ?><input type="hidden" name="contract_id" value="<?= (int) $viewId ?>">
-                        <select class="t8-select" name="party_id" required>
-                            <option value="">Select party to invite</option>
-                            <?php foreach ($viewParties as $party): ?>
-                                <option value="<?= (int) $party['party_id'] ?>"><?= e((string) $party['party_name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <input class="t8-input" type="email" name="email" placeholder="Party email" required>
-                        <input class="t8-input" type="text" name="party_name" placeholder="Optional party name">
-                        <button class="t8-btn t8-btn-outline" type="submit">Send secure portal invite</button>
-                    </form>
-                <?php endif; ?>
                 <div class="t8-form-actions" style="margin-top: 24px; border-top: 1px solid #eee; padding-top: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
                     <?php if ($viewContract['status'] === 'draft'): ?>
                         <form method="post" action="<?= e(page_url('contracts', ['action' => 'submit'])) ?>" style="margin: 0;">
@@ -1290,32 +1230,20 @@ if ($action === 'review' || $action === 'view') {
                     <?php endif; ?>
 
                     <?php if (t8_contract_normalize_status((string) $viewContract['status']) === 'under_review'): ?>
-                        <?php if ($isAdmin): ?>
+                        <?php if ($isAdmin && $viewPartiesAccepted): ?>
                             <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 0;">
                                 <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="approve">
                                 <button class="t8-btn t8-btn-success">Approve for Contracting</button>
                             </form>
+                        <?php elseif ($isAdmin): ?>
+                            <p class="t8-help-text" style="flex-basis:100%;">Contracting approval is locked until every involved party accepts the latest circulated version.</p>
                         <?php endif; ?>
-                        <details style="margin-top: 8px;">
-                            <summary class="t8-link-btn">Propose Contract Changes</summary>
-                            <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin-top: 12px; display: grid; gap: 8px; max-width: 720px;">
-                                <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="propose_changes">
-                                <input class="t8-input" name="change_summary" placeholder="Change summary" required>
-                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px;">
-                                    <input class="t8-input" name="title" value="<?= e((string) $viewContract['title']) ?>" placeholder="Title">
-                                    <input class="t8-input" name="contract_type" value="<?= e((string) ($viewContract['contract_type'] ?? '')) ?>" placeholder="Contract type">
-                                    <input class="t8-input" name="amount" type="number" min="0" step="0.01" value="<?= e((string) $viewContract['amount']) ?>" placeholder="Amount">
-                                    <input class="t8-input" name="currency" value="<?= e((string) $viewContract['currency']) ?>" placeholder="Currency">
-                                    <input class="t8-input" name="payment_terms" value="<?= e((string) $viewContract['payment_terms']) ?>" placeholder="Payment terms">
-                                    <input class="t8-input" name="payment_frequency" value="<?= e((string) $viewContract['payment_frequency']) ?>" placeholder="Payment frequency">
-                                    <input class="t8-input" name="deposit_amount" type="number" min="0" step="0.01" value="<?= e((string) $viewContract['deposit_amount']) ?>" placeholder="Deposit">
-                                    <input class="t8-input" name="notice_period_days" type="number" min="0" value="<?= e((string) $viewContract['notice_period_days']) ?>" placeholder="Notice period (days)">
-                                </div>
-                                <textarea class="t8-input" name="description" rows="3" placeholder="Contract description"><?= e((string) $viewContract['description']) ?></textarea>
-                                <textarea class="t8-input" name="financial_notes" rows="3" placeholder="Special conditions"><?= e((string) $viewContract['financial_notes']) ?></textarea>
-                                <button class="t8-btn t8-btn-outline" type="submit">Save Proposed Version</button>
+                        <?php if ($canManage): ?>
+                            <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="margin: 12px 0 0;">
+                                <?= t8_csrf_field() ?><input type="hidden" name="id" value="<?= $viewId ?>"><input type="hidden" name="workflow_action" value="revert_to_draft">
+                                <button class="t8-btn t8-btn-outline" type="submit">Back to Edit (Revert to Draft)</button>
                             </form>
-                        </details>
+                        <?php endif; ?>
                     <?php endif; ?>
 
                     <?php if ($isAdmin && t8_contract_normalize_status((string) $viewContract['status']) === 'pending_approval'): ?>
@@ -1365,14 +1293,30 @@ if ($action === 'review' || $action === 'view') {
                 <p class="t8-empty">No parties attached.</p>
             <?php else: ?>
                 <table class="t8-table">
-                    <thead><tr><th>Name</th><th>Type</th><th>Role</th><th>Contact</th></tr></thead>
+                    <thead><tr><th>Name</th><th>Type</th><th>Role</th><th>Contact</th><th>Latest Review</th><th>Party Feedback</th></tr></thead>
                     <tbody>
                         <?php foreach ($viewParties as $party): ?>
+                            <?php
+                            $partyReview = null;
+                            foreach ($viewPartyReviews as $review) {
+                                if ((int) $review['party_id'] === (int) $party['party_id']) {
+                                    $partyReview = $review;
+                                    break;
+                                }
+                            }
+                            ?>
                             <tr>
                                 <td><?= e((string) $party['party_name']) ?></td>
                                 <td><?= e(ucfirst((string) $party['party_type'])) ?></td>
                                 <td><?= e((string) $party['role_in_contract']) ?></td>
                                 <td><?= e((string) ($party['primary_contact'] ?? $party['contact_email'] ?? '—')) ?></td>
+                                <td><?= e(ucfirst(str_replace('_', ' ', (string) ($partyReview['status'] ?? 'not invited')))) ?></td>
+                                <td>
+                                    <?= !empty($partyReview['response_feedback']) ? nl2br(e((string) $partyReview['response_feedback'])) : '—' ?>
+                                    <?php if (!empty($partyReview['meeting_details'])): ?>
+                                        <br><strong>Meeting:</strong> <?= nl2br(e((string) $partyReview['meeting_details'])) ?>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -1388,15 +1332,18 @@ if ($action === 'review' || $action === 'view') {
             <?php
             $history = [];
             $negotiations = [];
-            try {
-                $st = $pdo->prepare('SELECT h.*, u.full_name FROM team8_contract_history h JOIN users u ON u.id = h.changed_by WHERE h.contract_id = :id ORDER BY h.version_no DESC LIMIT 25');
-                $st->execute(['id' => $viewId]);
-                $history = $st->fetchAll(PDO::FETCH_ASSOC);
-                $proposalStmt = $pdo->prepare('SELECT n.*, u.full_name AS proposed_by_name FROM team8_contract_negotiations n JOIN users u ON u.id = n.proposed_by WHERE n.contract_id = :id ORDER BY n.created_at DESC');
-                $proposalStmt->execute(['id' => $viewId]);
-                $negotiations = $proposalStmt->fetchAll(PDO::FETCH_ASSOC);
-            } catch (PDOException $e) {
-            }
+            $st = $pdo->prepare('SELECT h.*, u.full_name FROM team8_contract_history h JOIN users u ON u.id = h.changed_by WHERE h.contract_id = :id ORDER BY h.version_no DESC LIMIT 25');
+            $st->execute(['id' => $viewId]);
+            $history = $st->fetchAll(PDO::FETCH_ASSOC);
+            $proposalStmt = $pdo->prepare(
+                "SELECT n.*, COALESCE(u.full_name, NULLIF(p.trade_name, ''), p.name, 'External party') AS proposed_by_name
+                 FROM team8_contract_negotiations n
+                 LEFT JOIN users u ON u.id = n.proposed_by
+                 LEFT JOIN team8_parties p ON p.id = n.proposed_party_id
+                 WHERE n.contract_id = :id ORDER BY n.created_at DESC"
+            );
+            $proposalStmt->execute(['id' => $viewId]);
+            $negotiations = $proposalStmt->fetchAll(PDO::FETCH_ASSOC);
             ?>
             <h3>Contract Versions</h3>
             <?php if (!$history): ?>
@@ -1430,7 +1377,10 @@ if ($action === 'review' || $action === 'view') {
                                 <td><?= e((string) $proposal['change_summary']) ?></td>
                                 <td><span class="t8-badge <?= e(t8_contract_status_badge((string) $proposal['status'])) ?>"><?= e(t8_contract_status_label((string) $proposal['status'])) ?></span></td>
                             </tr>
-                            <?php if ($canManage && $proposal['status'] === 'pending'): ?>
+                            <?php if (!empty($proposal['external_meeting_details'])): ?>
+                                <tr><td colspan="5"><strong>Meeting request:</strong> <?= nl2br(e((string) $proposal['external_meeting_details'])) ?></td></tr>
+                            <?php endif; ?>
+                            <?php if ($canManage && $proposal['status'] === 'pending' && $proposal['source'] === 'internal'): ?>
                                 <tr>
                                     <td colspan="5">
                                         <form method="post" action="<?= e(page_url('contracts', ['action' => 'workflow'])) ?>" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -1440,6 +1390,8 @@ if ($action === 'review' || $action === 'view') {
                                         </form>
                                     </td>
                                 </tr>
+                            <?php elseif ($canManage && $proposal['status'] === 'pending' && $proposal['source'] === 'external'): ?>
+                                <tr><td colspan="5" class="t8-help-text">External request recorded. Prepare revised terms above; party requests are not applied directly to the contract.</td></tr>
                             <?php endif; ?>
                         <?php endforeach; ?>
                     </tbody>

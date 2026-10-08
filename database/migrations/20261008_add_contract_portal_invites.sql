@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS `team8_contract_portal_invites` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `contract_id` int(11) NOT NULL,
+  `party_id` int(11) NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `party_name` varchar(200) DEFAULT NULL,
+  `token_hash` varchar(255) NOT NULL,
+  `status` enum('pending','accepted','rejected','expired') NOT NULL DEFAULT 'pending',
+  `expires_at` datetime DEFAULT NULL,
+  `used_at` datetime DEFAULT NULL,
+  `created_by` int(11) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_team8_contract_portal_invites_token` (`token_hash`),
+  KEY `idx_team8_contract_portal_invites_contract` (`contract_id`,`status`),
+  KEY `idx_team8_contract_portal_invites_party` (`party_id`),
+  KEY `idx_team8_contract_portal_invites_email` (`email`),
+  CONSTRAINT `fk_team8_contractportal_contract` FOREIGN KEY (`contract_id`) REFERENCES `team8_contracts` (`id`),
+  CONSTRAINT `fk_team8_contractportal_party` FOREIGN KEY (`party_id`) REFERENCES `team8_parties` (`id`),
+  CONSTRAINT `fk_team8_contractportal_user` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

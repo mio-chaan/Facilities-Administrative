@@ -23,7 +23,7 @@ function t8_renewal_recipients(PDO $pdo, ?array $recipientOverride = null): arra
         "SELECT DISTINCT u.email FROM users u
          JOIN user_roles ur ON ur.user_id = u.id
          JOIN roles r ON r.id = ur.role_id
-         WHERE r.role_name = 'admin' AND u.email <> ''"
+         WHERE r.role_name IN ('admin', 'super_admin') AND u.email <> ''"
     )->fetchAll(PDO::FETCH_COLUMN);
     $emails = array_values(array_filter(array_unique(array_map('trim', $emails)), static fn(string $email): bool => filter_var($email, FILTER_VALIDATE_EMAIL) !== false));
     if ($emails === [] && defined('RENEWAL_ALERT_RECIPIENT') && filter_var(RENEWAL_ALERT_RECIPIENT, FILTER_VALIDATE_EMAIL)) {
@@ -91,7 +91,7 @@ function t8_renewal_notify_admins(PDO $pdo, string $message, string $targetUrl):
     try {
         $admins = $pdo->query(
             "SELECT DISTINCT ur.user_id FROM user_roles ur JOIN roles r ON r.id = ur.role_id
-             WHERE r.role_name = 'admin'"
+             WHERE r.role_name IN ('admin', 'super_admin')"
         )->fetchAll(PDO::FETCH_COLUMN);
         foreach ($admins as $adminId) {
             t8_notify_user($pdo, (int) $adminId, $message, $targetUrl);

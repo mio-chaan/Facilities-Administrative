@@ -372,15 +372,15 @@ if (isset($_GET['ajax_search']) && $_GET['page'] === 'party_registry') {
     t8_require_role(['admin', 'legal_officer', 'facilities_staff', 'employee']);
     $query = trim((string) ($_GET['q'] ?? ''));
     if ($query === '') {
-        $partySearch = $pdo->query('SELECT id, name, type FROM team8_parties ORDER BY name LIMIT 20');
+        $partySearch = $pdo->query("SELECT id, COALESCE(NULLIF(trade_name, ''), name) AS name, type FROM team8_parties ORDER BY name LIMIT 20");
     } else {
         if (strlen($query) < 2) {
             echo '[]';
             exit;
         }
         $partySearch = $pdo->prepare(
-            'SELECT id, name, type FROM team8_parties
-             WHERE name LIKE :name OR trade_name LIKE :trade_name ORDER BY name LIMIT 20'
+            "SELECT id, COALESCE(NULLIF(trade_name, ''), name) AS name, type FROM team8_parties
+             WHERE name LIKE :name OR trade_name LIKE :trade_name ORDER BY name LIMIT 20"
         );
         $like = '%' . $query . '%';
         $partySearch->execute(['name' => $like, 'trade_name' => $like]);

@@ -44,14 +44,27 @@ function t8_contract_create_negotiation(
         if (!in_array((string) $contract['status'], ['under_review', 'negotiation'], true)) {
             throw new RuntimeException('Contract is not available for negotiation.');
         }
+        $hasChanges = false;
         foreach ($sanitizedData as $field => $value) {
-            if ((string) ($contract[$field] ?? '') === trim((string) $value)) {
-                throw new RuntimeException('At least one contract field must change.');
+            if ((string) ($contract[$field] ?? '') !== trim((string) $value)) {
+                $hasChanges = true;
+                break;
             }
         }
+        if (!$hasChanges) {
+            throw new RuntimeException('At least one contract field must change.');
+        }
 
-        $versionStmt = $pdo->prepare('SELECT COALESCE(MAX(version_no), 0) + 1 AS next_version FROM team8_contract_history WHERE contract_id = :id');
-        $versionStmt->execute(['id' => $contractId]);
+        $versionStmt = $pdo->prepare(
+            'SELECT GREATEST(
+                (SELECT COALESCE(MAX(version_no), 0) FROM team8_contract_history WHERE contract_id = :history_contract_id),
+                (SELECT COALESCE(MAX(version_no), 0) FROM team8_contract_negotiations WHERE contract_id = :negotiation_contract_id)
+             ) + 1 AS next_version'
+        );
+        $versionStmt->execute([
+            'history_contract_id' => $contractId,
+            'negotiation_contract_id' => $contractId,
+        ]);
         $versionNo = (int) $versionStmt->fetchColumn();
 
         $versionData = $contract;
@@ -112,7 +125,7 @@ function t8_contract_accept_negotiation(PDO $pdo, int $contractId, int $proposal
 
     $pdo->beginTransaction();
     try {
-        $proposalStmt = $pdo->prepare('SELECT * FROM team8_contract_negotiations WHERE id = :id AND contract_id = :contract_id AND status = :status');
+        $proposalStmt = $pdo->prepare("SELECT * FROM team8_contract_negotiations WHERE id = :id AND contract_id = :contract_id AND status = :status AND source = 'internal' AND proposed_by IS NOT NULL");
         $proposalStmt->execute([
             'id' => $proposalId,
             'contract_id' => $contractId,
@@ -143,6 +156,11 @@ function t8_contract_accept_negotiation(PDO $pdo, int $contractId, int $proposal
             'id' => $proposalId,
             'pending' => 'pending',
         ]);
+        $pdo->prepare(
+            "UPDATE team8_contract_negotiations
+             SET status = 'accepted', resolved_at = CURRENT_TIMESTAMP
+             WHERE contract_id = :contract_id AND source = 'external' AND status = 'pending'"
+        )->execute(['contract_id' => $contractId]);
         $pdo->commit();
         return true;
     } catch (Throwable $e) {

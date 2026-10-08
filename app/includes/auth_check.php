@@ -29,17 +29,6 @@ if ($devBypass && empty($_SESSION['user_id'])) {
 
 // Real guard — sends anyone without a session to the temporary login form.
 if (empty($_SESSION['user_id'])) {
-    $requestedPage = (string) ($_GET['page'] ?? '');
-    $requestedAction = (string) ($_GET['action'] ?? '');
-    $requestedToken = trim((string) ($_GET['token'] ?? ''));
-    $isExternalPortalAccess = $requestedPage === 'contracts'
-        && in_array($requestedAction, ['portal', 'portal_review'], true)
-        && $requestedToken !== '';
-
-    if ($isExternalPortalAccess) {
-        return;
-    }
-
     $isAjax = strtolower($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'xmlhttprequest'
         || str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json');
 

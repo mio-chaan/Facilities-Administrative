@@ -449,9 +449,7 @@ code { font-family: var(--t8-font-data); }
     letter-spacing: 0.06em;
     line-height: 1.2;
     text-transform: uppercase;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
 }
 .t8-sidebar-link {
     display: flex;

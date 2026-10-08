@@ -28,12 +28,15 @@ framework — routing is a small hand-rolled front controller
   the ignored `vendor/` directory.
 3. Open `app/config/database.php` and edit `DB_HOST`/`DB_NAME`/`DB_USER`/
    `DB_PASS` for your local MySQL setup (defaults match a stock XAMPP
-   install — `root` with no password). App-level settings like
-   `APP_URL` live in `app/config/config.php`, edited the same way;
-  this project uses plain PHP constants instead of a `.env` file. For
-  Gmail delivery, add `GMAIL_SMTP_USER` and the 16-character
-  `GMAIL_SMTP_APP_PASSWORD` in the ignored `app/config/config.local.php`
-  or set those environment variables. Never commit real credentials.
+   install — `root` with no password). For deployment, set `APP_ENV=production`
+   and `APP_URL` in the environment; contract review invitations require an
+   externally reachable HTTPS URL. Local mode (`APP_ENV=local`, the default)
+   also permits `http://localhost:8000` for SMTP testing, but the emailed
+   review link only works on the same machine. This project uses plain PHP
+   constants instead of a `.env` file.
+   For Gmail delivery, add `GMAIL_SMTP_USER` and the 16-character
+   `GMAIL_SMTP_APP_PASSWORD` in the ignored `app/config/config.local.php`
+   or set those environment variables. Never commit real credentials.
 4. Create the database and import the schema (Team 8's tables only —
    see `docs/Database.md` for why the shared-table section exists):
    ```bash
@@ -42,6 +45,11 @@ framework — routing is a small hand-rolled front controller
   mysql -u root -p capstone_shared_db < database/seed_account.sql       # optional
   mysql -u root -p capstone_shared_db < database/seed_dummy_data.sql     # optional
    ```
+   For an existing database, apply
+   `database/migrations/20261008_add_contract_portal_invites.sql` if the
+   `team8_contract_portal_invites` table is not present, then apply
+   `database/migrations/20261008_update_contract_party_review_responses.sql`
+   to enable external party decisions and negotiation proposals.
 5. Start PHP's built-in dev server from the project root:
    ```bash
    php -S localhost:8000

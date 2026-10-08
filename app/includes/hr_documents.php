@@ -159,7 +159,7 @@ if (!function_exists('t8_hr_memorandum_recipient_labels')) {
 if (!function_exists('t8_hr_memorandum_visible_to_current_user')) {
     function t8_hr_memorandum_visible_to_current_user(PDO $pdo, int $memorandumId): bool
     {
-        if (t8_current_role() === 'admin') {
+        if (t8_has_role('admin')) {
             return true;
         }
         $departmentId = $_SESSION['department_id'] ?? null;
@@ -402,7 +402,7 @@ if (!function_exists('t8_hr_notify_admins')) {
             $admins = $pdo->query(
                 "SELECT ur.user_id FROM user_roles ur
                  JOIN roles r ON r.id = ur.role_id
-                 WHERE r.role_name = 'admin'"
+                 WHERE r.role_name IN ('admin', 'super_admin')"
             )->fetchAll(PDO::FETCH_COLUMN);
             foreach ($admins as $adminId) {
                 t8_hr_notify($pdo, (int) $adminId, $message);

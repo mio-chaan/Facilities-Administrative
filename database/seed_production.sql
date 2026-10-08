@@ -21,7 +21,8 @@ INSERT INTO roles (id, role_name) VALUES
     (3, 'front_desk'),
     (4, 'records_officer'),
     (5, 'legal_officer'),
-    (6, 'employee')
+    (6, 'employee'),
+    (7, 'super_admin')
 ON DUPLICATE KEY UPDATE role_name = VALUES(role_name);
 
 -- Document Categories

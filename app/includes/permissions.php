@@ -21,7 +21,8 @@ function t8_has_role($allowedRoles): bool
     }
 
     $allowedRoles = is_array($allowedRoles) ? $allowedRoles : [$allowedRoles];
-    return in_array($role, $allowedRoles, true);
+    return in_array($role, $allowedRoles, true)
+        || ($role === 'super_admin' && in_array('admin', $allowedRoles, true));
 }
 
 /**
@@ -48,6 +49,11 @@ function t8_is_staff(): bool
  */
 function t8_require_role($allowedRoles): void
 {
+    $allowedRoles = is_array($allowedRoles) ? $allowedRoles : [$allowedRoles];
+    if (in_array('admin', $allowedRoles, true)) {
+        $allowedRoles[] = 'super_admin';
+    }
+
     if (t8_has_role($allowedRoles)) {
         return;
     }

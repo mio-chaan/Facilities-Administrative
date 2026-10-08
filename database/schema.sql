@@ -255,9 +255,11 @@ CREATE TABLE `team8_contract_negotiations` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `contract_id` int(11) NOT NULL,
   `version_no` int(11) NOT NULL,
-  `proposed_by` int(11) NOT NULL,
+  `proposed_by` int(11) DEFAULT NULL,
+  `proposed_party_id` int(11) DEFAULT NULL,
   `change_summary` varchar(1000) NOT NULL,
   `proposed_data` longtext NOT NULL,
+  `external_meeting_details` text DEFAULT NULL,
   `status` enum('pending','accepted','rejected','superseded') NOT NULL DEFAULT 'pending',
   `source` enum('internal','external') NOT NULL DEFAULT 'internal',
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
@@ -267,7 +269,8 @@ CREATE TABLE `team8_contract_negotiations` (
   KEY `idx_team8_contract_negotiations_contract` (`contract_id`,`created_at`),
   KEY `idx_team8_contract_negotiations_status` (`status`,`created_at`),
   CONSTRAINT `fk_team8_contractnegotiations_contract` FOREIGN KEY (`contract_id`) REFERENCES `team8_contracts` (`id`),
-  CONSTRAINT `fk_team8_contractnegotiations_user` FOREIGN KEY (`proposed_by`) REFERENCES `users` (`id`)
+  CONSTRAINT `fk_team8_contractnegotiations_user` FOREIGN KEY (`proposed_by`) REFERENCES `users` (`id`),
+  CONSTRAINT `fk_team8_contractnegotiations_party` FOREIGN KEY (`proposed_party_id`) REFERENCES `team8_parties` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -320,7 +323,9 @@ CREATE TABLE `team8_contract_portal_invites` (
   `email` varchar(255) NOT NULL,
   `party_name` varchar(200) DEFAULT NULL,
   `token_hash` varchar(255) NOT NULL,
-  `status` enum('pending','accepted','rejected','expired') NOT NULL DEFAULT 'pending',
+  `status` enum('pending','accepted','rejected','negotiation_requested','expired') NOT NULL DEFAULT 'pending',
+  `response_feedback` text DEFAULT NULL,
+  `meeting_details` text DEFAULT NULL,
   `expires_at` datetime DEFAULT NULL,
   `used_at` datetime DEFAULT NULL,
   `created_by` int(11) DEFAULT NULL,

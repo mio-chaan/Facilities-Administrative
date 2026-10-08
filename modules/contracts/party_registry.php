@@ -18,11 +18,15 @@ if (isset($_GET['ajax_create_party']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
     $address = trim((string) ($_POST['address'] ?? ''));
     $contactEmail = trim((string) ($_POST['contact_email'] ?? ''));
     $tin = trim((string) ($_POST['tin'] ?? ''));
+    $tradeName = trim((string) ($_POST['trade_name'] ?? ''));
+    $type = ($_POST['type'] ?? '') === 'individual' ? 'individual' : 'organization';
     $errors = [];
     if ($name === '') $errors[] = 'Party name is required.';
+    if ($type === 'organization' && $tradeName === '') $errors[] = 'Trade/business name is required for organizations.';
     if ($primaryContact === '') $errors[] = 'Primary contact is required.';
     if ($address === '') $errors[] = 'Address is required.';
-    if ($contactEmail !== '' && filter_var($contactEmail, FILTER_VALIDATE_EMAIL) === false) $errors[] = 'Enter a valid email address.';
+    if ($contactEmail === '') $errors[] = 'Party email is required.';
+    elseif (filter_var($contactEmail, FILTER_VALIDATE_EMAIL) === false) $errors[] = 'Enter a valid email address.';
     if ($tin !== '' && !ctype_digit($tin)) $errors[] = 'TIN must contain only numbers.';
     $cleanPhone = preg_replace('/[^0-9]/', '', $contactPhone);
     if (strlen($cleanPhone) !== 10) $errors[] = 'Phone number must be exactly 10 digits (e.g., 9171234567).';
@@ -38,10 +42,10 @@ if (isset($_GET['ajax_create_party']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
              VALUES (:name, :trade, :registration, :tin, :type, :email, :phone, :contact, :address, :signatory, :position)'
         )->execute([
             'name' => $name,
-            'trade' => trim((string) ($_POST['trade_name'] ?? '')) ?: null,
+            'trade' => $tradeName ?: null,
             'registration' => trim((string) ($_POST['registration_number'] ?? '')) ?: null,
             'tin' => $tin ?: null,
-            'type' => ($_POST['type'] ?? '') === 'individual' ? 'individual' : 'organization',
+            'type' => $type,
             'email' => $contactEmail ?: null,
             'phone' => '+63' . $cleanPhone,
             'contact' => $primaryContact,
@@ -51,7 +55,7 @@ if (isset($_GET['ajax_create_party']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
         ]);
         $newId = (int) $pdo->lastInsertId();
         t8_audit_log($pdo, t8_current_user_id(), 'party', $newId, 'create');
-        echo json_encode(['success' => true, 'id' => $newId, 'name' => $name]);
+        echo json_encode(['success' => true, 'id' => $newId, 'name' => $tradeName ?: $name]);
     } catch (PDOException $e) {
         echo json_encode(['success' => false, 'error' => 'Party could not be saved.']);
     }
@@ -68,8 +72,14 @@ if (($_GET['action'] ?? '') === 'create' && $_SERVER['REQUEST_METHOD'] === 'POST
     $contactPhone = trim((string) ($_POST['contact_phone'] ?? ''));
     $address = trim((string) ($_POST['address'] ?? ''));
     $contactEmail = trim((string) ($_POST['contact_email'] ?? ''));
+    $tradeName = trim((string) ($_POST['trade_name'] ?? ''));
+    $type = ($_POST['type'] ?? '') === 'individual' ? 'individual' : 'organization';
     if ($name === '') {
         t8_flash_set('danger', 'Party name is required.');
+        redirect(page_url('party_registry'));
+    }
+    if ($type === 'organization' && $tradeName === '') {
+        t8_flash_set('danger', 'Trade/business name is required for organizations.');
         redirect(page_url('party_registry'));
     }
     if ($primaryContact === '') {
@@ -89,7 +99,11 @@ if (($_GET['action'] ?? '') === 'create' && $_SERVER['REQUEST_METHOD'] === 'POST
         t8_flash_set('danger', 'Address is required.');
         redirect(page_url('party_registry'));
     }
-    if ($contactEmail !== '' && filter_var($contactEmail, FILTER_VALIDATE_EMAIL) === false) {
+    if ($contactEmail === '') {
+        t8_flash_set('danger', 'Party email is required.');
+        redirect(page_url('party_registry'));
+    }
+    if (filter_var($contactEmail, FILTER_VALIDATE_EMAIL) === false) {
         t8_flash_set('danger', 'Enter a valid email address.');
         redirect(page_url('party_registry'));
     }
@@ -98,7 +112,6 @@ if (($_GET['action'] ?? '') === 'create' && $_SERVER['REQUEST_METHOD'] === 'POST
         t8_flash_set('danger', 'TIN must contain only numbers.');
         redirect(page_url('party_registry'));
     }
-    $type = ($_POST['type'] ?? '') === 'individual' ? 'individual' : 'organization';
     try {
         $pdo->prepare(
             'INSERT INTO team8_parties
@@ -107,7 +120,7 @@ if (($_GET['action'] ?? '') === 'create' && $_SERVER['REQUEST_METHOD'] === 'POST
              VALUES (:name, :trade, :registration, :tin, :type, :email, :phone, :contact, :address, :signatory, :position)'
         )->execute([
             'name' => $name,
-            'trade' => trim((string) ($_POST['trade_name'] ?? '')) ?: null,
+            'trade' => $tradeName ?: null,
             'registration' => trim((string) ($_POST['registration_number'] ?? '')) ?: null,
             'tin' => $tin ?: null,
             'type' => $type,
@@ -174,7 +187,7 @@ $parties = $stmt->fetchAll(PDO::FETCH_ASSOC);
 </form>
 <div class="t8-table-wrap"><table class="t8-table"><thead><tr><th>Party</th><th>Type</th><th>Contact</th><th>Contracts</th></tr></thead><tbody>
 <?php if (!$parties): ?><tr><td colspan="4" class="t8-table-empty-row">No parties found.</td></tr><?php else: foreach ($parties as $party): ?>
-<tr><td><strong><?= e((string) $party['name']) ?></strong><?php if (!empty($party['trade_name'])): ?><br><span class="t8-table-subtext"><?= e((string) $party['trade_name']) ?></span><?php endif; ?></td><td><?= e(ucfirst((string) $party['type'])) ?></td><td><?= e((string) ($party['primary_contact'] ?? $party['contact_email'] ?? '—')) ?></td><td><?= (int) $party['contract_count'] ?></td></tr>
+<tr><td><strong><?= e((string) ($party['trade_name'] ?: $party['name'])) ?></strong><?php if (!empty($party['trade_name']) && $party['trade_name'] !== $party['name']): ?><br><span class="t8-table-subtext"><?= e((string) $party['name']) ?></span><?php endif; ?></td><td><?= e(ucfirst((string) $party['type'])) ?></td><td><?= e((string) ($party['primary_contact'] ?? $party['contact_email'] ?? '—')) ?></td><td><?= (int) $party['contract_count'] ?></td></tr>
 <?php endforeach; endif; ?>
 </tbody></table></div>
 <?php if ($canCreate): ?>
